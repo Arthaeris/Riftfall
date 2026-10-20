@@ -380,12 +380,13 @@ function tryMove(dx, dz) {
 
 function startRoll() {
   const I = ui.input;
-  let d = I.move.active ? screenToWorld(I.move.x, I.move.y) : { x: Math.sin(P.face), z: Math.cos(P.face) };
+  const d = I.move.active && Math.hypot(I.move.x, I.move.y) > 0.25 ? screenToWorld(I.move.x, I.move.y) : { x: Math.sin(P.face), z: Math.cos(P.face) };
   P.rollDir.set(d.x, d.z);
   P.face = Math.atan2(d.x, d.z);
   P.state = 'roll'; P.t = 0; P.rollBuf = 0; P.swing = null;
+  resetPose();
   sound.sfx('roll');
-  dust(P.x, P.y, P.z, 6, 1.2);
+  dust(P.x, P.y, P.z, 5, 1);
   ui.hideHint('roll');
 }
 function startSwing(dir) {
@@ -399,41 +400,48 @@ function startSwing(dir) {
 }
 
 function updatePlayer(dt) {
-  const I = ui.input, C = CONFIG.player, W = WEAPONS.skyblade;
-  if (I.roll.pressed) { P.rollBuf = CONFIG.roll.buffer; I.roll.pressed = false; }
-  if (I.attack.pressed) { P.atkBuf = 0.28; I.attack.pressed = false; }
+  if (dt <= 0) return;
+  const I = ui.input, C = CONFIG.player, W = WEAPONS.skyblade, R = CONFIG.roll;
+  if (I.roll.pressed) { P.rollBuf = R.buffer; I.roll.pressed = false; }
+  if (I.attack.pressed) { P.atkBuf = 0.3; I.attack.pressed = false; }
   P.rollBuf = Math.max(0, P.rollBuf - dt); P.atkBuf = Math.max(0, P.atkBuf - dt);
   P.rollCd = Math.max(0, P.rollCd - dt); P.comboT = Math.max(0, P.comboT - dt); P.fireCd = Math.max(0, P.fireCd - dt);
   P.t += dt;
   const m = P.model;
-  let speedK = 0, moved = 0;
+  const prevFace = P.face;
+  let moved = 0;
 
   if (P.state === 'roll') {
-    const R = CONFIG.roll, p = Math.min(1, P.t / R.duration);
-    // fast at the start, easing out
-    const prev = 1 - Math.pow(1 - Math.max(0, (P.t - dt) / R.duration), 2.2), cur = 1 - Math.pow(1 - p, 2.2);
-    const dist = (cur - prev) * R.distance;
+    const p = Math.min(1, P.t / R.duration);
+    // a strong push off, a glide, then easing into the landing
+    const f = (u) => 1 - Math.pow(1 - u, 2.4);
+    const dist = (f(p) - f(Math.max(0, (P.t - dt) / R.duration))) * R.distance;
     const ox = P.x, oz = P.z;
     tryMove(P.rollDir.x * dist, P.rollDir.y * dist);
     moved = Math.hypot(P.x - ox, P.z - oz);
+    P.vx = (P.x - ox) / dt; P.vz = (P.z - oz) / dt;
     P.iframes = P.t >= R.iStart && P.t <= R.iEnd;
-    P.spin.rotation.x = smooth(p) * TAU;
-    P.spin.scale.set(1, 1 - Math.sin(p * Math.PI) * 0.18, 1);
-    P.model.body.position.y = -0.5 - Math.sin(p * Math.PI) * 0.12;
-    if (Math.random() < 0.6) sparks.spawn({ x: P.x, y: P.y + 0.5, z: P.z, vy: 0.3, life: 0.35, size: 0.18, color: '#bfefff', glow: 1.2, drag: 3 });
+    rollPose(p);
+    if (p > 0.15 && p < 0.8 && Math.random() < 0.5) sparks.spawn({ x: P.x, y: P.y + 0.45, z: P.z, vy: 0.2, life: 0.3, size: 0.16, color: '#bfefff', glow: 1, drag: 3 });
     if (p >= 1) {
-      P.state = 'move'; P.t = 0; P.rollCd = R.cooldown; P.iframes = false;
-      P.spin.rotation.x = 0; P.spin.scale.set(1, 1, 1); P.model.body.position.y = -0.5;
-      sound.sfx('land'); dust(P.x, P.y, P.z, 4, 0.8);
+      P.state = 'land'; P.t = 0; P.iframes = false;
+      P.vx *= 0.3; P.vz *= 0.3;
+      sound.sfx('land'); dust(P.x, P.y, P.z, 3, 0.6);
     }
+  } else if (P.state === 'land') {
+    // a short crouch coming up out of the roll
+    const k = Math.min(1, P.t / R.recover);
+    landPose(k);
+    P.vx *= Math.exp(-10 * dt); P.vz *= Math.exp(-10 * dt);
+    if (k >= 1 || P.atkBuf > 0) { P.state = 'move'; P.t = 0; P.rollCd = R.cooldown; resetPose(); }
   } else if (P.state === 'attack') {
+    // you stand your ground while swinging
     const s = P.swing, st = s.step, T = P.t;
     const tA = st.windup, tB = st.windup + st.active, tC = tB + st.recover;
-    // lunge forward through windup and the swing
-    if (T < tB) { const k = st.lunge / tB * dt * (T < tA ? 0.6 : 1.6); tryMove(s.dir.x * k, s.dir.z * k); }
+    P.vx *= Math.exp(-16 * dt); P.vz *= Math.exp(-16 * dt);
     if (T >= tA && !s.slash) {
       // the swing itself: a glowing arc and the hit check
-      const sl = slashMesh(st.range + 0.15, st.arc, st.heavy ? '#d8fbff' : '#9ff3ff', st.heavy ? 3.2 : 2.4);
+      const sl = slashMesh(st.range + 0.15, st.arc, st.heavy ? '#d8fbff' : '#9ff3ff', st.heavy ? 3.0 : 2.2);
       sl.position.set(P.x, P.y + 0.75, P.z);
       sl.rotation.y = Math.atan2(s.dir.x, s.dir.z);
       sl.rotation.z = st.swing === 'left' ? 0.18 : st.swing === 'right' ? -0.18 : 0;
@@ -444,96 +452,167 @@ function updatePlayer(dt) {
       sound.sfx(st.heavy ? 'swingHeavy' : 'swing');
       meleeHits(s);
     }
-    // can roll out of the windup or the recovery (not mid-swing), and chain into the next swing
+    // roll out of the windup or the recovery (not mid-swing); chain into the next swing; or let go
     if (P.rollBuf > 0 && P.rollCd <= 0 && (T < tA || T > tB)) startRoll();
-    else if (T > tB + st.recover * 0.4 && (P.atkBuf > 0 || I.attack.down)) startSwing(aimFor(I.attack, 3.2));
+    else if (T > tB + st.recover * 0.5 && (P.atkBuf > 0 || I.attack.down)) startSwing(aimFor(I.attack, 3.2));
     else if (T >= tC) { P.state = 'move'; P.t = 0; P.comboT = W.comboReset; }
-    swingPose(s, T, tA, tB, tC);
+    else if (T > tB + st.recover * 0.6 && I.move.active && Math.hypot(I.move.x, I.move.y) > 0.5) { P.state = 'move'; P.t = 0; P.comboT = W.comboReset; }
+    if (P.state === 'attack') swingPose(s, T, tA, tB, tC, dt);
   }
+
   if (P.state === 'move') {
-    // move
     let tx = 0, tz = 0, mag = 0;
-    if (I.move.active) { const d = screenToWorld(I.move.x, I.move.y); mag = Math.min(1, Math.hypot(I.move.x, I.move.y)); tx = d.x; tz = d.z; }
+    if (I.move.active) {
+      const raw = Math.min(1, Math.hypot(I.move.x, I.move.y));
+      if (raw > C.deadzone) {
+        const d = screenToWorld(I.move.x, I.move.y);
+        tx = d.x; tz = d.z;
+        mag = Math.pow((raw - C.deadzone) / (1 - C.deadzone), 1.25);
+      }
+    }
     const firing = I.ranged.down;
-    const sp = C.speed * mag * (firing ? 0.72 : 1);
-    const a = damp(Math.exp(-C.accel), dt);
-    P.vx = lerp(P.vx, tx * sp, a); P.vz = lerp(P.vz, tz * sp, a);
-    const ox = P.x, oz = P.z;
-    if (Math.abs(P.vx) + Math.abs(P.vz) > 0.01) tryMove(P.vx * dt, P.vz * dt);
-    moved = Math.hypot(P.x - ox, P.z - oz);
-    speedK = moved / dt / C.speed;
-    if (mag > 0.1 && !firing) P.face = angLerp(P.face, Math.atan2(tx, tz), damp(0.0001, dt));
-    // sling: hold to keep throwing at its own rate
+    // turning: a limited turn speed, quicker when you reverse
+    if (mag > 0 && !firing) {
+      const diff = Math.atan2(Math.sin(Math.atan2(tx, tz) - P.face), Math.cos(Math.atan2(tx, tz) - P.face));
+      const rate = C.turnRate * (Math.abs(diff) > 2.0 ? 2.4 : 1) * dt;
+      P.face += clamp(diff, -rate, rate);
+    }
     if (firing) {
       const dir = aimFor(I.ranged, WEAPONS.tidesling.range);
-      P.face = angLerp(P.face, Math.atan2(dir.x, dir.z), damp(0.00001, dt));
-      if (P.fireCd <= 0) { fire(dir); P.fireCd = 1 / WEAPONS.tidesling.rate; }
-      P.firing = 0.25;
+      const diff = Math.atan2(Math.sin(Math.atan2(dir.x, dir.z) - P.face), Math.cos(Math.atan2(dir.x, dir.z) - P.face));
+      P.face += clamp(diff, -C.turnRate * 2 * dt, C.turnRate * 2 * dt);
+      if (P.fireCd <= 0 && Math.abs(diff) < 0.5) { fire(dir); P.fireCd = 1 / WEAPONS.tidesling.rate; }
+      P.firing = 0.3;
     }
+    // you move mostly the way you face, so turns curve a little instead of snapping (while slinging you strafe freely)
+    let dx = tx, dz = tz;
+    if (mag > 0 && !firing) {
+      dx = lerp(tx, Math.sin(P.face), 0.45); dz = lerp(tz, Math.cos(P.face), 0.45);
+      const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    }
+    const sp = C.speed * mag * (firing ? 0.68 : 1);
+    const wx = dx * sp, wz = dz * sp;
+    const ddx = wx - P.vx, ddz = wz - P.vz, dl = Math.hypot(ddx, ddz);
+    const acc = (mag > 0 ? C.accel : C.decel) * dt;
+    if (dl <= acc) { P.vx = wx; P.vz = wz; } else { P.vx += (ddx / dl) * acc; P.vz += (ddz / dl) * acc; }
+    const ox = P.x, oz = P.z;
+    if (Math.abs(P.vx) + Math.abs(P.vz) > 0.005) {
+      tryMove(P.vx * dt, P.vz * dt);
+      // bumping into something takes the speed out of that direction
+      const ax = (P.x - ox) / dt, az = (P.z - oz) / dt;
+      if (Math.abs(ax) < Math.abs(P.vx) * 0.5) P.vx = ax;
+      if (Math.abs(az) < Math.abs(P.vz) * 0.5) P.vz = az;
+    }
+    moved = Math.hypot(P.x - ox, P.z - oz);
     if (P.rollBuf > 0 && P.rollCd <= 0) startRoll();
-    else if (P.atkBuf > 0 || (I.attack.down && P.comboT < W.comboReset - 0.05)) startSwing(aimFor(I.attack, 3.2));
-    walkPose(dt, speedK);
+    else if (P.atkBuf > 0 || (I.attack.down && P.comboT < W.comboReset - 0.1)) startSwing(aimFor(I.attack, 3.2));
   }
   P.firing = Math.max(0, P.firing - dt);
+
   // follow the ground: a quick hop up a step, a softer drop down
   const gy = world.groundAt(P.x, P.z);
-  P.y += (gy - P.y) * Math.min(1, dt * (gy > P.y ? 20 : 12));
+  P.y += (gy - P.y) * Math.min(1, dt * (gy > P.y ? 18 : 11));
   m.root.position.set(P.x, P.y, P.z);
-  m.root.rotation.y = angLerp(m.root.rotation.y, P.face, P.state === 'move' ? damp(0.0004, dt) : 1);
-  // footsteps
-  if (moved > 0 && P.state === 'move') {
-    P.stepT += moved;
-    if (P.stepT > 0.75) {
-      P.stepT = 0; P.stepSide ^= 1;
-      sound.sfx('step', 0.8);
-      if (Math.random() < 0.7) dust(P.x, P.y, P.z, 1, 0.4);
-    }
+  m.root.rotation.y = P.face;
+  // body language: lean into speed, bank into turns
+  const speed = Math.hypot(P.vx, P.vz);
+  const turn = Math.atan2(Math.sin(P.face - prevFace), Math.cos(P.face - prevFace)) / dt;
+  P.walkK = lerp(P.walkK || 0, P.state === 'move' ? Math.min(1, speed / C.speed) : 0, damp(0.004, dt));
+  P.lean = lerp(P.lean || 0, P.state === 'move' ? clamp(-turn * 0.03 * P.walkK, -0.2, 0.2) : 0, damp(0.002, dt));
+  if (P.state === 'move') {
+    P.phase = (P.phase || 0) + moved * 3.1;   // strides follow the ground you cover, so feet never slide
+    walkPose(dt, P.walkK);
+    // footsteps on each footfall
+    const fall = Math.floor(P.phase / Math.PI);
+    if (fall !== P.lastFall && P.walkK > 0.25) { P.lastFall = fall; sound.sfx('step', 0.6 + P.walkK * 0.4); if (Math.random() < 0.5) dust(P.x, P.y, P.z, 1, 0.35); }
   }
+  // the camera leads a little toward where you're heading, smoothly
+  P.leadX = lerp(P.leadX || 0, P.vx * 0.24, damp(0.15, dt));
+  P.leadZ = lerp(P.leadZ || 0, P.vz * 0.24, damp(0.15, dt));
   // scarf: trails behind when moving, sways when still
   const now = performance.now() / 1000;
-  const sv = P.state === 'roll' ? 1.2 : Math.min(1, speedK);
+  const sv = P.state === 'roll' ? 1.2 : P.walkK;
   m.scarfTail.rotation.x = -0.15 + sv * 0.9 + Math.sin(now * 9) * 0.06 * (0.3 + sv);
-  m.scarfTail.rotation.y = Math.sin(now * 3.1) * 0.2;
+  m.scarfTail.rotation.y = Math.sin(now * 3.1) * 0.2 - P.lean * 1.5;
   m.scarfEnd.rotation.x = sv * 0.3 + Math.sin(now * 11 + 1) * 0.12;
   // blink now and then
   const bl = (now % 4.2) < 0.12;
   for (const e of m.eyes) e.scale.y = bl ? 0.15 : 1;
-  ui.setCooldowns(P.rollCd <= 0 && P.state !== 'roll');
+  ui.setCooldowns(P.rollCd <= 0 && P.state !== 'roll' && P.state !== 'land');
 }
 
+const tw = (cur, target, dt, k = 0.00002) => lerp(cur, target, damp(k, dt));
 function walkPose(dt, k) {
-  const m = P.model;
-  const ph = performance.now() / 1000 * 9.5;
-  const s = Math.sin(ph) * 0.75 * Math.min(1, k);
-  m.legL.rotation.x = lerp(m.legL.rotation.x, s, damp(0.0001, dt));
-  m.legR.rotation.x = lerp(m.legR.rotation.x, -s, damp(0.0001, dt));
-  m.armL.rotation.set(lerp(m.armL.rotation.x, P.firing > 0 ? -1.35 : -s * 0.7, damp(0.0001, dt)), 0, 0);
-  m.armR.rotation.set(lerp(m.armR.rotation.x, s * 0.5 - 0.15, damp(0.0001, dt)), lerp(m.armR.rotation.y, 0, damp(0.001, dt)), 0);
-  m.torso.rotation.y = lerp(m.torso.rotation.y, 0, damp(0.001, dt));
-  m.body.position.y = -0.5 + Math.abs(Math.sin(ph)) * 0.05 * Math.min(1, k) + Math.sin(performance.now() / 1000 * 2) * 0.008;
-  m.body.rotation.x = lerp(m.body.rotation.x, k * 0.12, damp(0.001, dt));
-  m.head.rotation.x = 0;
-  P.spin.rotation.y = lerp(P.spin.rotation.y, 0, damp(0.0001, dt));
+  const m = P.model, ph = P.phase || 0, t = performance.now() / 1000;
+  const s = Math.sin(ph) * 0.8 * k;
+  m.legL.rotation.x = tw(m.legL.rotation.x, s, dt);
+  m.legR.rotation.x = tw(m.legR.rotation.x, -s, dt);
+  m.armL.rotation.set(tw(m.armL.rotation.x, P.firing > 0 ? -1.4 : -s * 0.7, dt), tw(m.armL.rotation.y, 0, dt), 0);
+  m.armR.rotation.set(tw(m.armR.rotation.x, s * 0.55 - 0.12, dt), tw(m.armR.rotation.y, 0, dt), 0);
+  m.torso.rotation.y = tw(m.torso.rotation.y, Math.sin(ph) * 0.06 * k, dt);
+  // a bob on every step while moving, slow breathing while standing
+  m.body.position.y = -0.5 + Math.abs(Math.sin(ph)) * 0.055 * k + Math.sin(t * 2.2) * 0.008 * (1 - k);
+  m.body.rotation.x = tw(m.body.rotation.x, k * 0.13, dt, 0.001);
+  m.head.rotation.x = tw(m.head.rotation.x, -k * 0.06, dt, 0.001);
+  P.spin.rotation.z = P.lean || 0;
+  P.spin.rotation.y = tw(P.spin.rotation.y, 0, dt);
 }
-function swingPose(s, T, tA, tB, tC) {
+function rollPose(p) {
+  const m = P.model;
+  // tuck in, tumble forward (easing in and out, not at a constant rate), open up again
+  const tuck = Math.sin(Math.min(1, p / 0.9) * Math.PI);
+  const spinP = smooth(clamp((p - 0.06) / 0.8, 0, 1));
+  P.spin.rotation.x = spinP * TAU;
+  P.spin.rotation.z = 0;
+  P.spin.position.y = 0.5 + Math.sin(p * Math.PI) * 0.1 - tuck * 0.14;
+  P.spin.scale.set(1, 1 - tuck * 0.1, 1);
+  m.legL.rotation.x = -1.6 * tuck; m.legR.rotation.x = -1.4 * tuck;
+  m.armL.rotation.set(-2.0 * tuck, 0, 0); m.armR.rotation.set(-1.7 * tuck, 0, 0);
+  m.head.rotation.x = 0.55 * tuck;
+  m.torso.rotation.y = 0;
+  m.body.position.y = -0.5;
+  m.body.rotation.x = 0.3 * tuck;
+}
+function landPose(k) {
+  const m = P.model, c = Math.cos(k * Math.PI * 0.5);
+  P.spin.rotation.x = 0;
+  P.spin.position.y = 0.5 - c * 0.16;
+  P.spin.scale.set(1, 1, 1);
+  m.legL.rotation.x = -0.7 * c; m.legR.rotation.x = 0.3 * c;
+  m.armL.rotation.set(-0.6 * c, 0, 0); m.armR.rotation.set(-0.5 * c, 0, 0);
+  m.head.rotation.x = 0.2 * c;
+  m.body.rotation.x = 0.35 * c;
+}
+function resetPose() {
+  P.spin.rotation.set(0, 0, 0);
+  P.spin.position.y = 0.5;
+  P.spin.scale.set(1, 1, 1);
+  P.model.head.rotation.x = 0;
+  P.model.body.rotation.x = 0;
+  P.model.body.position.y = -0.5;
+}
+function swingPose(s, T, tA, tB, tC, dt) {
   const m = P.model, st = s.step;
   const L = st.swing === 'left' ? -1 : 1;
   let yaw, pitch = -1.45;
   if (T < tA) { const k = smooth(T / tA); yaw = lerp(0, 1.5 * L, k); pitch = lerp(-0.4, -1.7, k); }
   else if (T < tB) { const k = (T - tA) / (tB - tA); yaw = lerp(1.5 * L, -1.4 * L, smooth(k)); }
-  else { const k = smooth(Math.min(1, (T - tB) / (tC - tB))); yaw = lerp(-1.4 * L, -0.3 * L, k); pitch = lerp(-1.45, -0.6, k); }
+  else { const k = smooth(Math.min(1, (T - tB) / (tC - tB))); yaw = lerp(-1.4 * L, -0.3 * L, k); pitch = lerp(-1.45, -0.5, k); }
   if (st.swing === 'spin') {
     yaw = T < tA ? lerp(0, 1.2, T / tA) : -0.4;
     pitch = T < tB ? -1.5 : lerp(-1.5, -0.5, Math.min(1, (T - tB) / (tC - tB)));
-    P.spin.rotation.y = T < tA ? lerp(0, 0.5, T / tA) : T < tB ? lerp(0.5, -TAU + 0.5, smooth((T - tA) / (tB - tA))) : lerp(-TAU + 0.5, -TAU, Math.min(1, (T - tB) / 0.1));
-    if (T >= tC - 0.01) P.spin.rotation.y = 0;
+    P.spin.rotation.y = T < tA ? lerp(0, 0.5, smooth(T / tA)) : T < tB ? lerp(0.5, -TAU + 0.5, smooth((T - tA) / (tB - tA))) : lerp(-TAU + 0.5, -TAU, smooth(Math.min(1, (T - tB) / 0.15)));
   }
+  // a planted stance: feet apart, knees a little bent, the body turning into the swing
+  const wind = T < tA ? smooth(T / tA) : 1;
   m.armR.rotation.set(pitch, yaw * 0.55, 0);
   m.torso.rotation.y = yaw * 0.32;
   m.armL.rotation.set(-0.5, -yaw * 0.2, 0);
-  m.legL.rotation.x = 0.35; m.legR.rotation.x = -0.25;
-  m.body.rotation.x = T < tB ? 0.18 : 0.1;
-  m.body.position.y = -0.5 - (T < tB ? 0.06 : 0.03);
+  m.legL.rotation.x = 0.35 * wind; m.legR.rotation.x = -0.3 * wind;
+  m.body.rotation.x = T < tB ? 0.08 + 0.12 * wind : 0.1;
+  m.body.position.y = -0.5 - (T < tB ? 0.07 * wind : 0.04);
+  m.head.rotation.x = 0;
+  P.spin.rotation.z = 0;
 }
 
 // the swing connects: everything inside the arc takes the hit, once
@@ -681,14 +760,14 @@ let intro = null;
 function shake(k) { if (prefs.shake) trauma = Math.min(1, trauma + k); }
 function gameplayCam(out, outLook) {
   const C = CONFIG.camera;
-  const lead = Math.min(1, Math.hypot(P.vx, P.vz) / CONFIG.player.speed) * C.lookAhead;
-  const vx = P.vx, vz = P.vz, vl = Math.hypot(vx, vz) || 1;
-  outLook.set(P.x + (vx / vl) * lead, P.y + 0.6, P.z + (vz / vl) * lead);
+  // look a little ahead of where you're heading (the lead is smoothed in updatePlayer)
+  outLook.set(P.x + (P.leadX || 0) * C.lookAhead, P.y + 0.6, P.z + (P.leadZ || 0) * C.lookAhead);
   const portrait = clamp(0.85 / camera.aspect, 1, 1.55);
   const dist = C.dist * ui.input.zoom * portrait;
   out.copy(outLook).addScaledVector(camDir, dist);
 }
 const wantPos = new V3(), wantLook = new V3();
+let camBlend = 0, camDist = CONFIG.camera.dist;
 function updateCamera(dt, t) {
   gameplayCam(wantPos, wantLook);
   if (intro) {
@@ -706,13 +785,19 @@ function updateCamera(dt, t) {
     if (started && (T > 6.6 || (ui.input.any && T > 0.8))) {
       if (!intro.card) { const pl = PLACES.cove; ui.titleCard(pl.name, pl.region, pl.line); }
       intro = null;
+      camBlend = T > 6.6 ? 0 : 1.6;
       ui.show(true);
       ui.showHint('move', TEXT.hintMove);
     }
   } else {
-    const k = damp(CONFIG.camera.follow, dt);
-    camLook.lerp(wantLook, k);
-    camPos.lerp(wantPos, damp(0.002, dt));
+    // the look point follows you softly; the camera keeps a fixed angle and distance from it,
+    // so the view glides without swimming
+    camLook.lerp(wantLook, damp(CONFIG.camera.follow, dt));
+    const C = CONFIG.camera;
+    camDist = lerp(camDist, C.dist * ui.input.zoom * clamp(0.85 / camera.aspect, 1, 1.55), damp(0.01, dt));
+    const fixed = tmpV.copy(camLook).addScaledVector(camDir, camDist);
+    if (camBlend > 0) { camBlend -= dt; camPos.lerp(fixed, damp(0.004, dt)); }
+    else camPos.copy(fixed);
   }
   camera.position.copy(camPos);
   if (window.RF && RF.view) { camera.position.set(...RF.view.pos); camera.lookAt(...RF.view.look); return; }

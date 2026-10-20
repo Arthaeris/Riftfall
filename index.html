@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Riftfall">
+  <meta name="theme-color" content="#1d1b4a">
+  <title>Riftfall</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=0.1.0">
+  <!-- Where every module comes from. To ship an update, change the ?v= numbers here (and VERSION in data.js). -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.min.js",
+      "@rf/data": "./data.js?v=0.1.0",
+      "@rf/art": "./art.js?v=0.1.0",
+      "@rf/world": "./world.js?v=0.1.0",
+      "@rf/ui": "./ui.js?v=0.1.0",
+      "@rf/game": "./game.js?v=0.1.0"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="ui"></div>
+
+  <div id="loading">
+    <div class="ldSky"></div>
+    <div class="ldCrack"></div>
+    <div class="ldInner">
+      <div class="ldMark">RIFTFALL</div>
+      <div class="ldSub">Prologue</div>
+      <div class="ldBar"><i></i></div>
+      <div class="ldTap">Tap to begin</div>
+      <div class="ldMsg"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    // load the game; if three.js or a file can't be fetched, say so instead of showing a blank screen
+    const fail = (e) => {
+      const ld = document.getElementById('loading');
+      if (!ld) return;
+      ld.classList.add('failed');
+      ld.querySelector('.ldMsg').textContent = 'The game could not load. Check your connection and reload. (' + (e && e.message ? e.message : e) + ')';
+    };
+    const slow = setTimeout(() => { const m = document.querySelector('#loading .ldMsg'); if (m && !document.getElementById('loading').classList.contains('ready')) m.textContent = 'Still loading… a slow connection can take a moment.'; }, 9000);
+    import('@rf/game').then(() => clearTimeout(slow)).catch(fail);
+    window.addEventListener('error', (e) => { if (!document.getElementById('loading')?.classList.contains('gone')) fail(e.error || e.message); });
+  </script>
+</body>
+</html>

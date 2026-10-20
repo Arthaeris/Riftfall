@@ -1,32 +1,36 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 
 export const CONFIG = {
   // ----- the player -----
   player: {
-    speed: 4.6,            // units per second at full stick
-    accel: 14,             // how fast you reach full speed (higher = snappier)
+    speed: 3.8,            // units per second at full stick
+    accel: 19,             // speeding up (units per second, per second)
+    decel: 24,             // slowing down when you let go
+    turnRate: 11,          // how fast you can turn (radians per second)
+    deadzone: 0.12,        // stick travel ignored around the centre
     radius: 0.32,          // collision size
     hearts: 5,             // max health in hearts (each heart = 2 half-hearts)
     stepUp: 0.55,          // highest ledge you can walk up without stairs
   },
   // the dodge: a classic roll with invincibility frames
   roll: {
-    duration: 0.42,        // seconds from start to end of the roll
-    distance: 3.8,         // how far one roll carries you
-    iStart: 0.03,          // invincible from ...
-    iEnd: 0.34,            // ... to (seconds into the roll)
-    cooldown: 0.18,        // pause after a roll before the next one
+    duration: 0.5,         // seconds from start to end of the roll
+    distance: 2.7,         // how far one roll carries you
+    iStart: 0.04,          // invincible from ...
+    iEnd: 0.36,            // ... to (seconds into the roll)
+    recover: 0.12,         // the short crouch as you come up out of it
+    cooldown: 0.2,         // pause after a roll before the next one
     buffer: 0.2,           // a roll pressed this long before you're free still happens
   },
   camera: {
     fov: 45,
     dist: 11.5,            // distance from the player
     dir: [0.42, 1.15, 1],  // the PixelPups angle: from behind-right, looking down
-    follow: 0.0009,        // smoothing (smaller = snappier)
-    lookAhead: 1.4,        // the camera leans toward where you're heading
+    follow: 0.03,          // smoothing (smaller = snappier)
+    lookAhead: 0.9,        // the camera leans toward where you're heading
     zoomMin: 0.65, zoomMax: 1.5,
   },
   feel: {
@@ -44,20 +48,21 @@ export const WEAPONS = {
     name: 'Skyglass Blade',
     kind: 'melee',
     desc: 'A sliver of fallen sky, bound to a driftwood hilt. Light, quick and humming.',
+    // you stay where you stand while swinging; upgrades will make these faster later
     combo: [
-      { dmg: 10, arc: 130, range: 2.0, windup: 0.07, active: 0.09, recover: 0.20, lunge: 0.55, swing: 'right' },
-      { dmg: 10, arc: 130, range: 2.0, windup: 0.06, active: 0.09, recover: 0.20, lunge: 0.55, swing: 'left' },
-      { dmg: 22, arc: 220, range: 2.4, windup: 0.13, active: 0.12, recover: 0.36, lunge: 1.1, swing: 'spin', heavy: true },
+      { dmg: 10, arc: 130, range: 2.0, windup: 0.15, active: 0.1, recover: 0.34, swing: 'right' },
+      { dmg: 10, arc: 130, range: 2.0, windup: 0.13, active: 0.1, recover: 0.34, swing: 'left' },
+      { dmg: 22, arc: 220, range: 2.4, windup: 0.24, active: 0.14, recover: 0.52, swing: 'spin', heavy: true },
     ],
-    comboReset: 0.55,      // seconds after a swing before the combo starts over
+    comboReset: 0.6,       // seconds after a swing before the combo starts over
     knock: 2.4,
   },
   tidesling: {
     name: 'Tidesling',
     kind: 'ranged',
     desc: 'A sling that throws bright drops of sea water. They fall in a soft arc.',
-    rate: 3.4,             // shots per second while held
-    speed: 13,
+    rate: 2.0,             // shots per second while held
+    speed: 11,
     range: 9.5,
     dmg: 5,
     size: 0.17,

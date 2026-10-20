@@ -45,12 +45,9 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .hud { position: absolute; inset: 0; opacity: 0; transition: opacity 0.8s ease 0.2s; }
 body.playing .hud, body.playing .pad { opacity: 1; }
 .hearts { position: absolute; left: var(--pad-l); top: var(--pad-t); display: flex; gap: 5px; filter: drop-shadow(0 2px 3px rgba(10, 6, 30, 0.45)); }
-.heart { width: 24px; height: 22px; display: block; }
+.heart { width: 30px; height: 26px; display: block; image-rendering: pixelated; }
 .heart svg { width: 100%; height: 100%; display: block; }
-.heart .hb { fill: rgba(20, 14, 40, 0.45); stroke: rgba(255, 255, 255, 0.55); stroke-width: 1.2; }
-.heart .hl, .heart .hr { fill: transparent; }
-.heart.full .hl, .heart.full .hr, .heart.half .hl { fill: var(--heart); }
-.heart.full .hb, .heart.half .hb { stroke: rgba(255, 220, 225, 0.8); }
+.hearts { gap: 3px; }
 .pauseBtn { position: absolute; right: var(--pad-r); top: var(--pad-t); width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; pointer-events: auto; transition: transform 0.15s; }
 .pauseBtn svg { width: 20px; height: 20px; }
 .pauseBtn:active { transform: scale(0.92); }
@@ -58,30 +55,28 @@ body.playing .hud, body.playing .pad { opacity: 1; }
 .hint.on { opacity: 1; transform: translate(-50%, 0); }
 @media (orientation: landscape) { .hint { top: calc(var(--pad-t) + 4px); } }
 
-/* ---------- action buttons (bottom-right; bottom-left for left-handed) ---------- */
-.pad { position: absolute; right: var(--pad-r); bottom: var(--pad-b); width: 210px; height: 200px; opacity: 0; transition: opacity 0.8s ease 0.3s; }
+/* ---------- action buttons: tucked into the bottom-right corner (bottom-left for left-handed) ---------- */
+.pad { position: absolute; right: var(--pad-r); bottom: var(--pad-b); width: 190px; height: 160px; opacity: 0; transition: opacity 0.8s ease 0.3s; }
 body.lefty .pad { right: auto; left: var(--pad-l); transform: scaleX(-1); }
 body.lefty .pad .ic { transform: scaleX(-1); }
 .act { position: absolute; border-radius: 50%; pointer-events: auto; touch-action: none; display: grid; place-items: center; color: #fff;
-  background: radial-gradient(120% 120% at 30% 25%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04) 60%), rgba(28, 22, 58, 0.38);
+  background: radial-gradient(120% 120% at 30% 25%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04) 60%), rgba(28, 22, 58, 0.34);
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  border: 1px solid rgba(255, 255, 255, 0.28); box-shadow: var(--drop), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  transition: transform 0.12s ease, background 0.2s; }
-.act .ic { width: 52%; height: 52%; display: block; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
+  border: 1px solid rgba(255, 255, 255, 0.26); box-shadow: var(--drop), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  transition: transform 0.12s ease, background 0.2s, opacity 0.2s; }
+.act .ic { width: 50%; height: 50%; display: block; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
 .act .ic svg { width: 100%; height: 100%; display: block; }
 .act .ring { position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; transition: border-color 0.2s; }
 .act.held { transform: scale(0.93); background: radial-gradient(120% 120% at 30% 25%, rgba(159, 243, 255, 0.45), rgba(159, 243, 255, 0.08) 60%), rgba(28, 22, 58, 0.45); }
 .act.held .ring { border-color: rgba(159, 243, 255, 0.7); }
 .act.pop { animation: pop 0.25s ease; }
 @keyframes pop { 40% { transform: scale(0.86); } 100% { transform: scale(1); } }
-.act.attack { width: 84px; height: 84px; right: 6px; bottom: 6px; color: #dffbff; }
-.act.ranged { width: 58px; height: 58px; right: 98px; bottom: 58px; color: #9ff3ff; }
-.act.roll { width: 58px; height: 58px; right: 66px; bottom: 120px; }
-.act.roll.cool { opacity: 0.55; }
-.act.ability { width: 50px; height: 50px; right: 4px; bottom: 112px; color: #ffd29a; }
-.act.ability.locked { opacity: 0.5; }
-.act.ability .lk { position: absolute; right: -2px; bottom: -2px; width: 18px; height: 18px; padding: 3px; border-radius: 50%; background: rgba(20, 14, 40, 0.8); color: #fff; display: block; }
-.act.ability .lk svg { width: 100%; height: 100%; display: block; }
+/* the sword sits in the corner; roll to its left, sling above it, a free slot between them for a future ability */
+.act.attack { width: 72px; height: 72px; right: 4px; bottom: 4px; color: #dffbff; }
+.act.roll { width: 50px; height: 50px; right: 96px; bottom: 6px; }
+.act.roll.cool { opacity: 0.5; }
+.act.ranged { width: 50px; height: 50px; right: 14px; bottom: 96px; color: #9ff3ff; }
+.act.ability { width: 46px; height: 46px; right: 84px; bottom: 78px; color: #ffd29a; }
 
 /* the floating joystick */
 .joy { position: fixed; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; display: none;
@@ -164,3 +159,13 @@ details[open] summary.gTitle { margin-bottom: 8px; }
 @keyframes tapPulse { 50% { opacity: 0.45; } }
 .ldMsg { margin-top: 14px; max-width: 320px; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
 #loading.failed .ldBar, #loading.failed .ldTap { display: none; }
+
+/* ---------- hold it sideways ---------- */
+.rotate { display: none; position: fixed; inset: 0; z-index: 30; place-items: center; text-align: center; padding: 24px;
+  background: radial-gradient(120% 80% at 60% 10%, #5b4a8f 0%, #2a2560 45%, #141233 100%); }
+@media (orientation: portrait) and (pointer: coarse) { .rotate { display: grid; } }
+.rotPhone { width: 46px; height: 78px; margin: 0 auto 22px; border: 3px solid var(--ink); border-radius: 10px; position: relative; animation: turn 2.6s ease-in-out infinite; }
+.rotPhone i { position: absolute; left: 50%; bottom: 6px; width: 12px; height: 3px; margin-left: -6px; border-radius: 2px; background: var(--ink); }
+@keyframes turn { 0%, 25% { transform: rotate(0); } 55%, 100% { transform: rotate(-90deg); } }
+.rotTitle { font-family: var(--serif); font-size: 26px; }
+.rotSub { margin-top: 6px; font-size: 14px; color: var(--ink-2); }

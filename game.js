@@ -1,0 +1,824 @@
+/* Riftfall — game.js
+   The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
+import * as THREE from 'three';
+import { CONFIG, WEAPONS, PLACES, PALETTE, TEXT } from '@rf/data';
+import { buildPlayer, buildSkyblade, buildTidesling, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT } from '@rf/art';
+import { buildCove } from '@rf/world';
+import { createUI, loadPrefs, loadingDone, loadingFailed } from '@rf/ui';
+
+const V3 = THREE.Vector3;
+const damp = (k, dt) => 1 - Math.pow(k, dt);   // frame-rate independent smoothing
+const angLerp = (a, b, t) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
+const smooth = (t) => t * t * (3 - 2 * t);
+
+// ===========================================================================
+// Renderer and the look: HDR scene -> bloom -> ink outline, colour grade, vignette -> tone map
+// ===========================================================================
+const canvas = document.getElementById('game');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(PALETTE.fog);
+scene.fog = new THREE.Fog(PALETTE.fog, 36, 95);
+const camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, innerWidth / innerHeight, 0.4, 600);
+
+const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 1.3);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(PALETTE.sun, 3.6);
+sun.castShadow = true;
+sun.shadow.bias = -0.0005;
+sun.shadow.normalBias = 0.035;
+scene.add(sun, sun.target);
+// a cool rim light from the sea side, so silhouettes read against the dusk
+const rim = new THREE.DirectionalLight('#8fb4ff', 0.6);
+rim.position.set(10, 6, 12);
+scene.add(rim);
+
+const prefs = loadPrefs();
+const QUALITY = {
+  2: { pr: Math.min(devicePixelRatio || 1, 2), msaa: 4, shadow: 2048, bloom: 1 },
+  1: { pr: Math.min(devicePixelRatio || 1, 1.5), msaa: 2, shadow: 1024, bloom: 1 },
+  0: { pr: 1, msaa: 0, shadow: 0, bloom: 0 },
+};
+const look = { level: 2, slow: 0, watch: 0 };
+function qualityLevel() {
+  if (prefs.quality === 'high') return 2;
+  if (prefs.quality === 'medium') return 1;
+  if (prefs.quality === 'low') return 0;
+  return prefs.autoLevel != null ? prefs.autoLevel : 2;
+}
+
+const FS = (() => {
+  const s = new THREE.Scene(), c = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+  q.frustumCulled = false; s.add(q);
+  return { draw(mat, target) { q.material = mat; renderer.setRenderTarget(target); renderer.render(s, c); } };
+})();
+const VERT = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+const fsMat = (frag, uniforms) => new THREE.ShaderMaterial({ uniforms, vertexShader: VERT, fragmentShader: frag, depthTest: false, depthWrite: false });
+
+const post = (() => {
+  let main = null, w = 0, h = 0, msaa = -1;
+  const chain = [];   // bloom: [down0..down4], [up0..up3]
+  const bright = fsMat(`uniform sampler2D tSrc; uniform float thr; varying vec2 vUv;
+    void main() { vec3 c = texture2D(tSrc, vUv).rgb; float l = max(c.r, max(c.g, c.b));
+      float k = clamp((l - thr + 0.5) / 1.0, 0.0, 1.0); k = k * k * 0.5; float w = max(k, l - thr) / max(l, 1e-4);
+      gl_FragColor = vec4(min(c * w, vec3(12.0)), 1.0); }`, { tSrc: { value: null }, thr: { value: 1.0 } });
+  const down = fsMat(`uniform sampler2D tSrc; uniform vec2 px; varying vec2 vUv;
+    void main() { vec3 c = texture2D(tSrc, vUv).rgb * 4.0;
+      c += texture2D(tSrc, vUv + vec2(-px.x, -px.y)).rgb + texture2D(tSrc, vUv + vec2(px.x, -px.y)).rgb + texture2D(tSrc, vUv + vec2(-px.x, px.y)).rgb + texture2D(tSrc, vUv + vec2(px.x, px.y)).rgb;
+      gl_FragColor = vec4(c / 8.0, 1.0); }`, { tSrc: { value: null }, px: { value: new THREE.Vector2() } });
+  const up = fsMat(`uniform sampler2D tSrc; uniform sampler2D tBase; uniform vec2 px; uniform float mixK; varying vec2 vUv;
+    void main() { vec3 c = vec3(0.0);
+      c += texture2D(tSrc, vUv + vec2(-px.x, 0.0)).rgb * 2.0 + texture2D(tSrc, vUv + vec2(px.x, 0.0)).rgb * 2.0;
+      c += texture2D(tSrc, vUv + vec2(0.0, -px.y)).rgb * 2.0 + texture2D(tSrc, vUv + vec2(0.0, px.y)).rgb * 2.0;
+      c += texture2D(tSrc, vUv + vec2(-px.x, -px.y)).rgb + texture2D(tSrc, vUv + vec2(px.x, -px.y)).rgb + texture2D(tSrc, vUv + vec2(-px.x, px.y)).rgb + texture2D(tSrc, vUv + vec2(px.x, px.y)).rgb;
+      gl_FragColor = vec4(c / 12.0 + texture2D(tBase, vUv).rgb * mixK, 1.0); }`, { tSrc: { value: null }, tBase: { value: null }, px: { value: new THREE.Vector2() }, mixK: { value: 1 } });
+  const final = fsMat(`uniform sampler2D tColor; uniform sampler2D tDepth; uniform sampler2D tBloom;
+    uniform vec2 texel; uniform float cnear, cfar, ink, bloomK, vig, edges, aspect, seed, flash; uniform vec3 grade; uniform float sat; uniform vec3 flashCol;
+    varying vec2 vUv;
+    float lin(vec2 uv) { float z = texture2D(tDepth, uv).x * 2.0 - 1.0; return 2.0 * cnear * cfar / (cfar + cnear - z * (cfar - cnear)); }
+    void main() {
+      vec3 col = texture2D(tColor, vUv).rgb;
+      if (edges > 0.5) {
+        float d0 = lin(vUv);
+        float dl = lin(vUv - vec2(texel.x, 0.0)), dr = lin(vUv + vec2(texel.x, 0.0));
+        float dd = lin(vUv - vec2(0.0, texel.y)), du = lin(vUv + vec2(0.0, texel.y));
+        float far = max(max(dl, dr), max(dd, du)) - d0;
+        float sil = smoothstep(0.03, 0.07, far / d0);
+        float crease = smoothstep(0.004, 0.012, (abs(dl + dr - 2.0 * d0) + abs(dd + du - 2.0 * d0)) / d0);
+        float e = max(sil, crease * 0.55);
+        if (d0 > cfar * 0.9) e = 0.0;
+        e *= 1.0 - smoothstep(30.0, 70.0, d0);
+        col *= 1.0 - ink * e;
+      }
+      col += texture2D(tBloom, vUv).rgb * bloomK;
+      float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(l), col, sat) * grade;
+      col = mix(col, flashCol, flash);
+      vec2 q = (vUv - 0.5) * vec2(aspect, 1.0) * 1.5;
+      col *= mix(1.0, smoothstep(1.2, 0.2, length(q)), vig);
+      float n = fract(sin(dot(vUv * 913.7 + seed, vec2(12.9898, 78.233))) * 43758.5453);
+      col += (n - 0.5) / 255.0;
+      gl_FragColor = vec4(max(col, vec3(0.0)), 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`, {
+    tColor: { value: null }, tDepth: { value: null }, tBloom: { value: null }, texel: { value: new THREE.Vector2() },
+    cnear: { value: 0.4 }, cfar: { value: 600 }, ink: { value: 0.55 }, bloomK: { value: 0.75 }, vig: { value: 0.42 }, edges: { value: 1 },
+    aspect: { value: 1 }, seed: { value: 0 }, grade: { value: new THREE.Vector3(1.04, 0.99, 0.97) }, sat: { value: 1.08 }, flash: { value: 0 }, flashCol: { value: new THREE.Color(1, 1, 1) },
+  });
+  final.toneMapped = true;
+  const black = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); black.needsUpdate = true;
+  const rt = (W, H) => new THREE.WebGLRenderTarget(Math.max(1, W), Math.max(1, H), { type: THREE.HalfFloatType, depthBuffer: false });
+  function make(W, H, samples) {
+    if (main) { main.dispose(); chain.forEach((c) => c.dispose()); chain.length = 0; }
+    main = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples, depthTexture: new THREE.DepthTexture(W, H) });
+    let bw = W >> 1, bh = H >> 1;
+    for (let i = 0; i < 5; i++) { chain.push(rt(bw, bh)); bw >>= 1; bh >>= 1; }
+    for (let i = 0; i < 4; i++) chain.push(rt(chain[i].width, chain[i].height));
+    w = W; h = H; msaa = samples;
+  }
+  const size = new THREE.Vector2();
+  return {
+    final,
+    render() {
+      const Q = QUALITY[look.level];
+      renderer.getDrawingBufferSize(size);
+      if (!main || w !== size.x || h !== size.y || msaa !== Q.msaa) make(size.x, size.y, Q.msaa);
+      renderer.setRenderTarget(main);
+      renderer.render(scene, camera);
+      let bloomTex = black;
+      if (Q.bloom) {
+        bright.uniforms.tSrc.value = main.texture;
+        FS.draw(bright, chain[0]);
+        for (let i = 1; i < 5; i++) { down.uniforms.tSrc.value = chain[i - 1].texture; down.uniforms.px.value.set(1 / chain[i - 1].width, 1 / chain[i - 1].height); FS.draw(down, chain[i]); }
+        let src = chain[4];
+        for (let i = 3; i >= 0; i--) {
+          const dst = chain[5 + i];
+          up.uniforms.tSrc.value = src.texture; up.uniforms.tBase.value = chain[i].texture; up.uniforms.px.value.set(1 / src.width, 1 / src.height);
+          FS.draw(up, dst);
+          src = dst;
+        }
+        bloomTex = src.texture;
+      }
+      const U = final.uniforms;
+      U.tColor.value = main.texture; U.tDepth.value = main.depthTexture; U.tBloom.value = bloomTex;
+      const k = Math.max(1, renderer.getPixelRatio() * 0.75);
+      U.texel.value.set(k / size.x, k / size.y);
+      U.cnear.value = camera.near; U.cfar.value = camera.far; U.aspect.value = size.x / size.y;
+      U.seed.value = (U.seed.value + 0.37) % 100;
+      U.edges.value = look.level > 0 ? 1 : 0;
+      FS.draw(final, null);
+    },
+  };
+})();
+
+function applyQuality() {
+  look.level = qualityLevel();
+  const Q = QUALITY[look.level];
+  renderer.setPixelRatio(Q.pr);
+  renderer.setSize(innerWidth, innerHeight, false);
+  sun.castShadow = Q.shadow > 0;
+  if (Q.shadow && sun.shadow.mapSize.x !== Q.shadow) {
+    sun.shadow.mapSize.set(Q.shadow, Q.shadow);
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  }
+}
+// "Automatic": if frames run long for a while, step down a level for good
+function watchFrames(dt) {
+  if (prefs.quality !== 'auto' || document.hidden || paused) { look.slow = 0; return; }
+  look.watch += dt;
+  if (look.watch < 5) return;
+  if (dt > 1 / 32) look.slow += dt; else look.slow = Math.max(0, look.slow - dt * 0.5);
+  if (look.slow > 2.5 && look.level > 0) {
+    prefs.autoLevel = look.level - 1;
+    try { localStorage.setItem('riftfall-prefs', JSON.stringify(prefs)); } catch (_) { /* fine */ }
+    look.slow = 0; look.watch = 0;
+    applyQuality();
+  }
+}
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight, false); });
+
+// ===========================================================================
+// Sound: all synthesized, no files. Ocean, a quiet generative tune, and the effects.
+// ===========================================================================
+const sound = (() => {
+  let ctx = null, master, sfxBus, musicBus, ambBus, noiseBuf, delay;
+  function init() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+    master = ctx.createDynamicsCompressor();
+    master.threshold.value = -14; master.ratio.value = 4;
+    master.connect(ctx.destination);
+    sfxBus = ctx.createGain(); musicBus = ctx.createGain(); ambBus = ctx.createGain();
+    sfxBus.connect(master); musicBus.connect(master); ambBus.connect(master);
+    volumes();
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // echo for the music
+    delay = ctx.createDelay(1.5); delay.delayTime.value = 0.42;
+    const fb = ctx.createGain(); fb.gain.value = 0.38;
+    const dl = ctx.createBiquadFilter(); dl.type = 'lowpass'; dl.frequency.value = 2200;
+    delay.connect(dl); dl.connect(fb); fb.connect(delay); dl.connect(musicBus);
+    ocean();
+  }
+  function volumes() { if (!ctx) return; sfxBus.gain.value = prefs.sfx * 0.9; musicBus.gain.value = prefs.music * 0.32; ambBus.gain.value = 0.55 * Math.max(prefs.sfx, 0.2); }
+  function noise(dur) { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = dur > 1.9; s.start(ctx.currentTime, Math.random() * 1.5); if (!s.loop) s.stop(ctx.currentTime + dur); return s; }
+  function ocean() {
+    // two slow swells of filtered noise, out of step with each other
+    for (const [f, rate, g0] of [[480, 0.09, 0.22], [900, 0.13, 0.08]]) {
+      const n = noise(99); n.loop = true;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = f;
+      const g = ctx.createGain(); g.gain.value = g0;
+      const lfo = ctx.createOscillator(); lfo.frequency.value = rate;
+      const lg = ctx.createGain(); lg.gain.value = g0 * 0.8;
+      lfo.connect(lg); lg.connect(g.gain); lfo.start();
+      n.connect(lp); lp.connect(g); g.connect(ambBus);
+    }
+  }
+  const env = (g, t, a, peak, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
+  function tone(type, f0, f1, dur, vol, bus = sfxBus, at = 0) {
+    const t = ctx.currentTime + at, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    env(g, t, 0.005, vol, dur); o.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + 0.05);
+    return o;
+  }
+  function hiss(type, f0, f1, q, dur, vol, at = 0) {
+    const t = ctx.currentTime + at, n = noise(dur + 0.1), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    f.type = type; f.Q.value = q; f.frequency.setValueAtTime(f0, t); if (f1) f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    env(g, t, 0.01, vol, dur); n.connect(f); f.connect(g); g.connect(sfxBus);
+  }
+  function sfx(name, k = 1) {
+    if (!ctx) return;
+    const r = 0.92 + Math.random() * 0.16;
+    switch (name) {
+      case 'swing': hiss('bandpass', 900 * r, 3200 * r, 1.4, 0.13, 0.35 * k); tone('sine', 520 * r, 980 * r, 0.09, 0.04); break;
+      case 'swingHeavy': hiss('bandpass', 500, 2600, 1.1, 0.24, 0.5); tone('triangle', 220, 440, 0.2, 0.06); break;
+      case 'hit': tone('sine', 150 * r, 55, 0.16, 0.6 * k); hiss('highpass', 2500, 0, 0.7, 0.05, 0.3 * k); tone('square', 880 * r, 660, 0.05, 0.04 * k); break;
+      case 'wood': tone('triangle', 240 * r, 160, 0.1, 0.35 * k); tone('triangle', 410 * r, 300, 0.06, 0.15 * k); break;
+      case 'roll': hiss('lowpass', 1400, 300, 0.8, 0.3, 0.32); break;
+      case 'land': hiss('lowpass', 700, 200, 0.6, 0.12, 0.25); break;
+      case 'sling': tone('sine', 520 * r, 980 * r, 0.08, 0.14); hiss('bandpass', 2000, 4200, 2, 0.07, 0.12); break;
+      case 'splash': hiss('bandpass', 2600 * r, 900, 1.2, 0.18, 0.28 * k); tone('sine', 1300 * r, 600, 0.06, 0.06 * k); break;
+      case 'step': hiss('bandpass', 1400 * r, 0, 1.5, 0.05, 0.05 * k); break;
+      case 'tick': tone('sine', 1500, 0, 0.04, 0.06); break;
+      case 'open': tone('sine', 660, 990, 0.12, 0.07); break;
+      case 'deny': tone('triangle', 300, 220, 0.12, 0.12); break;
+      case 'shimmer': for (let i = 0; i < 4; i++) tone('sine', 1320 * Math.pow(1.25, i), 0, 0.5, 0.035, sfxBus, i * 0.07); break;
+      case 'riftfall': tone('sine', 98, 49, 3.5, 0.3); hiss('lowpass', 300, 80, 0.7, 3, 0.25); break;
+    }
+  }
+  // the music: soft pad chords and a few plucked notes, like wind chimes on the lighthouse
+  const SCALE = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21];
+  const CHORDS = [[50, 57, 62, 66], [47, 54, 59, 62], [43, 50, 55, 59], [45, 52, 57, 61]];
+  let nextNote = 0, chordAt = 0, chordI = 0;
+  const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  function pad(notes, dur) {
+    const t = ctx.currentTime;
+    for (const m of notes) {
+      for (const det of [-6, 6]) {
+        const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+        o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = det;
+        f.type = 'lowpass'; f.frequency.value = 700; f.Q.value = 0.3;
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.022, t + dur * 0.35); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+        o.connect(f); f.connect(g); g.connect(musicBus); o.start(t); o.stop(t + dur + 0.1);
+      }
+    }
+  }
+  function pluck(m, vol) {
+    const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle'; o.frequency.value = mtof(m);
+    env(g, t, 0.004, vol, 1.6);
+    o.connect(g); g.connect(musicBus); g.connect(delay); o.start(t); o.stop(t + 1.8);
+  }
+  function update() {
+    if (!ctx || ctx.state !== 'running') return;
+    const t = ctx.currentTime;
+    if (t >= chordAt) { pad(CHORDS[chordI], 9.5); chordI = (chordI + 1) % CHORDS.length; chordAt = t + 8; }
+    if (t >= nextNote) {
+      const base = CHORDS[(chordI + 3) % 4][0] + 12;
+      pluck(base + SCALE[Math.floor(Math.random() * SCALE.length)], 0.05 + Math.random() * 0.04);
+      nextNote = t + [0.6, 1.2, 1.8, 2.4, 3.2][Math.floor(Math.random() * 5)];
+    }
+  }
+  function suspend(on) { if (ctx) (on ? ctx.suspend() : ctx.resume()).catch(() => {}); }
+  return { init, sfx, update, volumes, suspend };
+})();
+
+// ===========================================================================
+// The world, effects and the apprentice
+// ===========================================================================
+let world, sparks, bits, ui, paused = false, started = false;
+const camDir = new V3(...CONFIG.camera.dir).normalize();
+const camFwd = new V3(-camDir.x, 0, -camDir.z).normalize();
+const camRight = new V3().crossVectors(camFwd, new V3(0, 1, 0)).normalize();
+
+const P = {
+  x: 0, y: 0, z: 0, vx: 0, vz: 0, face: 0, state: 'move', t: 0,
+  hp: CONFIG.player.hearts * 2, maxHp: CONFIG.player.hearts * 2,
+  combo: 0, comboT: 0, swing: null, rollDir: new THREE.Vector2(), rollCd: 0, rollBuf: 0, atkBuf: 0, fireCd: 0,
+  stepT: 0, stepSide: 0, firing: 0, hitList: null, model: null, blade: null, sling: null, spin: null,
+};
+let stop = 0, trauma = 0, flashT = 0;
+const projectiles = [];
+
+function setupPlayer() {
+  const m = buildPlayer();
+  // a pivot at hip height, so the roll tumbles around the middle of the body
+  const spin = new THREE.Group();
+  spin.position.y = 0.5;
+  m.root.add(spin);
+  m.root.remove(m.body);
+  spin.add(m.body);
+  m.body.position.y = -0.5;
+  scene.add(m.root);
+  m.armR.rotation.order = 'YXZ';
+  m.armL.rotation.order = 'YXZ';
+  const blade = buildSkyblade();
+  blade.root.rotation.x = Math.PI * 0.5 - 0.2;   // hangs pointing forward-down at rest
+  m.handR.add(blade.root);
+  const sling = buildTidesling();
+  sling.root.rotation.x = Math.PI * 0.5;
+  sling.root.scale.setScalar(0.9);
+  m.handL.add(sling.root);
+  P.model = m; P.blade = blade; P.sling = sling; P.spin = spin;
+  P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.spawn.y;
+  P.face = Math.PI * 0.85;
+}
+
+// screen direction (x right, y down) -> world direction on the ground
+function screenToWorld(sx, sy) {
+  const x = camRight.x * sx - camFwd.x * sy, z = camRight.z * sx - camFwd.z * sy;
+  const l = Math.hypot(x, z) || 1;
+  return { x: x / l, z: z / l };
+}
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), ground = new THREE.Plane(new V3(0, 1, 0), 0);
+function mouseDir() {
+  ndc.set((ui.input.mouse.x / innerWidth) * 2 - 1, -(ui.input.mouse.y / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  ground.constant = -(P.y + 0.6);
+  const hit = new V3();
+  if (!ray.ray.intersectPlane(ground, hit)) return null;
+  const dx = hit.x - P.x, dz = hit.z - P.z, l = Math.hypot(dx, dz);
+  return l > 0.01 ? { x: dx / l, z: dz / l } : null;
+}
+// where to aim: a dragged button wins, then the mouse, then the nearest target in front of you, then straight ahead
+function aimFor(st, range) {
+  if (st.aim.active) return screenToWorld(st.aim.x, st.aim.y);
+  if (ui.input.mouse.has && st.down && !('ontouchstart' in window && navigator.maxTouchPoints > 0)) { const d = mouseDir(); if (d) return d; }
+  let best = null, bestS = Infinity;
+  const fx = Math.sin(P.face), fz = Math.cos(P.face);
+  const mv = ui.input.move.active ? screenToWorld(ui.input.move.x, ui.input.move.y) : null;
+  for (const d of world.dummies) {
+    const dx = d.x - P.x, dz = d.z - P.z, dist = Math.hypot(dx, dz);
+    if (dist > range) continue;
+    const dir = mv || { x: fx, z: fz };
+    const cos = (dx * dir.x + dz * dir.z) / (dist || 1);
+    if (cos < 0.25) continue;
+    const s = dist * (1.6 - cos);
+    if (s < bestS) { bestS = s; best = { x: dx / dist, z: dz / dist }; }
+  }
+  if (best) return best;
+  if (mv) return mv;
+  return { x: fx, z: fz };
+}
+
+function tryMove(dx, dz) {
+  const r = CONFIG.player.radius, y = world.groundAt(P.x, P.z);
+  if (world.walkable(P.x + dx, P.z + dz, y, r, CONFIG.player.stepUp)) { P.x += dx; P.z += dz; return true; }
+  if (Math.abs(dx) > 1e-5 && world.walkable(P.x + dx, P.z, y, r, CONFIG.player.stepUp)) { P.x += dx; return true; }
+  if (Math.abs(dz) > 1e-5 && world.walkable(P.x, P.z + dz, y, r, CONFIG.player.stepUp)) { P.z += dz; return true; }
+  return false;
+}
+
+function startRoll() {
+  const I = ui.input;
+  let d = I.move.active ? screenToWorld(I.move.x, I.move.y) : { x: Math.sin(P.face), z: Math.cos(P.face) };
+  P.rollDir.set(d.x, d.z);
+  P.face = Math.atan2(d.x, d.z);
+  P.state = 'roll'; P.t = 0; P.rollBuf = 0; P.swing = null;
+  sound.sfx('roll');
+  dust(P.x, P.y, P.z, 6, 1.2);
+  ui.hideHint('roll');
+}
+function startSwing(dir) {
+  const W = WEAPONS.skyblade;
+  if (P.comboT <= 0) P.combo = 0;
+  const step = W.combo[P.combo % W.combo.length];
+  P.swing = { step, idx: P.combo % W.combo.length, dir, hit: false, slash: null };
+  P.face = Math.atan2(dir.x, dir.z);
+  P.state = 'attack'; P.t = 0; P.atkBuf = 0;
+  P.combo = (P.combo + 1) % W.combo.length;
+}
+
+function updatePlayer(dt) {
+  const I = ui.input, C = CONFIG.player, W = WEAPONS.skyblade;
+  if (I.roll.pressed) { P.rollBuf = CONFIG.roll.buffer; I.roll.pressed = false; }
+  if (I.attack.pressed) { P.atkBuf = 0.28; I.attack.pressed = false; }
+  P.rollBuf = Math.max(0, P.rollBuf - dt); P.atkBuf = Math.max(0, P.atkBuf - dt);
+  P.rollCd = Math.max(0, P.rollCd - dt); P.comboT = Math.max(0, P.comboT - dt); P.fireCd = Math.max(0, P.fireCd - dt);
+  P.t += dt;
+  const m = P.model;
+  let speedK = 0, moved = 0;
+
+  if (P.state === 'roll') {
+    const R = CONFIG.roll, p = Math.min(1, P.t / R.duration);
+    // fast at the start, easing out
+    const prev = 1 - Math.pow(1 - Math.max(0, (P.t - dt) / R.duration), 2.2), cur = 1 - Math.pow(1 - p, 2.2);
+    const dist = (cur - prev) * R.distance;
+    const ox = P.x, oz = P.z;
+    tryMove(P.rollDir.x * dist, P.rollDir.y * dist);
+    moved = Math.hypot(P.x - ox, P.z - oz);
+    P.iframes = P.t >= R.iStart && P.t <= R.iEnd;
+    P.spin.rotation.x = smooth(p) * TAU;
+    P.spin.scale.set(1, 1 - Math.sin(p * Math.PI) * 0.18, 1);
+    P.model.body.position.y = -0.5 - Math.sin(p * Math.PI) * 0.12;
+    if (Math.random() < 0.6) sparks.spawn({ x: P.x, y: P.y + 0.5, z: P.z, vy: 0.3, life: 0.35, size: 0.18, color: '#bfefff', glow: 1.2, drag: 3 });
+    if (p >= 1) {
+      P.state = 'move'; P.t = 0; P.rollCd = R.cooldown; P.iframes = false;
+      P.spin.rotation.x = 0; P.spin.scale.set(1, 1, 1); P.model.body.position.y = -0.5;
+      sound.sfx('land'); dust(P.x, P.y, P.z, 4, 0.8);
+    }
+  } else if (P.state === 'attack') {
+    const s = P.swing, st = s.step, T = P.t;
+    const tA = st.windup, tB = st.windup + st.active, tC = tB + st.recover;
+    // lunge forward through windup and the swing
+    if (T < tB) { const k = st.lunge / tB * dt * (T < tA ? 0.6 : 1.6); tryMove(s.dir.x * k, s.dir.z * k); }
+    if (T >= tA && !s.slash) {
+      // the swing itself: a glowing arc and the hit check
+      const sl = slashMesh(st.range + 0.15, st.arc, st.heavy ? '#d8fbff' : '#9ff3ff', st.heavy ? 3.2 : 2.4);
+      sl.position.set(P.x, P.y + 0.75, P.z);
+      sl.rotation.y = Math.atan2(s.dir.x, s.dir.z);
+      sl.rotation.z = st.swing === 'left' ? 0.18 : st.swing === 'right' ? -0.18 : 0;
+      sl.material.uniforms.uDir.value = st.swing === 'left' ? -1 : 1;
+      scene.add(sl);
+      s.slash = { mesh: sl, t: 0 };
+      slashes.push(s.slash);
+      sound.sfx(st.heavy ? 'swingHeavy' : 'swing');
+      meleeHits(s);
+    }
+    // can roll out of the windup or the recovery (not mid-swing), and chain into the next swing
+    if (P.rollBuf > 0 && P.rollCd <= 0 && (T < tA || T > tB)) startRoll();
+    else if (T > tB + st.recover * 0.4 && (P.atkBuf > 0 || I.attack.down)) startSwing(aimFor(I.attack, 3.2));
+    else if (T >= tC) { P.state = 'move'; P.t = 0; P.comboT = W.comboReset; }
+    swingPose(s, T, tA, tB, tC);
+  }
+  if (P.state === 'move') {
+    // move
+    let tx = 0, tz = 0, mag = 0;
+    if (I.move.active) { const d = screenToWorld(I.move.x, I.move.y); mag = Math.min(1, Math.hypot(I.move.x, I.move.y)); tx = d.x; tz = d.z; }
+    const firing = I.ranged.down;
+    const sp = C.speed * mag * (firing ? 0.72 : 1);
+    const a = damp(Math.exp(-C.accel), dt);
+    P.vx = lerp(P.vx, tx * sp, a); P.vz = lerp(P.vz, tz * sp, a);
+    const ox = P.x, oz = P.z;
+    if (Math.abs(P.vx) + Math.abs(P.vz) > 0.01) tryMove(P.vx * dt, P.vz * dt);
+    moved = Math.hypot(P.x - ox, P.z - oz);
+    speedK = moved / dt / C.speed;
+    if (mag > 0.1 && !firing) P.face = angLerp(P.face, Math.atan2(tx, tz), damp(0.0001, dt));
+    // sling: hold to keep throwing at its own rate
+    if (firing) {
+      const dir = aimFor(I.ranged, WEAPONS.tidesling.range);
+      P.face = angLerp(P.face, Math.atan2(dir.x, dir.z), damp(0.00001, dt));
+      if (P.fireCd <= 0) { fire(dir); P.fireCd = 1 / WEAPONS.tidesling.rate; }
+      P.firing = 0.25;
+    }
+    if (P.rollBuf > 0 && P.rollCd <= 0) startRoll();
+    else if (P.atkBuf > 0 || (I.attack.down && P.comboT < W.comboReset - 0.05)) startSwing(aimFor(I.attack, 3.2));
+    walkPose(dt, speedK);
+  }
+  P.firing = Math.max(0, P.firing - dt);
+  // follow the ground: a quick hop up a step, a softer drop down
+  const gy = world.groundAt(P.x, P.z);
+  P.y += (gy - P.y) * Math.min(1, dt * (gy > P.y ? 20 : 12));
+  m.root.position.set(P.x, P.y, P.z);
+  m.root.rotation.y = angLerp(m.root.rotation.y, P.face, P.state === 'move' ? damp(0.0004, dt) : 1);
+  // footsteps
+  if (moved > 0 && P.state === 'move') {
+    P.stepT += moved;
+    if (P.stepT > 0.75) {
+      P.stepT = 0; P.stepSide ^= 1;
+      sound.sfx('step', 0.8);
+      if (Math.random() < 0.7) dust(P.x, P.y, P.z, 1, 0.4);
+    }
+  }
+  // scarf: trails behind when moving, sways when still
+  const now = performance.now() / 1000;
+  const sv = P.state === 'roll' ? 1.2 : Math.min(1, speedK);
+  m.scarfTail.rotation.x = -0.15 + sv * 0.9 + Math.sin(now * 9) * 0.06 * (0.3 + sv);
+  m.scarfTail.rotation.y = Math.sin(now * 3.1) * 0.2;
+  m.scarfEnd.rotation.x = sv * 0.3 + Math.sin(now * 11 + 1) * 0.12;
+  // blink now and then
+  const bl = (now % 4.2) < 0.12;
+  for (const e of m.eyes) e.scale.y = bl ? 0.15 : 1;
+  ui.setCooldowns(P.rollCd <= 0 && P.state !== 'roll');
+}
+
+function walkPose(dt, k) {
+  const m = P.model;
+  const ph = performance.now() / 1000 * 9.5;
+  const s = Math.sin(ph) * 0.75 * Math.min(1, k);
+  m.legL.rotation.x = lerp(m.legL.rotation.x, s, damp(0.0001, dt));
+  m.legR.rotation.x = lerp(m.legR.rotation.x, -s, damp(0.0001, dt));
+  m.armL.rotation.set(lerp(m.armL.rotation.x, P.firing > 0 ? -1.35 : -s * 0.7, damp(0.0001, dt)), 0, 0);
+  m.armR.rotation.set(lerp(m.armR.rotation.x, s * 0.5 - 0.15, damp(0.0001, dt)), lerp(m.armR.rotation.y, 0, damp(0.001, dt)), 0);
+  m.torso.rotation.y = lerp(m.torso.rotation.y, 0, damp(0.001, dt));
+  m.body.position.y = -0.5 + Math.abs(Math.sin(ph)) * 0.05 * Math.min(1, k) + Math.sin(performance.now() / 1000 * 2) * 0.008;
+  m.body.rotation.x = lerp(m.body.rotation.x, k * 0.12, damp(0.001, dt));
+  m.head.rotation.x = 0;
+  P.spin.rotation.y = lerp(P.spin.rotation.y, 0, damp(0.0001, dt));
+}
+function swingPose(s, T, tA, tB, tC) {
+  const m = P.model, st = s.step;
+  const L = st.swing === 'left' ? -1 : 1;
+  let yaw, pitch = -1.45;
+  if (T < tA) { const k = smooth(T / tA); yaw = lerp(0, 1.5 * L, k); pitch = lerp(-0.4, -1.7, k); }
+  else if (T < tB) { const k = (T - tA) / (tB - tA); yaw = lerp(1.5 * L, -1.4 * L, smooth(k)); }
+  else { const k = smooth(Math.min(1, (T - tB) / (tC - tB))); yaw = lerp(-1.4 * L, -0.3 * L, k); pitch = lerp(-1.45, -0.6, k); }
+  if (st.swing === 'spin') {
+    yaw = T < tA ? lerp(0, 1.2, T / tA) : -0.4;
+    pitch = T < tB ? -1.5 : lerp(-1.5, -0.5, Math.min(1, (T - tB) / (tC - tB)));
+    P.spin.rotation.y = T < tA ? lerp(0, 0.5, T / tA) : T < tB ? lerp(0.5, -TAU + 0.5, smooth((T - tA) / (tB - tA))) : lerp(-TAU + 0.5, -TAU, Math.min(1, (T - tB) / 0.1));
+    if (T >= tC - 0.01) P.spin.rotation.y = 0;
+  }
+  m.armR.rotation.set(pitch, yaw * 0.55, 0);
+  m.torso.rotation.y = yaw * 0.32;
+  m.armL.rotation.set(-0.5, -yaw * 0.2, 0);
+  m.legL.rotation.x = 0.35; m.legR.rotation.x = -0.25;
+  m.body.rotation.x = T < tB ? 0.18 : 0.1;
+  m.body.position.y = -0.5 - (T < tB ? 0.06 : 0.03);
+}
+
+// the swing connects: everything inside the arc takes the hit, once
+function meleeHits(s) {
+  const st = s.step;
+  const half = (st.arc / 2) * Math.PI / 180;
+  const faceA = Math.atan2(s.dir.x, s.dir.z);
+  let any = false;
+  for (const d of world.dummies) {
+    const dx = d.x - P.x, dz = d.z - P.z, dist = Math.hypot(dx, dz);
+    if (dist > st.range + d.r) continue;
+    const da = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - faceA), Math.cos(Math.atan2(dx, dz) - faceA)));
+    if (da > half + 0.25) continue;
+    any = true;
+    hitDummy(d, dx / (dist || 1), dz / (dist || 1), st.dmg, st.heavy, WEAPONS.skyblade.knock);
+  }
+  if (any) { stop = st.heavy ? CONFIG.feel.hitStop * 2 : CONFIG.feel.hitStop; shake(st.heavy ? 0.5 : 0.28); }
+}
+
+const tmpV = new V3();
+function hitDummy(d, nx, nz, dmg, heavy, knock) {
+  d.vel.x += nx * knock * (heavy ? 1.8 : 1); d.vel.y += nz * knock * (heavy ? 1.8 : 1);
+  d.flashT = 1;
+  d.hits++;
+  const hx = d.x - nx * 0.25, hz = d.z - nz * 0.25, hy = d.root.position.y + 0.95;
+  // sparks of skyglass and chips of straw and wood
+  for (let i = 0; i < (heavy ? 22 : 12); i++) {
+    const a = Math.atan2(nx, nz) + (Math.random() - 0.5) * 2.2, sp = 2 + Math.random() * 5;
+    sparks.spawn({ x: hx, y: hy, z: hz, vx: Math.sin(a) * sp, vy: (Math.random() - 0.2) * 4, vz: Math.cos(a) * sp, drag: 4, grav: 4, life: 0.35 + Math.random() * 0.3, size: 0.14, color: i % 3 ? '#bff6ff' : '#ffffff', glow: 3 });
+  }
+  for (let i = 0; i < (heavy ? 9 : 5); i++) {
+    const a = Math.atan2(nx, nz) + (Math.random() - 0.5) * 1.6, sp = 1.5 + Math.random() * 3;
+    bits.spawn({ x: hx, y: hy, z: hz, vx: Math.sin(a) * sp, vy: 2 + Math.random() * 3, vz: Math.cos(a) * sp, life: 1.2, size: 0.06 + Math.random() * 0.06, color: Math.random() < 0.5 ? '#c8b28a' : '#9b7b5c', floor: d.root.position.y });
+  }
+  sound.sfx('hit', heavy ? 1.2 : 1); sound.sfx('wood', 0.8);
+  tmpV.set(d.x, hy + 0.6, d.z).project(camera);
+  ui.number(String(dmg), (tmpV.x + 1) / 2 * innerWidth, (1 - tmpV.y) / 2 * innerHeight, heavy);
+  if (d.hits === 3) ui.showHint('roll', TEXT.hintRoll);
+}
+
+// the sling: bright drops of sea water that fly, sag and splash
+const dropGeo = new THREE.BoxGeometry(1, 1, 1);
+const dropMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#7fe8ff').multiplyScalar(2.2) });
+function fire(dir) {
+  const S = WEAPONS.tidesling;
+  const m = new THREE.Mesh(dropGeo, dropMat);
+  m.scale.setScalar(S.size * 1.4);
+  const ox = P.x + dir.x * 0.45 - dir.z * 0.12, oz = P.z + dir.z * 0.45 + dir.x * 0.12;
+  m.position.set(ox, P.y + 0.95, oz);
+  scene.add(m);
+  projectiles.push({ m, x: ox, y: P.y + 0.95, z: oz, vx: dir.x * S.speed, vz: dir.z * S.speed, vy: 0.6, dist: 0, S });
+  sound.sfx('sling');
+  P.model.armL.rotation.x = -1.7;
+}
+function updateProjectiles(dt) {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i], S = p.S;
+    const dx = p.vx * dt, dz = p.vz * dt;
+    p.x += dx; p.z += dz; p.dist += Math.hypot(dx, dz);
+    // flat at first, then the drop sags and falls, like a tear in Isaac
+    if (p.dist > S.range * 0.65) p.vy -= 22 * dt; else p.vy -= 1.5 * dt;
+    p.y += p.vy * dt;
+    p.m.position.set(p.x, p.y, p.z);
+    p.m.rotation.set(p.dist * 3, p.dist * 2, 0);
+    if (Math.random() < 0.8) sparks.spawn({ x: p.x, y: p.y, z: p.z, life: 0.25, size: 0.12, color: '#7fe8ff', glow: 1.6, drag: 6 });
+    let done = false, hitD = null;
+    for (const d of world.dummies) if (Math.hypot(d.x - p.x, d.z - p.z) < d.r + S.size && p.y < d.root.position.y + 1.6) { hitD = d; break; }
+    const gy = world.groundAt(p.x, p.z);
+    if (hitD) {
+      const l = Math.hypot(p.vx, p.vz) || 1;
+      hitDummy(hitD, p.vx / l, p.vz / l, S.dmg, false, S.knock);
+      stop = Math.max(stop, 0.02);
+      done = true;
+    } else if (p.y <= Math.max(gy, 0) + 0.05 || world.solids.some((s) => !s.dummy && Math.hypot(s.x - p.x, s.z - p.z) < s.r && p.y < gy + 2)) done = true;
+    if (done) {
+      splash(p.x, Math.max(gy, -0.05) + 0.05, p.z, !!hitD);
+      scene.remove(p.m);
+      projectiles.splice(i, 1);
+    }
+  }
+}
+function splash(x, y, z, big) {
+  for (let i = 0; i < (big ? 14 : 9); i++) {
+    const a = Math.random() * TAU, sp = 1 + Math.random() * 2.5;
+    sparks.spawn({ x, y: y + 0.1, z, vx: Math.cos(a) * sp, vy: 2 + Math.random() * 2.5, vz: Math.sin(a) * sp, grav: 9, drag: 1.5, life: 0.5, size: 0.13, color: i % 2 ? '#bff6ff' : '#7fe8ff', glow: 2 });
+  }
+  sound.sfx('splash', big ? 1 : 0.6);
+}
+function dust(x, y, z, n, k = 1) {
+  const sand = world.groundAt(x, z) < 1;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU, sp = (0.6 + Math.random()) * k;
+    bits.spawn({ x: x + Math.cos(a) * 0.2, y: y + 0.08, z: z + Math.sin(a) * 0.2, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 1.5 * k, vz: Math.sin(a) * sp, life: 0.5 + Math.random() * 0.3, size: 0.05 + Math.random() * 0.05, color: sand ? '#e5cf9b' : '#a8c27a', floor: y });
+  }
+}
+
+// the dummies wobble back upright on a spring
+function updateDummies(dt) {
+  for (const d of world.dummies) {
+    const k = 60, c = 6;
+    d.vel.x += (-k * d.tilt.x - c * d.vel.x) * dt;
+    d.vel.y += (-k * d.tilt.y - c * d.vel.y) * dt;
+    d.tilt.x += d.vel.x * dt; d.tilt.y += d.vel.y * dt;
+    d.tilt.x = clamp(d.tilt.x, -0.6, 0.6); d.tilt.y = clamp(d.tilt.y, -0.6, 0.6);
+    // tilt is in world x/z: lean away from the hit
+    const ry = d.root.rotation.y, cs = Math.cos(-ry), sn = Math.sin(-ry);
+    const lx = d.tilt.x * cs - d.tilt.y * sn, lz = d.tilt.x * sn + d.tilt.y * cs;
+    d.wob.rotation.set(lz * 0.5, 0, -lx * 0.5);
+    d.head.rotation.x = -lz * 0.4;
+    d.flashT = Math.max(0, (d.flashT || 0) - dt * 7);
+    d.flash(d.flashT);
+  }
+}
+
+// glowing arcs fade out on their own
+const slashes = [];
+function updateSlashes(dt) {
+  for (let i = slashes.length - 1; i >= 0; i--) {
+    const s = slashes[i];
+    s.t += dt;
+    s.mesh.material.uniforms.uT.value = s.t / 0.28;
+    s.mesh.position.set(P.x, P.y + 0.75, P.z);
+    if (s.t > 0.28) { scene.remove(s.mesh); s.mesh.material.dispose(); slashes.splice(i, 1); }
+  }
+}
+
+// the aim marker: a soft chevron on the ground while you aim
+const aimMark = (() => {
+  const b = new Batch(1);
+  for (let i = 0; i < 3; i++) {
+    b.box(0.08, 0.02, 0.32, '#9ff3ff', 0.12, 0, 1.0 + i * 0.32, { rotY: 0.7, glow: 1.4 - i * 0.35, jitter: 0, ao: 1 });
+    b.box(0.08, 0.02, 0.32, '#9ff3ff', -0.12, 0, 1.0 + i * 0.32, { rotY: -0.7, glow: 1.4 - i * 0.35, jitter: 0, ao: 1 });
+  }
+  const m = b.mesh(MAT.glowAdd);
+  m.castShadow = false; m.receiveShadow = false; m.matrixAutoUpdate = true;
+  m.visible = false;
+  return m;
+})();
+
+// ===========================================================================
+// Camera: the PixelPups angle, following with a little lead, plus shake and the opening shot
+// ===========================================================================
+const camLook = new V3(), camPos = new V3();
+let intro = null;
+function shake(k) { if (prefs.shake) trauma = Math.min(1, trauma + k); }
+function gameplayCam(out, outLook) {
+  const C = CONFIG.camera;
+  const lead = Math.min(1, Math.hypot(P.vx, P.vz) / CONFIG.player.speed) * C.lookAhead;
+  const vx = P.vx, vz = P.vz, vl = Math.hypot(vx, vz) || 1;
+  outLook.set(P.x + (vx / vl) * lead, P.y + 0.6, P.z + (vz / vl) * lead);
+  const portrait = clamp(0.85 / camera.aspect, 1, 1.55);
+  const dist = C.dist * ui.input.zoom * portrait;
+  out.copy(outLook).addScaledVector(camDir, dist);
+}
+const wantPos = new V3(), wantLook = new V3();
+function updateCamera(dt, t) {
+  gameplayCam(wantPos, wantLook);
+  if (intro) {
+    if (started) intro.t += dt;
+    const T = intro.t;
+    // looking up at the crack in the sky, then down to the cove and the apprentice
+    const k = smooth(clamp((T - 2.2) / 4.2, 0, 1));
+    const startPos = tmpV.set(P.x - 4, P.y + 2.2, P.z + 9);
+    const startLook = new V3().copy(startPos).addScaledVector(world.crackDir, 50);
+    camPos.lerpVectors(startPos, wantPos, k);
+    camLook.lerpVectors(startLook, wantLook, smooth(k));
+    camPos.y += Math.sin(k * Math.PI) * 4;
+    if (T > 3.2 && !intro.card) { intro.card = true; const pl = PLACES.cove; ui.titleCard(pl.name, pl.region, pl.line); }
+    // any touch or key after the first moment skips ahead
+    if (started && (T > 6.6 || (ui.input.any && T > 0.8))) {
+      if (!intro.card) { const pl = PLACES.cove; ui.titleCard(pl.name, pl.region, pl.line); }
+      intro = null;
+      ui.show(true);
+      ui.showHint('move', TEXT.hintMove);
+    }
+  } else {
+    const k = damp(CONFIG.camera.follow, dt);
+    camLook.lerp(wantLook, k);
+    camPos.lerp(wantPos, damp(0.002, dt));
+  }
+  camera.position.copy(camPos);
+  if (window.RF && RF.view) { camera.position.set(...RF.view.pos); camera.lookAt(...RF.view.look); return; }
+  // shake: strong and short, decays fast
+  if (trauma > 0) {
+    const s = trauma * trauma * 0.35;
+    camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; camera.position.z += (Math.random() - 0.5) * s;
+    trauma = Math.max(0, trauma - dt * 2.8);
+  }
+  camera.lookAt(camLook);
+  // the sun's shadow box follows you (snapped to texels so edges don't shimmer)
+  const span = 20, step = (span * 2) / (sun.shadow.mapSize.x || 1024);
+  const fx = Math.round(camLook.x / step) * step, fz = Math.round(camLook.z / step) * step;
+  sun.target.position.set(fx, 0, fz);
+  sun.position.set(fx, 0, fz).addScaledVector(world.sunDir, 50);
+  const S = sun.shadow.camera;
+  if (S.right !== span) { S.left = -span; S.right = span; S.top = span; S.bottom = -span; S.near = 1; S.far = 120; S.updateProjectionMatrix(); }
+}
+
+// ===========================================================================
+// Main loop
+// ===========================================================================
+let last = performance.now(), time = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (paused) { post.render(); return; }
+  time += dt;
+  ui.keyFrame();
+  watchFrames(dt);
+  // hit-stop: the action freezes for a few frames, effects keep moving
+  let simDt = dt;
+  if (stop > 0) { stop -= dt; simDt = dt * 0.04; }
+  if (started && !intro) {
+    updatePlayer(simDt);
+    updateProjectiles(simDt);
+  } else {
+    walkPose(dt, 0);
+    P.model.root.position.set(P.x, P.y, P.z);
+    P.model.root.rotation.y = P.face;
+  }
+  updateDummies(simDt);
+  updateSlashes(simDt);
+  // aim marker
+  const I = ui.input, aiming = started && !intro && (I.attack.aim.active || I.ranged.aim.active || I.ranged.down);
+  aimMark.visible = aiming;
+  if (aiming) {
+    const d = aimFor(I.ranged.down || I.ranged.aim.active ? I.ranged : I.attack, 9);
+    aimMark.position.set(P.x, P.y + 0.06, P.z);
+    aimMark.rotation.y = Math.atan2(d.x, d.z);
+  }
+  // hint when you first reach the training ground
+  if (started && !intro && Math.hypot(P.x - world.dummies[1].x, P.z - world.dummies[1].z) < 6) ui.showHint('attack', TEXT.hintAttack, 7000);
+  world.update(dt, time, P);
+  sparks.update(dt);
+  bits.update(dt);
+  updateCamera(dt, time);
+  post.final.uniforms.flash.value = flashT = Math.max(0, flashT - dt * 3);
+  ui.setHearts(P.hp, P.maxHp);
+  sound.update();
+  post.render();
+}
+
+// ===========================================================================
+// Start
+// ===========================================================================
+try {
+  world = buildCove(scene);
+  world.crackDir = new V3(0.25, 0.62, -0.75).normalize();
+  sparks = createSparks(scene, 700);
+  bits = createBits(scene, 320);
+  world.fx.sparks = sparks;
+  scene.add(aimMark);
+  ui = createUI({
+    canvas, prefs,
+    isPaused: () => paused,
+    isStarted: () => started,
+    onPause: () => { paused = true; sound.suspend(true); },
+    onResume: () => { paused = false; last = performance.now(); sound.suspend(false); },
+    onPrefs: () => { applyQuality(); sound.volumes(); },
+    onLocked: () => { sound.sfx('deny'); ui.toast('Abilities awaken later in the Prologue'); },
+    sfx: (n) => sound.sfx(n),
+  });
+  setupPlayer();
+  applyQuality();
+  // first frame of the opening shot, drawn behind the loading veil
+  intro = { t: 0, skippable: false };
+  gameplayCam(wantPos, wantLook);
+  camPos.copy(wantPos); camLook.copy(wantLook);
+  scene.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+  ui.setHearts(P.hp, P.maxHp);
+  requestAnimationFrame(frame);
+  loadingDone(() => {
+    sound.init();
+    // iPhones only let sound start on a finished tap, so try again when the finger lifts
+    const unlock = () => sound.init();
+    addEventListener('touchend', unlock, { once: true });
+    addEventListener('click', unlock, { once: true });
+    sound.sfx('riftfall');
+    started = true;
+    intro = { t: 0, skippable: false };
+    ui.input.any = false;
+  });
+  if (/[?&]debug/.test(location.search)) window.RF = { P, world, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; } };
+} catch (e) {
+  console.error(e);
+  loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));
+}

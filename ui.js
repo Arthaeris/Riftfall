@@ -28,16 +28,44 @@ const ICON = {
   spark: '<svg viewBox="0 0 48 48"><path d="M24 5l4 14 14 5-14 5-4 14-4-14-14-5 14-5z" fill="currentColor"/></svg>',
   lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5" fill="currentColor"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2.4" fill="none"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/></svg>',
-  heart: '<svg viewBox="0 0 24 22"><path d="M12 21C5 16 1 12.3 1 7.4 1 3.9 3.7 1 7.1 1c2 0 3.8 1 4.9 2.7C13.1 2 14.9 1 16.9 1 20.3 1 23 3.9 23 7.4 23 12.3 19 16 12 21z" class="hb"/><path d="M12 21C5 16 1 12.3 1 7.4 1 3.9 3.7 1 7.1 1c2 0 3.8 1 4.9 2.7V21z" class="hl"/><path d="M12 21V3.7C13.1 2 14.9 1 16.9 1 20.3 1 23 3.9 23 7.4 23 12.3 19 16 12 21z" class="hr"/><path d="M5.5 5.5c.8-1 2-1.4 3-1.2" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg>',
 };
+
+// A voxel heart: a little pixel heart where every pixel is a block with a lit top edge and a shaded side.
+// state: 2 = full, 1 = half, 0 = empty
+const HEART_PX = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
+function voxelHeart(state) {
+  const S = 4, D = 1.6;   // block size and depth of the shaded side (px in the 34 x 30 box)
+  let side = '', face = '', hi = '';
+  HEART_PX.forEach((row, y) => [...row].forEach((ch, x) => {
+    if (ch !== 'X') return;
+    const full = state === 2 || (state === 1 && x <= 3);
+    const px = 2 + x * S, py = 2 + y * S;
+    side += `<rect x="${px + D}" y="${py + D}" width="${S}" height="${S}" fill="${full ? '#8e1f3c' : 'rgba(10,6,24,.55)'}"/>`;
+    face += `<rect x="${px}" y="${py}" width="${S}" height="${S}" fill="${full ? (y < 2 ? '#ff5a68' : y < 4 ? '#f2404f' : '#d93347') : 'rgba(40,30,70,.6)'}"/>`;
+    // a lit top edge on each block, a little highlight in the upper left
+    if (full) hi += `<rect x="${px}" y="${py}" width="${S}" height="1" fill="rgba(255,210,215,.55)"/>`;
+    if (full && ((x === 1 && y === 1) || (x === 1 && y === 0) || (x === 2 && y === 1))) hi += `<rect x="${px + 0.6}" y="${py + 0.6}" width="${S - 1.4}" height="${S - 1.4}" fill="#ffc2c8"/>`;
+  }));
+  const outline = state ? '' : HEART_PX.map((row, y) => [...row].map((ch, x) => ch === 'X' ? `<rect x="${2 + x * S}" y="${2 + y * S}" width="${S}" height="${S}" fill="none" stroke="rgba(255,255,255,.22)" stroke-width=".5"/>` : '').join('')).join('');
+  return `<svg viewBox="0 0 34 30" shape-rendering="crispEdges">${side}${face}${hi}${outline}</svg>`;
+}
 
 // ---------------------------------------------------------------------------
 // The UI
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 export function createUI(opts) {
   const prefs = opts.prefs;
   const root = $('#ui');
   root.innerHTML = '';
+
+  // Riftfall is played sideways: holding the phone upright shows a gentle reminder (and pauses)
+  if (!$('.rotate')) {
+    document.body.appendChild(el('div', 'rotate', '<div class="rotBox"><div class="rotPhone"><i></i></div><div class="rotTitle">Turn your phone sideways</div><div class="rotSub">Riftfall is played in landscape.</div></div>'));
+  }
+  const portrait = matchMedia('(orientation: portrait) and (pointer: coarse)');
+  const onTurn = () => { if (portrait.matches && opts.isStarted()) pause(); };
+  if (portrait.addEventListener) portrait.addEventListener('change', onTurn); else portrait.addListener(onTurn);
 
   // shared input state, read by the game every frame
   const input = {
@@ -70,7 +98,7 @@ export function createUI(opts) {
   const bAttack = mkBtn('attack', ICON.sword, 'Attack');
   const bRanged = mkBtn('ranged', ICON.sling, 'Sling');
   const bRoll = mkBtn('roll', ICON.roll, 'Roll');
-  const bAbility = mkBtn('ability locked', ICON.spark + `<i class="lk">${ICON.lock}</i>`, 'Ability (locked)');
+  const bAbility = mkBtn('ability hidden', ICON.spark, 'Ability');   // appears once an ability is unlocked
   root.appendChild(pad);
   const joy = el('div', 'joy', '<div class="knob"></div>');
   root.appendChild(joy);
@@ -131,6 +159,9 @@ export function createUI(opts) {
       return;
     }
     const others = [...touches.values()].filter((t) => t.kind === 'joy');
+    // the right side belongs to the buttons: a thumb landing there doesn't start the joystick
+    const buttonSide = prefs.lefty ? e.clientX < innerWidth * 0.4 : e.clientX > innerWidth * 0.6;
+    if (!others.length && buttonSide) return;
     if (others.length === 1) {
       // a second finger on the field: pinch to zoom
       const a = others[0];
@@ -227,7 +258,7 @@ export function createUI(opts) {
     hearts.innerHTML = '';
     for (let i = 0; i < max / 2; i++) {
       const v = Math.max(0, Math.min(2, hp - i * 2));
-      const h = el('i', 'heart ' + (v === 2 ? 'full' : v === 1 ? 'half' : 'empty'), ICON.heart);
+      const h = el('i', 'heart ' + (v === 2 ? 'full' : v === 1 ? 'half' : 'empty'), voxelHeart(v));
       hearts.appendChild(h);
     }
   }
@@ -305,7 +336,7 @@ export function createUI(opts) {
         <p><b>Move</b> — drag anywhere on the left. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
         <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
       </details>
-      <div class="foot">Riftfall v${VERSION} · Prologue, round 1</div>
+      <div class="foot">Riftfall v${VERSION} · Prologue, round 1.1</div>
     </div>`;
   root.appendChild(sheet);
   function syncSheet() {

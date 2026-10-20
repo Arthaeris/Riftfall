@@ -87,7 +87,7 @@ export function buildCove(scene) {
       for (let a = -w; a <= w; a++) for (let b = -w; b <= w; b++) if (Math.abs(a) + Math.abs(b) <= w) pathCells.add(Math.floor(x + a) + ',' + Math.floor(z + b));
     }
   };
-  paint(-3, -6, -4, -2, 1); paint(-4, -2, 0, 2, 1); paint(0, 2, 4, 3, 0); paint(-4, -2, -8, -2, 0);
+  paint(-3, -6, -4, -2, 1); paint(-4, -2, 0, 2, 1); paint(0, 2, 4, 3, 0); paint(-4, -2, -6.4, 2, 0);
   paint(-3, -13, 0, -14, 1); paint(0, -14, 9, -15, 0); paint(9, -15, 19, -14, 0);
   paint(4, 2, 8, 3, 0);
   for (const key of pathCells) {
@@ -152,6 +152,8 @@ export function buildCove(scene) {
   const take = (x, z, rad = 1) => { for (let a = -rad; a <= rad; a++) for (let c = -rad; c <= rad; c++) occupied.add(Math.floor(x + a) + ',' + Math.floor(z + c)); };
   const free = (x, z) => !occupied.has(Math.floor(x) + ',' + Math.floor(z)) && !pathCells.has(Math.floor(x) + ',' + Math.floor(z)) && !stairMap.has(Math.floor(x) + ',' + Math.floor(z));
   const kindAt = (x, z) => kAt(Math.floor(x) - H0, Math.floor(z) - H0);
+  // trees and rocks keep their distance from paths, stairs and doors, so the ways through stay open
+  const nearWay = (x, z, rad) => { for (let a = -rad; a <= rad; a++) for (let c = -rad; c <= rad; c++) { const k = Math.floor(x + a) + ',' + Math.floor(z + c); if (pathCells.has(k) || stairMap.has(k)) return true; } return false; };
   const flatAround = (x, z, rad) => { const h = cellH(x, z); for (let a = -rad; a <= rad; a++) for (let c = -rad; c <= rad; c++) if (cellH(x + a, z + c) !== h) return false; return true; };
 
   // landmarks first
@@ -161,6 +163,7 @@ export function buildCove(scene) {
   const cotX = 1.5, cotZ = -16.5, cotY = cellH(cotX, cotZ);
   PROPS.cottage(b, g, cotX, cotY, cotZ, 0);
   boxes.push({ x0: cotX - 2.3, z0: cotZ - 1.9, x1: cotX + 2.3, z1: cotZ + 1.9 }); take(cotX, cotZ, 3);
+  take(cotX - 0.6, cotZ + 4, 2);   // keep the way to the door clear
   // a little garden fence, a woodpile and a bench by the cottage
   PROPS.fence(b, cotX - 3.2, cotZ + 2.6, cotX - 3.2, cotZ - 2, cotY, cotY);
   for (let k = 0; k < 6; k++) b.box(0.9, 0.22, 0.24, k % 2 ? '#9a6b45' : '#8a5e3c', cotX + 3.0, cotY + 0.12 + Math.floor(k / 2) * 0.24, cotZ - 0.6 + (k % 2) * 0.26);
@@ -178,10 +181,10 @@ export function buildCove(scene) {
   for (const [x, z, rot] of lanterns) { PROPS.lanternPost(b, g, x, cellH(x, z), z, rot); solids.push({ x, z, r: 0.2 }); take(x, z, 0); }
 
   // the old training ground: a ring of fence posts, a weapon rack and three practice dummies
-  const tgX = -7.5, tgZ = -2.5, tgY = cellH(tgX, tgZ);
-  // a ring of fence around it, open toward the south-east where the path comes in
+  const tgX = -11, tgZ = 2, tgY = cellH(tgX, tgZ);
+  // a ring of fence around it, open toward the east where the path comes in
   const ring = [];
-  for (let k = 0; k <= 16; k++) { const a = 1.75 + (k / 16) * (TAU - 0.95); ring.push([tgX + Math.cos(a) * 4.6, tgZ + Math.sin(a) * 4.6]); }
+  for (let k = 0; k <= 16; k++) { const a = 0.55 + (k / 16) * (TAU - 1.1); ring.push([tgX + Math.cos(a) * 4.4, tgZ + Math.sin(a) * 4.4]); }
   for (let k = 0; k < ring.length - 1; k++) {
     const [x0, z0] = ring[k], [x1, z1] = ring[k + 1];
     PROPS.fence(b, x0, z0, x1, z1, cellH(x0, z0), cellH(x1, z1));
@@ -276,18 +279,20 @@ export function buildCove(scene) {
     }
     if (kind === 'grass') {
       const forest = fbm(x * 0.11 + 40, z * 0.11) > 0.55 || x < -14 || z < -21 || (h >= 4 && Math.abs(x - 6) > 12);
-      if (roll < (forest ? 0.12 : 0.025) && flatAround(x, z, 0)) {
+      if (roll < (forest ? 0.12 : 0.025) && flatAround(x, z, 1) && !nearWay(x, z, 2)) {
+        // trees are solid out to their foliage, so you never stand inside a canopy
         const pine = z < -10 || x < -14 || r() < 0.3;
-        if (pine) PROPS.pine(b, x, h, z, r, 0.85 + r() * 0.5); else PROPS.roundTree(b, x, h, z, r, 0.8 + r() * 0.4);
-        solids.push({ x, z, r: 0.42 }); take(x, z, 1);
+        const s = pine ? 0.85 + r() * 0.5 : 0.8 + r() * 0.4;
+        if (pine) PROPS.pine(b, x, h, z, r, s); else PROPS.roundTree(b, x, h, z, r, s);
+        solids.push({ x, z, r: (pine ? 0.82 : 0.78) * s }); take(x, z, 1);
         continue;
       }
       if (roll < 0.16) { PROPS.flowers(b, x, h, z, r); }
-      else if (roll < 0.18) { PROPS.rock(b, x + (r() - 0.5) * 0.3, h, z, r, 0.45 + r() * 0.3); solids.push({ x, z, r: 0.35 }); take(x, z, 0); continue; }
+      else if (roll < 0.18 && !nearWay(x, z, 1)) { PROPS.rock(b, x + (r() - 0.5) * 0.3, h, z, r, 0.45 + r() * 0.3); solids.push({ x, z, r: 0.35 }); take(x, z, 0); continue; }
       const n = 1 + Math.floor(r() * 3);
       for (let k = 0; k < n; k++) grassSpots.push({ x: x + (r() - 0.5) * 0.9, y: h, z: z + (r() - 0.5) * 0.9, rot: r() * TAU, s: 0.7 + r() * 0.6, c: pick(['#62a447', '#6fb04f', '#57933f', '#7cb85a', '#8cbf5e'], r) });
     } else if (kind === 'stone') {
-      if (roll < 0.07 && flatAround(x, z, 0)) { PROPS.rock(b, x, h, z, r, 0.6 + r() * 0.6); solids.push({ x, z, r: 0.5 }); take(x, z, 0); }
+      if (roll < 0.07 && flatAround(x, z, 0) && !nearWay(x, z, 1)) { PROPS.rock(b, x, h, z, r, 0.6 + r() * 0.6); solids.push({ x, z, r: 0.5 }); take(x, z, 0); }
       else if (roll < 0.11) b.box(0.4, 0.1, 0.4, '#6f9a4a', x + (r() - 0.5) * 0.5, h + 0.05, z + (r() - 0.5) * 0.5, { jitter: 0.15 });
     } else if (kind === 'sand') {
       if (roll < 0.04) PROPS.shell(b, x + (r() - 0.5) * 0.6, h, z + (r() - 0.5) * 0.6, r);
@@ -448,7 +453,7 @@ export function buildCove(scene) {
     for (const gl of gulls) {
       const a = t * gl.sp + gl.ph;
       gl.grp.position.set(gl.cx + Math.cos(a) * gl.rad, gl.y + Math.sin(a * 2.3) * 0.5, gl.cz + Math.sin(a) * gl.rad);
-      gl.grp.rotation.y = -a + Math.PI;
+      gl.grp.rotation.y = -a;   // heading along the circle (the model's beak points along +z)
       gl.grp.rotation.z = -0.25;
       const flap = Math.sin(t * 7 + gl.ph) * (Math.sin(a * 0.7) > 0.3 ? 0.7 : 0.08);
       for (const w of gl.wings) w.p.rotation.z = w.s * flap;

@@ -91,6 +91,9 @@ export function createUI(opts) {
   const hud = el('div', 'hud');
   const hearts = el('div', 'hearts');
   hud.appendChild(hearts);
+  // Skyglass slivers you've gathered: a small voxel shard and a number, shown once you have any
+  const shards = el('div', 'shards hidden', '<i class="sIc"><svg viewBox="0 0 12 18" shape-rendering="crispEdges"><rect x="4" y="0" width="4" height="3" fill="#e6fdff"/><rect x="2" y="3" width="8" height="10" fill="#9ff3ff"/><rect x="4" y="13" width="4" height="4" fill="#5fd6ec"/><rect x="2" y="3" width="3" height="6" fill="#e6fdff"/><rect x="8" y="5" width="2" height="8" fill="#3fb5d0"/></svg></i><b>0</b>');
+  hud.appendChild(shards);
   const pauseBtn = el('button', 'pauseBtn glass', ICON.pause);
   pauseBtn.setAttribute('aria-label', 'Pause');
   hud.appendChild(pauseBtn);
@@ -296,6 +299,16 @@ export function createUI(opts) {
     }
   }
 
+  let shown = -1;
+  function setShards(n, gained) {
+    if (n === shown && !gained) return;
+    shown = n;
+    shards.classList.toggle('hidden', n <= 0);
+    shards.querySelector('b').textContent = n;
+    if (gained) { shards.classList.remove('gain'); void shards.offsetWidth; shards.classList.add('gain'); }
+  }
+  function hurt() { hearts.classList.remove('hurt'); void hearts.offsetWidth; hearts.classList.add('hurt'); }
+
   // ----- hints: small, once, then gone -----
   let hintKey = null, hintT = null;
   function showHint(key, text, ms = 5200) {
@@ -369,7 +382,7 @@ export function createUI(opts) {
         <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
         <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
       </details>
-      <div class="foot">Riftfall v${VERSION} · Prologue, round 1.2</div>
+      <div class="foot">Riftfall v${VERSION} · Prologue, round 2</div>
     </div>`;
   root.appendChild(sheet);
   function syncSheet() {
@@ -422,7 +435,7 @@ export function createUI(opts) {
   }
 
   return {
-    input, setHearts, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
+    input, setHearts, setShards, hurt, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

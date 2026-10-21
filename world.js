@@ -21,6 +21,8 @@ function plateauEdge(x) { return -9.5 + (fbm(x * 0.15, 4.2) - 0.5) * 4; }
 const STAIRS = [];                                   // cells of the stair path, with their height
 for (let k = 0; k <= 6; k++) for (let w = -1; w <= 1; w++) STAIRS.push({ x: -3 + w, z: -6 - k, h: 1.5 + k * 0.5 });
 const stairMap = new Map(STAIRS.map((s) => [s.x + ',' + s.z, s.h]));
+// the Seep: a round clearing in the southern meadow where the fallen shard lies
+export const SEEP_AT = { x: -4, z: 12, r: 6.2, h: 1 };
 
 function cellInfo(cx, cz) {
   // cx, cz: the integer cell corner (world units)
@@ -29,6 +31,9 @@ function cellInfo(cx, cz) {
   const st = stairMap.get(cx + ',' + cz);
   let h, kind;
   if (st !== undefined) return { h: st, kind: 'path' };
+  // the Seep's clearing is level ground, ringed by a worn circle of stones
+  const ds = Math.hypot(x - SEEP_AT.x, z - SEEP_AT.z);
+  if (ds < SEEP_AT.r + 1.6) return { h: SEEP_AT.h, kind: Math.abs(ds - SEEP_AT.r) < 0.6 ? 'path' : ds < 1.8 ? 'seep' : 'grass' };
   const edge = plateauEdge(x);
   const west = -x - 19 + (fbm(z * 0.13, 9) - 0.5) * 5;  // > 0 in the western hills
   if (s >= 0.8) {
@@ -90,6 +95,7 @@ export function buildCove(scene) {
   paint(-3, -6, -4, -2, 1); paint(-4, -2, 0, 2, 1); paint(0, 2, 4, 3, 0); paint(-4, -2, -6.4, 2, 0);
   paint(-3, -13, 0, -14, 1); paint(0, -14, 9, -15, 0); paint(9, -15, 19, -14, 0);
   paint(4, 2, 8, 3, 0);
+  paint(0, 2, -1.5, 6.4, 0);
   for (const key of pathCells) {
     const [x, z] = key.split(',').map(Number);
     const i = x - H0, j = z - H0;
@@ -108,6 +114,7 @@ export function buildCove(scene) {
       case 'sand': return PALETTE.sand[Math.floor(nn * 4) % 4];
       case 'stone': return PALETTE.stone[Math.floor(nn * 3) % 3];
       case 'path': return PALETTE.path[Math.floor(nn * 3) % 3];
+      case 'seep': return ['#7fb7a6', '#86c2b2', '#78ad9e'][Math.floor(nn * 3) % 3];   // grass going glassy around the shard
       default: return PALETTE.grass[Math.floor((nn * 0.7 + hashJ(i, j) * 0.3) * 4) % 4];
     }
   };
@@ -260,7 +267,8 @@ export function buildCove(scene) {
   take(fire.x, fire.z, 2);
 
   // a fallen shard of sky by the water's edge, still humming
-  const shard = { x: 14.5, z: 1.2 };
+  const shard = { x: SEEP_AT.x, z: SEEP_AT.z };
+  take(SEEP_AT.x, SEEP_AT.z, Math.ceil(SEEP_AT.r + 1));   // nothing grows or stands inside the clearing
   shard.y = cellH(shard.x, shard.z);
   PROPS.skyglassShard(b, g, shard.x, shard.y, shard.z, r, 1.1);
   solids.push({ x: shard.x, z: shard.z, r: 0.75 });
@@ -514,6 +522,7 @@ export function buildCove(scene) {
   }
 
   const fx = { sparks: null };
+  let seepPower = 1;   // how awake the shard is: 0 = spent, 1 = calm, 2 = the Seep is open
   function update(dt, t, player) {
     SKY_UNIFORMS.uTime.value = t;
     WIND.uTime.value = t;
@@ -521,7 +530,7 @@ export function buildCove(scene) {
     beam.rotation.y = t * 0.45;
     lampLight.intensity = 30 + Math.sin(t * 2.3) * 2;
     windowLight.intensity = 7 + Math.sin(t * 9) * 0.4 + Math.sin(t * 13.7) * 0.3;   // a candle-ish flicker
-    shardLight.intensity = 9 + Math.sin(t * 1.3) * 2.5;
+    shardLight.intensity = (9 + Math.sin(t * 1.3) * 2.5) * (0.35 + seepPower * 0.45);
     for (const l of lanternLights) l.intensity = 5 + Math.sin(t * 7 + l.position.x) * 0.25;
     fireLight.intensity = 7 + Math.sin(t * 11) * 0.8 + Math.sin(t * 17.3) * 0.55 + Math.sin(t * 5.1) * 0.4;
     boat.position.y = 0.02 + Math.sin(t * 1.2) * 0.06;
@@ -580,6 +589,7 @@ export function buildCove(scene) {
   const spawn = { x: 8.0, z: 1.2 };
   spawn.y = groundAt(spawn.x, spawn.z);
   return {
+    seep: SEEP_AT, setSeepPower: (k) => { seepPower = k; },
     name: 'cove', groundAt, walkable, terrainOk, solidAt, findPath, clearLine, update, fx, dummies, solids, spawn, shard,
     debugMap: () => { const rows = []; for (let j = 0; j < N; j += 1) { let s = ''; for (let i = 0; i < N; i += 1) { const h = H[j * N + i], k = K[j * N + i]; s += h <= 0 ? '~' : k === 'sand' ? (h > 0.5 ? 's' : '.') : k === 'stone' ? '#' : k === 'path' ? '=' : String(Math.min(9, Math.floor(h))); } rows.push((H0 + j + '').padStart(4) + ' ' + s); } return rows.join('\n'); },
     sunDir: new V3(-0.7, 0.56, -0.3).normalize(),

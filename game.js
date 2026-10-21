@@ -1,8 +1,9 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP } from '@rf/data';
-import { buildPlayer, buildSkyblade, buildTidesling, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT } from '@rf/art';
+import { CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES } from '@rf/data';
+import { buildPlayer, buildSkyblade, buildTidesling, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
+import { createStory } from '@rf/story';
 import { buildCove } from '@rf/world';
 import { createFoes } from '@rf/foes';
 import { createUI, loadPrefs, loadingDone, loadingFailed, view, updateView } from '@rf/ui';
@@ -278,6 +279,13 @@ const sound = (() => {
       case 'clear': [0, 4, 7, 12, 16].forEach((st, i) => tone('triangle', 523.25 * Math.pow(2, st / 12), 0, 0.6, 0.09, sfxBus, i * 0.11)); break;
       case 'fall': tone('sine', 300, 60, 1.4, 0.25); hiss('lowpass', 600, 100, 0.6, 1.2, 0.2); break;
       case 'wake': [0, 7, 12].forEach((st, i) => tone('sine', 392 * Math.pow(2, st / 12), 0, 0.9, 0.06, sfxBus, i * 0.2)); break;
+      case 'blip': tone('sine', 880, 0, 0.05, 0.03); break;
+      case 'voice': tone('triangle', 300 + Math.random() * 160, 0, 0.045, 0.025); break;
+      case 'quest': [0, 5, 9].forEach((st, i) => tone('sine', 659.25 * Math.pow(2, st / 12), 0, 0.5, 0.06, sfxBus, i * 0.09)); break;
+      case 'beacon': [0, 4, 7, 11, 14].forEach((st, i) => tone('sine', 587.33 * Math.pow(2, st / 12), 0, 0.9, 0.05, sfxBus, i * 0.07)); tone('sine', 146.8, 0, 1.4, 0.15); break;
+      case 'crack': for (let i = 0; i < 6; i++) hiss('highpass', 3000 + i * 600, 0, 1, 0.08, 0.3, i * 0.06); tone('sine', 2200, 1100, 1.2, 0.06); tone('sine', 55, 30, 3, 0.4); break;
+      case 'streak': hiss('bandpass', 4000, 800, 3, 1.2, 0.06); break;
+      case 'impact': tone('sine', 80, 25, 1.6, 0.7); hiss('lowpass', 2000, 100, 0.6, 1.4, 0.6); for (let i = 0; i < 5; i++) tone('sine', 1760 * Math.pow(1.12, i), 0, 1.0, 0.04, sfxBus, 0.1 + i * 0.06); break;
       case 'riftfall': tone('sine', 98, 49, 3.5, 0.3); hiss('lowpass', 300, 80, 0.7, 3, 0.25); break;
     }
   }
@@ -321,7 +329,7 @@ const sound = (() => {
 // ===========================================================================
 // The world, effects and the apprentice
 // ===========================================================================
-let world, sparks, bits, ui, foes, paused = false, started = false;
+let world, sparks, bits, ui, foes, story, paused = false, started = false;
 const camDir = new V3(...CONFIG.camera.dir).normalize();
 const camFwd = new V3(-camDir.x, 0, -camDir.z).normalize();
 const camRight = new V3().crossVectors(camFwd, new V3(0, 1, 0)).normalize();
@@ -390,7 +398,8 @@ function aimFor(st, range) {
   let best = null, bestS = Infinity;
   const fx = Math.sin(P.face), fz = Math.cos(P.face);
   const mv = ui.input.move.active ? screenToWorld(ui.input.move.x, ui.input.move.y) : null;
-  for (const d of [...foes.targets(), ...world.dummies]) {
+  // creatures first, then shootable targets (switches, crystals) that still need waking, then practice dummies
+  for (const d of [...foes.targets(), ...world.targets.filter((t) => !t.on), ...world.dummies]) {
     const dx = d.x - P.x, dz = d.z - P.z, dist = Math.hypot(dx, dz);
     if (dist > range) continue;
     const dir = mv || { x: fx, z: fz };
@@ -446,6 +455,9 @@ const tapRing = (() => {
 function walkTo(sx, sy) {
   const hit = groundUnder(sx, sy);
   if (!hit) return;
+  const npc = story.npcAt(hit.x, hit.z);
+  story.setTalkTarget(npc);
+  if (npc) { hit.x = npc.x + (P.x - npc.x) * 0.3; hit.z = npc.z + (P.z - npc.z) * 0.3; }
   const pts = world.findPath(P.x, P.z, hit.x, hit.z);
   if (!pts || !pts.length) { sound.sfx('deny'); return; }
   P.path = pts;
@@ -534,10 +546,39 @@ function locomote(dt, speedMul, canTurn) {
   return moved;
 }
 
+// ----- evening into night: blend every light, colour and the sky between the two palettes -----
+const lightDir = new V3();
+const tc = new THREE.Color(), tc2 = new THREE.Color();
+const mixCol = (target, a, b, k) => target.copy(tc.set(a)).lerp(tc2.set(b), k);
+const SUN_EVE = new V3(-0.75, 0.16, -0.64).normalize(), SUN_NIGHT = new V3(-0.75, -0.3, -0.64).normalize();
+const MOON = new V3(0.42, 0.8, -0.42).normalize();
+function setTime(k) {
+  const A = TIMES.evening, B = TIMES.night, U = SKY_UNIFORMS;
+  mixCol(U.uZenith.value, A.zenith, B.zenith, k);
+  mixCol(U.uMid.value, A.mid, B.mid, k);
+  mixCol(U.uHorizon.value, A.horizon, B.horizon, k);
+  mixCol(U.uGlow.value, A.glow, B.glow, k);
+  U.uSunDir.value.copy(SUN_EVE).lerp(SUN_NIGHT, k).normalize();
+  U.uNight.value = k;
+  mixCol(scene.fog.color, A.fog, B.fog, k);
+  scene.background.copy(scene.fog.color);
+  mixCol(sun.color, A.sun, B.sun, k);
+  sun.intensity = lerp(A.sunI, B.sunI, k);
+  mixCol(hemi.color, A.hemiSky, B.hemiSky, k);
+  mixCol(hemi.groundColor, A.hemiGround, B.hemiGround, k);
+  hemi.intensity = lerp(A.hemiI, B.hemiI, k);
+  // the sun's low evening light gives way to moonlight from high up
+  lightDir.copy(world.sunDir).lerp(MOON, smooth(k)).normalize();
+  post.final.uniforms.grade.value.set(lerp(A.grade[0], B.grade[0], k), lerp(A.grade[1], B.grade[1], k), lerp(A.grade[2], B.grade[2], k));
+  renderer.toneMappingExposure = 1.0 + k * 0.15;
+  world.setNight(k);
+}
+
 // ----- getting hurt, falling, waking by the fire -----
 let hurtFlash = 0, fade = 0, deadSat = 1;
+const cineFlash = { r: 1, g: 1, b: 1, k: 0 };
 function hurtPlayer(dmg, fx, fz) {
-  if (!started || intro || P.state === 'dead' || P.iframes || P.invuln > 0) return false;
+  if (!started || intro || P.state === 'dead' || P.iframes || P.invuln > 0 || P.safe > 0) return false;
   P.hp = Math.max(0, P.hp - dmg);
   P.invuln = HURT.invuln;
   const dx = P.x - fx, dz = P.z - fz, l = Math.hypot(dx, dz) || 1;
@@ -778,6 +819,12 @@ function meleeHits(s) {
     any = true;
     hitDummy(d, dx / (dist || 1), dz / (dist || 1), st.dmg, st.heavy, WEAPONS.skyblade.knock);
   }
+  for (const t of world.targets) {
+    const dx = t.x - P.x, dz = t.z - P.z, dist = Math.hypot(dx, dz);
+    if (dist > st.range + t.r || Math.abs(t.y - (P.y + 0.9)) > 1.2) continue;
+    const da = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - faceA), Math.cos(Math.atan2(dx, dz) - faceA)));
+    if (da <= half + 0.25 && t.onHit) { t.onHit('sword'); any = true; }
+  }
   for (const f of foes.targets()) {
     const dx = f.x - P.x, dz = f.z - P.z, dist = Math.hypot(dx, dz);
     if (dist > st.range + f.D.r) continue;
@@ -793,6 +840,7 @@ function hitDummy(d, nx, nz, dmg, heavy, knock) {
   d.vel.x += nx * knock * (heavy ? 1.8 : 1); d.vel.y += nz * knock * (heavy ? 1.8 : 1);
   d.flashT = 1;
   d.hits++;
+  story.onDummyHit();
   const hx = d.x - nx * 0.25, hz = d.z - nz * 0.25, hy = d.root.position.y + 0.95;
   // sparks of skyglass and chips of straw and wood
   for (let i = 0; i < (heavy ? 22 : 12); i++) {
@@ -844,12 +892,17 @@ function updateProjectiles(dt) {
       foes.hit(hitF, p.vx / l, p.vz / l, S.dmg, false, S.knock);
       stop = Math.max(stop, 0.02);
       done = true; hitD = hitF;
+    } else if (!hitD && world.targetAt(p.x, p.y, p.z, S.size)) {
+      // a target: a switch or a crystal; it decides what happens
+      const t = world.targetAt(p.x, p.y, p.z, S.size);
+      if (t.onHit) t.onHit('sling');
+      done = true;
     } else if (hitD) {
       const l = Math.hypot(p.vx, p.vz) || 1;
       hitDummy(hitD, p.vx / l, p.vz / l, S.dmg, false, S.knock);
       stop = Math.max(stop, 0.02);
       done = true;
-    } else if (p.y <= Math.max(gy, 0) + 0.05 || world.solids.some((s) => !s.dummy && Math.hypot(s.x - p.x, s.z - p.z) < s.r && p.y < gy + 2)) done = true;
+    } else if (p.y <= Math.max(gy, 0) + 0.05 || world.shotBlocked(p.x, p.y, p.z, S.size * 0.6)) done = true;   // houses, trees, rocks, cliffs
     if (done) {
       splash(p.x, Math.max(gy, -0.05) + 0.05, p.z, !!hitD);
       scene.remove(p.m);
@@ -930,7 +983,7 @@ function gameplayCam(out, outLook) {
   out.copy(outLook).addScaledVector(camDir, dist);
 }
 const wantPos = new V3(), wantLook = new V3();
-let camBlend = 0, camDist = CONFIG.camera.dist;
+let camBlend = 0, camDist = CONFIG.camera.dist, cineView = null, camFocus = null;
 function updateCamera(dt, t) {
   gameplayCam(wantPos, wantLook);
   if (intro) {
@@ -949,15 +1002,22 @@ function updateCamera(dt, t) {
       if (!intro.card) { const pl = PLACES.cove; ui.titleCard(pl.name, pl.region, pl.line); }
       intro = null;
       camBlend = T > 6.6 ? 0 : 1.6;
+      story.begin();
       ui.show(true);
       setTimeout(() => { if (!P.everMoved) ui.showHint('move', TEXT.hintMove, 6500); }, 5200);   // after the place name has faded
     }
+  } else if (cineView) {
+    // a cinematic: the story points the camera somewhere and it glides there
+    camPos.lerp(cineView.pos, damp(cineView.k || 0.03, dt));
+    camLook.lerp(cineView.look, damp(cineView.k || 0.03, dt));
+    camBlend = 1.4;
   } else {
     // the look point follows you softly; the camera keeps a fixed angle and distance from it,
-    // so the view glides without swimming
+    // so the view glides without swimming. In a conversation it settles between you and who you're talking to.
+    if (camFocus) wantLook.set(camFocus.x, P.y + 0.7, camFocus.z);
     camLook.lerp(wantLook, damp(CONFIG.camera.follow, dt));
     const C = CONFIG.camera;
-    camDist = lerp(camDist, C.dist * ui.input.zoom * clamp(0.85 / camera.aspect, 1, 1.55), damp(0.01, dt));
+    camDist = lerp(camDist, C.dist * ui.input.zoom * (camFocus ? camFocus.zoom : 1) * clamp(0.85 / camera.aspect, 1, 1.55), damp(0.01, dt));
     const fixed = tmpV.copy(camLook).addScaledVector(camDir, camDist);
     if (camBlend > 0) { camBlend -= dt; camPos.lerp(fixed, damp(0.004, dt)); }
     else camPos.copy(fixed);
@@ -975,7 +1035,7 @@ function updateCamera(dt, t) {
   const span = 20, step = (span * 2) / (sun.shadow.mapSize.x || 1024);
   const fx = Math.round(camLook.x / step) * step, fz = Math.round(camLook.z / step) * step;
   sun.target.position.set(fx, 0, fz);
-  sun.position.set(fx, 0, fz).addScaledVector(world.sunDir, 50);
+  sun.position.set(fx, 0, fz).addScaledVector(lightDir, 50);
   const S = sun.shadow.camera;
   if (S.right !== span) { S.left = -span; S.right = span; S.top = span; S.bottom = -span; S.near = 1; S.far = 120; S.updateProjectionMatrix(); }
 }
@@ -999,15 +1059,26 @@ function tick(dt) {
   // hit-stop: the action freezes for a few frames, effects keep moving
   let simDt = dt;
   if (stop > 0) { stop -= dt; simDt = dt * 0.04; }
-  if (started && !intro) {
+  P.safe = Math.max(0, (P.safe || 0) - dt);
+  if (started && !intro) story.update(dt);
+  ui.talkFrame(dt);
+  const busy = started && !intro && story.busy();
+  if (started && !intro && !busy) {
+    // the sword button says "Talk" when someone is near: then it talks instead of swinging
+    if (ui.input.attack.pressed && story.tryTalk()) { ui.input.attack.pressed = false; ui.input.attack.down = false; }
     if (ui.input.tap) { if (P.state === 'move' && !ui.input.ranged.down) walkTo(ui.input.tap.x, ui.input.tap.y); ui.input.tap = null; }
     updatePlayer(simDt);
     updateProjectiles(simDt);
     foes.update(simDt, camera);
   } else {
+    // in a conversation or a cinematic, the apprentice just stands and listens
+    P.vx *= 0.8; P.vz *= 0.8; P.path = null;
+    if (busy) { updateProjectiles(simDt); foes.update(simDt, camera); }
+    P.walkK = lerp(P.walkK || 0, 0, Math.min(1, dt * 6));
     walkPose(dt, 0);
     P.model.root.position.set(P.x, P.y, P.z);
-    P.model.root.rotation.y = P.face;
+    P.model.root.rotation.y = angLerp(P.model.root.rotation.y, P.face, Math.min(1, dt * 8));
+    P.model.root.visible = true;
   }
   updateDummies(simDt);
   updateSlashes(simDt);
@@ -1037,7 +1108,9 @@ function tick(dt) {
   hurtFlash = Math.max(0, hurtFlash - dt * 3.5);
   if (P.waking) { P.waking = Math.max(0, P.waking - dt * 1.1); fade = P.waking; }
   const FU = post.final.uniforms;
-  if (fade > 0) { FU.flashCol.value.setRGB(0.02, 0.01, 0.05); FU.flash.value = fade; }
+  cineFlash.k = Math.max(0, cineFlash.k - dt * 1.6);
+  if (cineFlash.k > 0.01) { FU.flashCol.value.setRGB(cineFlash.r, cineFlash.g, cineFlash.b); FU.flash.value = cineFlash.k; }
+  else if (fade > 0) { FU.flashCol.value.setRGB(0.02, 0.01, 0.05); FU.flash.value = fade; }
   else { FU.flashCol.value.setRGB(0.85, 0.08, 0.16); FU.flash.value = hurtFlash * 0.22; }
   FU.sat.value = 1.08 * deadSat;
   FU.vig.value = 0.42 + (1 - deadSat) * 0.4 + hurtFlash * 0.25;
@@ -1064,7 +1137,9 @@ try {
     heal: (n) => { P.hp = Math.min(P.maxHp, P.hp + n); },
     toast: (t) => ui.toast(t),
     playerDead: () => P.state === 'dead',
+    onSeepClear: () => story.onSeepClear(),
   });
+
   scene.add(aimMark, tapRing);
   ui = createUI({
     canvas, prefs,
@@ -1077,6 +1152,15 @@ try {
     sfx: (n) => sound.sfx(n),
   });
   setupPlayer();
+  story = createStory({
+    scene, world, foes, P, ui, sound, sparks, bits, shake,
+    flash: (r, g, b, k) => { Object.assign(cineFlash, { r, g, b, k }); },
+    setTime,
+    cine: (v) => { cineView = v; },
+    focus: (f) => { camFocus = f; },
+    safe: (sec) => { P.safe = sec; },
+  });
+  setTime(0);
   applyQuality();
   // first frame of the opening shot, drawn behind the loading veil
   intro = { t: 0, skippable: false };
@@ -1091,12 +1175,12 @@ try {
     const unlock = () => sound.init();
     addEventListener('touchend', unlock, { once: true });
     addEventListener('click', unlock, { once: true });
-    sound.sfx('riftfall');
+    sound.sfx('wake');
     started = true;
     intro = { t: 0, skippable: false };
     ui.input.any = false;
   });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, foes, world, hurtPlayer, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, foes, story, world, hurtPlayer, setTime, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

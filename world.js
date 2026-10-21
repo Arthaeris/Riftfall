@@ -23,6 +23,8 @@ for (let k = 0; k <= 6; k++) for (let w = -1; w <= 1; w++) STAIRS.push({ x: -3 +
 const stairMap = new Map(STAIRS.map((s) => [s.x + ',' + s.z, s.h]));
 // the Seep: a round clearing in the southern meadow where the fallen shard lies
 export const SEEP_AT = { x: -4, z: 12, r: 6.2, h: 1 };
+// Lanternhold village: houses round a well, south of the stone circle
+export const VILLAGE_AT = { x: -12.5, z: 21.5, r: 11 };
 
 function cellInfo(cx, cz) {
   // cx, cz: the integer cell corner (world units)
@@ -33,7 +35,10 @@ function cellInfo(cx, cz) {
   if (st !== undefined) return { h: st, kind: 'path' };
   // the Seep's clearing is level ground, ringed by a worn circle of stones
   const ds = Math.hypot(x - SEEP_AT.x, z - SEEP_AT.z);
-  if (ds < SEEP_AT.r + 1.6) return { h: SEEP_AT.h, kind: Math.abs(ds - SEEP_AT.r) < 0.6 ? 'path' : ds < 1.8 ? 'seep' : 'grass' };
+  if (ds < SEEP_AT.r + 1.6) return { h: SEEP_AT.h, kind: Math.abs(ds - SEEP_AT.r) < 0.6 ? 'path' : 'grass' };
+  // the village sits on level ground, with a cobbled square around the well
+  const dv = Math.hypot(x - VILLAGE_AT.x, z - VILLAGE_AT.z);
+  if (dv < VILLAGE_AT.r) return { h: 1, kind: dv < 3.3 ? 'cobble' : s > -5.4 ? 'sand' : 'grass' };
   const edge = plateauEdge(x);
   const west = -x - 19 + (fbm(z * 0.13, 9) - 0.5) * 5;  // > 0 in the western hills
   if (s >= 0.8) {
@@ -96,6 +101,7 @@ export function buildCove(scene) {
   paint(-3, -13, 0, -14, 1); paint(0, -14, 9, -15, 0); paint(9, -15, 19, -14, 0);
   paint(4, 2, 8, 3, 0);
   paint(0, 2, -1.5, 6.4, 0);
+  paint(-9.8, 18.9, -8.4, 16.4, 0); paint(-9.4, 22.2, -3.5, 22.6, 0); paint(-14.6, 19.2, -16.2, 17.6, 0); paint(-14.8, 22.8, -16.8, 24.2, 0); paint(-12.4, 24.6, -12.1, 26.2, 0);
   for (const key of pathCells) {
     const [x, z] = key.split(',').map(Number);
     const i = x - H0, j = z - H0;
@@ -114,6 +120,7 @@ export function buildCove(scene) {
       case 'sand': return PALETTE.sand[Math.floor(nn * 4) % 4];
       case 'stone': return PALETTE.stone[Math.floor(nn * 3) % 3];
       case 'path': return PALETTE.path[Math.floor(nn * 3) % 3];
+      case 'cobble': return ['#a8a39a', '#9d978d', '#b2ada3', '#a39d92'][Math.floor(hashJ(i * 7, j * 3) * 4)];
       case 'seep': return ['#7fb7a6', '#86c2b2', '#78ad9e'][Math.floor(nn * 3) % 3];   // grass going glassy around the shard
       default: return PALETTE.grass[Math.floor((nn * 0.7 + hashJ(i, j) * 0.3) * 4) % 4];
     }
@@ -166,16 +173,16 @@ export function buildCove(scene) {
   // landmarks first
   const lhX = 21.5, lhZ = -15.5;
   const lh = PROPS.lighthouse(b, g, lhX, cellH(lhX, lhZ), lhZ);
-  solids.push({ x: lhX, z: lhZ, r: 1.75 }); take(lhX, lhZ, 2);
+  solids.push({ x: lhX, z: lhZ, r: 1.75, h: 12 }); take(lhX, lhZ, 2);
   const cotX = 1.5, cotZ = -16.5, cotY = cellH(cotX, cotZ);
   PROPS.cottage(b, g, cotX, cotY, cotZ, 0);
-  boxes.push({ x0: cotX - 2.3, z0: cotZ - 1.9, x1: cotX + 2.3, z1: cotZ + 1.9 }); take(cotX, cotZ, 3);
+  boxes.push({ x0: cotX - 2.3, z0: cotZ - 1.9, x1: cotX + 2.3, z1: cotZ + 1.9, h: 5 }); take(cotX, cotZ, 3);
   take(cotX - 0.6, cotZ + 4, 2);   // keep the way to the door clear
   // a little garden fence, a woodpile and a bench by the cottage
   PROPS.fence(b, cotX - 3.2, cotZ + 2.6, cotX - 3.2, cotZ - 2, cotY, cotY);
   for (let k = 0; k < 6; k++) b.box(0.9, 0.22, 0.24, k % 2 ? '#9a6b45' : '#8a5e3c', cotX + 3.0, cotY + 0.12 + Math.floor(k / 2) * 0.24, cotZ - 0.6 + (k % 2) * 0.26);
   b.box(1.4, 0.12, 0.45, '#8b5e3c', cotX + 3.3, cotY + 0.45, cotZ + 1.6); b.box(0.12, 0.4, 0.4, '#5d3d26', cotX + 2.75, cotY + 0.2, cotZ + 1.6); b.box(0.12, 0.4, 0.4, '#5d3d26', cotX + 3.85, cotY + 0.2, cotZ + 1.6);
-  solids.push({ x: cotX + 3.0, z: cotZ - 0.5, r: 0.55 });
+  solids.push({ x: cotX + 3.0, z: cotZ - 0.5, r: 0.55, h: 0.8 });
   // vegetable patch
   for (let a = 0; a < 3; a++) for (let c = 0; c < 4; c++) {
     const px = cotX - 5.2 + a * 0.7, pz = cotZ - 1.4 + c * 0.8;
@@ -185,7 +192,7 @@ export function buildCove(scene) {
   take(cotX - 5, cotZ, 2);
   // lanterns along the way up and at the dock
   const lanterns = [[-1.2, -7.5, 0], [-1.6, -12.8, 0], [7.5, -14.6, 1.2], [16.5, -13.4, 0.6], [11.6, 7.4, 0], [4.2, 1.2, 0.4], [-5.3, -0.3, 2]];
-  for (const [x, z, rot] of lanterns) { PROPS.lanternPost(b, g, x, cellH(x, z), z, rot); solids.push({ x, z, r: 0.2 }); take(x, z, 0); }
+  for (const [x, z, rot] of lanterns) { PROPS.lanternPost(b, g, x, cellH(x, z), z, rot); solids.push({ x, z, r: 0.2, h: 2.1 }); take(x, z, 0); }
 
   // the old training ground: a ring of fence posts, a weapon rack and three practice dummies
   const tgX = -11, tgZ = 2, tgY = cellH(tgX, tgZ);
@@ -195,7 +202,7 @@ export function buildCove(scene) {
   for (let k = 0; k < ring.length - 1; k++) {
     const [x0, z0] = ring[k], [x1, z1] = ring[k + 1];
     PROPS.fence(b, x0, z0, x1, z1, cellH(x0, z0), cellH(x1, z1));
-    for (let t = 0; t <= 1; t += 0.25) solids.push({ x: lerp(x0, x1, t), z: lerp(z0, z1, t), r: 0.18 });
+    for (let t = 0; t <= 1; t += 0.25) solids.push({ x: lerp(x0, x1, t), z: lerp(z0, z1, t), r: 0.18, h: 0.85 });
   }
   // a pennant pole at the gate
   const [gx, gz] = ring[0];
@@ -207,7 +214,7 @@ export function buildCove(scene) {
   b.box(0.14, 1.3, 0.2, '#5d3d26', -0.7, 0.65, 0); b.box(0.14, 1.3, 0.2, '#5d3d26', 0.7, 0.65, 0);
   for (const [x, c] of [[-0.35, '#9aa3ad'], [0, '#c9a24a'], [0.35, '#9aa3ad']]) b.box(0.08, 1.0, 0.06, c, x, 0.75, 0.12, { rotZ: x * 0.1 });
   b.pop();
-  solids.push({ x: tgX - 3.2, z: tgZ - 2.2, r: 0.7 });
+  solids.push({ x: tgX - 3.2, z: tgZ - 2.2, r: 0.7, h: 1.3 });
   take(tgX, tgZ, 4);
   const dummies = [];
   for (const [dx, dz] of [[-1.6, -0.6], [1.4, -1.4], [0.2, 1.6]]) {
@@ -233,7 +240,7 @@ export function buildCove(scene) {
   PROPS.crate(b, dock.x0 + 0.5, dock.y, dock.z1 - 1.0, 0.3);
   PROPS.crate(b, dock.x0 + 0.45, dock.y + 0.7, dock.z1 - 1.0, 0.7, 0.8);
   PROPS.barrel(b, dock.x1 - 0.45, dock.y, dock.z1 - 2.1, 0.4);
-  solids.push({ x: dock.x0 + 0.5, z: dock.z1 - 1.0, r: 0.5 }, { x: dock.x1 - 0.45, z: dock.z1 - 2.1, r: 0.35 });
+  solids.push({ x: dock.x0 + 0.5, z: dock.z1 - 1.0, r: 0.5, h: 1.4 }, { x: dock.x1 - 0.45, z: dock.z1 - 2.1, r: 0.35, h: 0.9 });
   // coiled rope and a fishing net drying over a rack on the beach
   b.box(0.5, 0.1, 0.5, '#c8b28a', dock.x1 - 0.5, dock.y + 0.05, dock.z0 + 4);
   b.box(0.3, 0.12, 0.3, '#b09a74', dock.x1 - 0.5, dock.y + 0.12, dock.z0 + 4);
@@ -241,10 +248,10 @@ export function buildCove(scene) {
   b.box(0.12, 1.4, 0.12, '#6b4a33', netX - 1, netY + 0.7, netZ); b.box(0.12, 1.4, 0.12, '#6b4a33', netX + 1, netY + 0.7, netZ);
   b.box(2.2, 0.08, 0.08, '#5d3d26', netX, netY + 1.38, netZ);
   for (let k = 0; k < 9; k++) b.box(0.22, 1.0 - (k % 3) * 0.15, 0.03, k % 2 ? '#7a8f7a' : '#8aa08a', netX - 0.9 + k * 0.22, netY + 0.9 - (k % 3) * 0.07, netZ, { jitter: 0.15 });
-  solids.push({ x: netX - 1, z: netZ, r: 0.15 }, { x: netX + 1, z: netZ, r: 0.15 });
+  solids.push({ x: netX - 1, z: netZ, r: 0.15, h: 1.5 }, { x: netX + 1, z: netZ, r: 0.15, h: 1.5 }, { x: netX, z: netZ, r: 0.5, h: 1.4, thin: true });
   take(netX, netZ, 1);
-  for (const [x, z] of [[11.2, 6.6], [10.5, 7.3]]) { PROPS.crate(b, x, cellH(x, z), z, r()); solids.push({ x, z, r: 0.45 }); }
-  PROPS.barrel(b, 11.6, cellH(11.6, 5.8), 5.8, 1); solids.push({ x: 11.6, z: 5.8, r: 0.35 });
+  for (const [x, z] of [[11.2, 6.6], [10.5, 7.3]]) { PROPS.crate(b, x, cellH(x, z), z, r()); solids.push({ x, z, r: 0.45, h: 0.75 }); }
+  PROPS.barrel(b, 11.6, cellH(11.6, 5.8), 5.8, 1); solids.push({ x: 11.6, z: 5.8, r: 0.35, h: 0.85 });
   take(11, 6.5, 1);
 
   // a campfire on the beach with log seats: the warm heart of the cove at dusk
@@ -261,18 +268,136 @@ export function buildCove(scene) {
     b.box(0.08, 0.36, 0.4, '#c8a77a', 0.76, 0.2, 0, { jitter: 0 });
     b.box(0.08, 0.36, 0.4, '#c8a77a', -0.76, 0.2, 0, { jitter: 0 });
     b.pop();
-    solids.push({ x: fire.x + dx, z: fire.z + dz, r: 0.42 });
+    solids.push({ x: fire.x + dx, z: fire.z + dz, r: 0.42, h: 0.45 });
   }
-  solids.push({ x: fire.x, z: fire.z, r: 0.6 });
+  solids.push({ x: fire.x, z: fire.z, r: 0.6, h: 0.5 });
   take(fire.x, fire.z, 2);
 
   // a fallen shard of sky by the water's edge, still humming
   const shard = { x: SEEP_AT.x, z: SEEP_AT.z };
   take(SEEP_AT.x, SEEP_AT.z, Math.ceil(SEEP_AT.r + 1));   // nothing grows or stands inside the clearing
   shard.y = cellH(shard.x, shard.z);
-  PROPS.skyglassShard(b, g, shard.x, shard.y, shard.z, r, 1.1);
-  solids.push({ x: shard.x, z: shard.z, r: 0.75 });
+  const sb = new Batch(14), sg = new Batch(15);
+  PROPS.skyglassShard(sb, sg, shard.x, shard.y, shard.z, r, 1.1);
+  // where it landed, the grass turns to glass
+  for (let k = 0; k < 46; k++) {
+    const a = r() * TAU, d = Math.pow(r(), 0.7) * 4.2;
+    const gx = Math.floor(shard.x + Math.cos(a) * d) + 0.5, gz = Math.floor(shard.z + Math.sin(a) * d) + 0.5;
+    sb.box(0.98, 0.04, 0.98, pick(['#86c2b2', '#7fb7a6', '#9fd4c6', '#78ad9e'], r), gx, shard.y + 0.02, gz, { jitter: 0.05, ao: 1 });
+    if (r() < 0.25) sg.box(0.16, 0.3 + r() * 0.3, 0.16, '#8fe9ff', gx + (r() - 0.5) * 0.6, shard.y + 0.15, gz + (r() - 0.5) * 0.6, { glow: 1.3, rotZ: (r() - 0.5) * 0.5, jitter: 0.2 });
+  }
+  const shardGroup = new THREE.Group();
+  shardGroup.add(sb.mesh());
+  const sgm = sg.mesh(MAT.glow); sgm.castShadow = false; shardGroup.add(sgm);
+  shardGroup.visible = false;
+  scene.add(shardGroup);
+  const shardSolid = { x: shard.x, z: shard.z, r: 0.75, h: 2.4 };
   take(shard.x, shard.z, 1);
+
+  // ----- Lanternhold village: four houses round a well, a bakery stall, a fishing hut by the beach -----
+  const V = VILLAGE_AT, vy = 1;
+  const houses = [
+    { x: -18.0, z: 17.8, rot: Math.PI / 2, wall: '#f1e2c4', roof: '#a8473d' },
+    { x: -18.6, z: 25.0, rot: Math.PI / 2, wall: '#e6dccb', roof: '#3f7a6a' },
+    { x: -12.0, z: 27.6, rot: Math.PI, wall: '#f3e7cf', roof: '#7a4a8a', chimney: false },
+    { x: -6.2, z: 26.4, rot: Math.PI, wall: '#efd9b8', roof: '#b0683a' },   // Wenna's bakery
+  ];
+  for (const hs of houses) {
+    PROPS.cottage(b, g, hs.x, vy, hs.z, hs.rot, { wall: hs.wall, roof: hs.roof, chimney: hs.chimney });
+    const side = Math.abs(Math.sin(hs.rot)) > 0.5;
+    const hx = side ? 1.9 : 2.3, hz = side ? 2.3 : 1.9;
+    boxes.push({ x0: hs.x - hx, z0: hs.z - hz, x1: hs.x + hx, z1: hs.z + hz, h: 5 });
+    take(hs.x, hs.z, 3);
+  }
+  // the well in the middle of the square
+  b.push(V.x, vy, V.z);
+  for (let k = 0; k < 10; k++) { const a = (k / 10) * TAU; b.box(0.5, 0.7, 0.36, pick(PALETTE.stone, r), Math.cos(a) * 0.8, 0.35, Math.sin(a) * 0.8, { rotY: -a, top: '#b9b3a7' }); }
+  b.box(1.2, 0.05, 1.2, '#1d2a3a', 0, 0.45, 0, { jitter: 0 });
+  for (const x of [-0.85, 0.85]) b.box(0.16, 1.9, 0.16, '#6b4a33', x, 1.0, 0);
+  b.box(1.9, 0.12, 0.12, '#5d3d26', 0, 1.75, 0);
+  b.box(2.1, 0.14, 1.1, '#7a4a3a', 0, 2.05, 0, { rotZ: 0 }); b.box(1.7, 0.14, 0.7, '#8a5a46', 0, 2.2, 0);
+  b.box(0.26, 0.26, 0.26, '#8b5e3c', 0.2, 1.25, 0); b.box(0.03, 0.5, 0.03, '#c8b28a', 0.2, 1.5, 0);
+  b.pop();
+  solids.push({ x: V.x, z: V.z, r: 1.05, h: 2.2 });
+  // a bench, flower tubs and barrels round the square
+  b.push(V.x - 2.6, vy, V.z + 1.6, 0.9); b.box(1.5, 0.12, 0.45, '#8b5e3c', 0, 0.45, 0); b.box(0.12, 0.4, 0.4, '#5d3d26', -0.6, 0.2, 0); b.box(0.12, 0.4, 0.4, '#5d3d26', 0.6, 0.2, 0); b.pop();
+  solids.push({ x: V.x - 2.6, z: V.z + 1.6, r: 0.55, h: 0.6 });
+  for (const [x, z] of [[V.x + 2.4, V.z - 2.0], [V.x - 1.6, V.z - 2.7], [V.x + 2.9, V.z + 2.2]]) {
+    b.box(0.6, 0.4, 0.6, '#8b5e3c', x, vy + 0.2, z); PROPS.flowers(b, x, vy + 0.4, z, r);
+    solids.push({ x, z, r: 0.35, h: 0.6 });
+  }
+  PROPS.barrel(b, -15.9, vy, 20.4, 0.3); solids.push({ x: -15.9, z: 20.4, r: 0.35, h: 0.85 });
+  PROPS.barrel(b, -16.3, vy, 21.1, 1.1); solids.push({ x: -16.3, z: 21.1, r: 0.35, h: 0.85 });
+  // a washing line between the two western houses
+  b.box(0.1, 2.0, 0.1, '#6b4a33', -19.4, vy + 1.0, 20.4); b.box(0.1, 2.0, 0.1, '#6b4a33', -19.4, vy + 1.0, 22.6);
+  b.box(0.03, 0.03, 2.2, '#e8e0d0', -19.4, vy + 1.9, 21.5);
+  [['#e0573f', 20.9], ['#5fa8d6', 21.4], ['#f2d36b', 21.9], ['#f4f0ff', 22.25]].forEach(([c, z]) => b.box(0.04, 0.5, 0.36, c, -19.4, vy + 1.62, z, { jitter: 0.1 }));
+  solids.push({ x: -19.4, z: 20.4, r: 0.12, h: 2 }, { x: -19.4, z: 22.6, r: 0.12, h: 2 });
+  // Wenna's stall: a striped awning, loaves on the counter
+  const st = { x: -9.2, z: 23.3 };
+  b.push(st.x, vy, st.z);
+  b.box(1.9, 0.9, 0.8, '#a77a4f', 0, 0.45, 0, { top: '#c8a77a' });
+  for (const x of [-0.9, 0.9]) b.box(0.1, 2.0, 0.1, '#6b4a33', x, 1.0, 0.45);
+  for (let k = 0; k < 6; k++) b.box(0.34, 0.08, 1.1, k % 2 ? '#f4f0ff' : '#e0573f', -0.85 + k * 0.34, 2.0, 0.2, { rotX: -0.25, jitter: 0 });
+  for (let k = 0; k < 5; k++) b.box(0.32, 0.16, 0.18, k % 2 ? '#d9a35b' : '#c88a43', -0.7 + k * 0.34, 0.99, -0.1 + (k % 2) * 0.12, { top: '#e8b871', rotY: (k % 3) * 0.2 });
+  b.box(0.26, 0.26, 0.26, '#b07a3a', 0.6, 1.05, 0.2);
+  b.pop();
+  solids.push({ x: st.x, z: st.z, r: 0.95, h: 1.2 });
+  take(st.x, st.z, 1);
+  // Tobin's fishing hut by the beach, with fish drying on a rack and his rowing boat pulled up
+  const hut = { x: -1.8, z: 22.4 }, huy = cellH(hut.x, hut.z);
+  b.push(hut.x, huy, hut.z, -Math.PI / 2);
+  b.box(2.4, 0.2, 2.0, '#8b5e3c', 0, 0.1, 0, { top: '#a77a4f' });
+  for (const [px, pz] of [[-1.1, -0.9], [1.1, -0.9], [-1.1, 0.9], [1.1, 0.9]]) b.box(0.16, 1.9, 0.16, '#5d3d26', px, 1.05, pz);
+  b.box(2.3, 1.5, 0.12, '#9a6b45', 0, 0.95, -0.9); b.box(0.12, 1.5, 1.8, '#9a6b45', -1.1, 0.95, 0); b.box(0.12, 1.5, 1.8, '#9a6b45', 1.1, 0.95, 0);
+  for (let k = 0; k < 5; k++) b.box(2.7, 0.12, 0.5, k % 2 ? '#6b7a8a' : '#5d6a78', 0, 1.95 + k * 0.08, -1.0 + k * 0.48, { rotX: 0.18 });
+  for (let k = 0; k < 6; k++) b.box(0.18, 0.5, 0.03, k % 2 ? '#7a8f7a' : '#8aa08a', -0.9 + k * 0.36, 1.4, 0.88, { jitter: 0.15 });
+  b.pop();
+  boxes.push({ x0: hut.x - 1.15, z0: hut.z - 1.3, x1: hut.x + 1.15, z1: hut.z + 1.3, h: 2.4 });
+  take(hut.x, hut.z, 2);
+  b.push(hut.x - 0.4, huy, hut.z + 2.4, 0.2);
+  b.box(0.1, 1.3, 0.1, '#6b4a33', -0.9, 0.65, 0); b.box(0.1, 1.3, 0.1, '#6b4a33', 0.9, 0.65, 0); b.box(1.9, 0.06, 0.06, '#5d3d26', 0, 1.25, 0);
+  for (let k = 0; k < 5; k++) { b.box(0.08, 0.32, 0.16, '#b8c4cc', -0.7 + k * 0.35, 1.0, 0, { top: '#d8e2e8' }); b.box(0.04, 0.12, 0.12, '#8a96a0', -0.7 + k * 0.35, 0.8, 0); }
+  b.pop();
+  solids.push({ x: hut.x - 1.3, z: hut.z + 2.5, r: 0.15, h: 1.3 }, { x: hut.x + 0.5, z: hut.z + 2.2, r: 0.15, h: 1.3 });
+  const rowboat = buildBoat(); rowboat.scale.setScalar(0.75); rowboat.position.set(1.4, cellH(1.4, 25.6) - 0.05, 25.6); rowboat.rotation.set(0, 2.4, 0.12); scene.add(rowboat);
+  solids.push({ x: 1.4, z: 25.6, r: 1.0, h: 0.9 });
+  take(hut.x, hut.z + 2.6, 1);
+  // village lanterns
+  for (const [x, z, rot] of [[-14.4, 18.4, 0.4], [-10.2, 24.6, 2.6], [-15.6, 24.4, 3.6], [-8.6, 17.4, 1.2]]) { PROPS.lanternPost(b, g, x, cellH(x, z), z, rot); solids.push({ x, z, r: 0.2, h: 2.1 }); take(x, z, 0); }
+  take(V.x, V.z, 3);
+
+  // ----- the dock beacon: its light has gone out. Its crystal sits on a stone out in the water,
+  // out of reach: you light it again by hitting the crystal with a sling drop -----
+  const bcn = { x: 13.3, z: 20.15, y: 0.72 };
+  b.box(0.2, 3.0, 0.2, '#5d3d26', bcn.x, bcn.y + 1.5, bcn.z);
+  b.box(0.6, 0.1, 0.6, '#3a3a44', bcn.x, bcn.y + 3.05, bcn.z);
+  for (const [px, pz] of [[-0.24, -0.24], [0.24, -0.24], [-0.24, 0.24], [0.24, 0.24]]) b.box(0.05, 0.5, 0.05, '#2c2c36', bcn.x + px, bcn.y + 3.35, bcn.z + pz);
+  b.box(0.7, 0.12, 0.7, '#3a3a44', bcn.x, bcn.y + 3.65, bcn.z);
+  b.box(0.34, 0.34, 0.34, '#3a4a5a', bcn.x, bcn.y + 3.33, bcn.z);   // the dark lamp
+  solids.push({ x: bcn.x, z: bcn.z, r: 0.18, h: 3.8 });
+  const tgt = { x: 17.6, z: 23.4 };
+  const tgy = cellH(tgt.x, tgt.z);
+  // a sea stack with a brass cage on top, and the crystal inside it
+  b.box(1.1, 1.6 - tgy, 1.0, '#7d7a86', tgt.x, (1.6 + tgy) / 2 - 0.3, tgt.z, { top: '#8f8c98' });
+  b.box(0.8, 0.5, 0.9, '#6f6c78', tgt.x + 0.2, 0.2, tgt.z - 0.1);
+  b.box(0.7, 0.08, 0.7, '#c9a24a', tgt.x, 1.36, tgt.z);
+  for (const [px, pz] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) b.box(0.05, 0.75, 0.05, '#c9a24a', tgt.x + px, 1.75, tgt.z + pz);
+  b.box(0.7, 0.08, 0.7, '#c9a24a', tgt.x, 2.14, tgt.z);
+  b.box(0.3, 0.5, 0.3, '#7d8f9a', tgt.x, 1.72, tgt.z, { rotY: 0.6 });   // the crystal, dark for now
+  const beaconLit = new Batch(16);
+  beaconLit.box(0.34, 0.54, 0.34, '#9ff3ff', tgt.x, 1.72, tgt.z, { glow: 2.4, rotY: 0.6, jitter: 0 });
+  beaconLit.box(0.36, 0.36, 0.36, '#ffe9a8', bcn.x, bcn.y + 3.33, bcn.z, { glow: 4, jitter: 0 });
+  const beaconLitMesh = beaconLit.mesh(MAT.glow); beaconLitMesh.castShadow = false; beaconLitMesh.visible = false;
+  scene.add(beaconLitMesh);
+  const beaconLight = new THREE.PointLight(0xffd59a, 0, 10, 1.5);
+  beaconLight.position.set(bcn.x, bcn.y + 3.3, bcn.z);
+  scene.add(beaconLight);
+  // anything you can shoot to make something happen goes in targets (switches, crystals, bells ...)
+  const targets = [];
+  const beacon = { id: 'beacon', x: tgt.x, y: 1.72, z: tgt.z, r: 0.42, h: 1.0, on: false, onHit: null };
+  beacon.light = () => { beacon.on = true; beaconLitMesh.visible = true; };
+  targets.push(beacon);
 
   // ----- scatter: trees, rocks, flowers, shells, driftwood -----
   const grassSpots = [];
@@ -292,20 +417,20 @@ export function buildCove(scene) {
         const pine = z < -10 || x < -14 || r() < 0.3;
         const s = pine ? 0.85 + r() * 0.5 : 0.8 + r() * 0.4;
         if (pine) PROPS.pine(b, x, h, z, r, s); else PROPS.roundTree(b, x, h, z, r, s);
-        solids.push({ x, z, r: (pine ? 0.82 : 0.78) * s }); take(x, z, 1);
+        solids.push({ x, z, r: (pine ? 0.82 : 0.78) * s, h: 4.5 * s }); take(x, z, 1);
         continue;
       }
       if (roll < 0.16) { PROPS.flowers(b, x, h, z, r); }
-      else if (roll < 0.18 && !nearWay(x, z, 1)) { PROPS.rock(b, x + (r() - 0.5) * 0.3, h, z, r, 0.45 + r() * 0.3); solids.push({ x, z, r: 0.35 }); take(x, z, 0); continue; }
+      else if (roll < 0.18 && !nearWay(x, z, 1)) { PROPS.rock(b, x + (r() - 0.5) * 0.3, h, z, r, 0.45 + r() * 0.3); solids.push({ x, z, r: 0.35, h: 0.7 }); take(x, z, 0); continue; }
       const n = 1 + Math.floor(r() * 3);
       for (let k = 0; k < n; k++) grassSpots.push({ x: x + (r() - 0.5) * 0.9, y: h, z: z + (r() - 0.5) * 0.9, rot: r() * TAU, s: 0.7 + r() * 0.6, c: pick(['#62a447', '#6fb04f', '#57933f', '#7cb85a', '#8cbf5e'], r) });
     } else if (kind === 'stone') {
-      if (roll < 0.07 && flatAround(x, z, 0) && !nearWay(x, z, 1)) { PROPS.rock(b, x, h, z, r, 0.6 + r() * 0.6); solids.push({ x, z, r: 0.5 }); take(x, z, 0); }
+      if (roll < 0.07 && flatAround(x, z, 0) && !nearWay(x, z, 1)) { PROPS.rock(b, x, h, z, r, 0.6 + r() * 0.6); solids.push({ x, z, r: 0.5, h: 1.1 }); take(x, z, 0); }
       else if (roll < 0.11) b.box(0.4, 0.1, 0.4, '#6f9a4a', x + (r() - 0.5) * 0.5, h + 0.05, z + (r() - 0.5) * 0.5, { jitter: 0.15 });
     } else if (kind === 'sand') {
       if (roll < 0.04) PROPS.shell(b, x + (r() - 0.5) * 0.6, h, z + (r() - 0.5) * 0.6, r);
       else if (roll < 0.05 && flatAround(x, z, 1)) { PROPS.driftwood(b, x, h, z, r); take(x, z, 1); }
-      else if (roll < 0.065 && h >= 0.5) { PROPS.rock(b, x, h - 0.15, z, r, 0.5 + r() * 0.4, '#9a958c'); solids.push({ x, z, r: 0.4 }); take(x, z, 0); }
+      else if (roll < 0.065 && h >= 0.5) { PROPS.rock(b, x, h - 0.15, z, r, 0.5 + r() * 0.4, '#9a958c'); solids.push({ x, z, r: 0.4, h: 0.8 }); take(x, z, 0); }
       else if (roll < 0.1 && h >= 1) grassSpots.push({ x, y: h, z, rot: r() * TAU, s: 1.1, c: '#b8c27a' });   // dune grass
     }
   }
@@ -330,7 +455,7 @@ export function buildCove(scene) {
     let h;
     const ci = Math.floor(x) - H0, cj = Math.floor(z) - H0;
     if (ci >= 0 && cj >= 0 && ci < N && cj < N) h = H[cj * N + ci];
-    else h = shoreS(x, z) > 0.8 ? -0.5 - Math.min(3.5, (shoreS(x, z) - 0.8) * 0.55) : 3;
+    else h = -2.5;   // beyond the edge of the map: open sea all round, so the island ends in cliffs
     const v = clamp((h + 4) / 8, 0, 1) * 255;
     data.set([v, v, v, 255], (j * TS + i) * 4);
   }
@@ -374,7 +499,8 @@ export function buildCove(scene) {
   const fireLight = new THREE.PointLight(0xff9a4a, 7, 7, 1.6);
   fireLight.position.set(fire.x, fire.y + 0.9, fire.z);
   scene.add(fireLight);
-  const lanternLights = [[11.6, 7.4], [-1.2, -7.5]].map(([x, z]) => {
+  shardLight.visible = false;
+  const lanternLights = [[11.6, 7.4], [-1.2, -7.5], [-14.4, 18.4], [-10.2, 24.6]].map(([x, z]) => {
     const l = new THREE.PointLight(0xffc46b, 5, 6, 1.6);
     l.position.set(x + 0.4, cellH(x, z) + 1.5, z);
     scene.add(l);
@@ -521,6 +647,40 @@ export function buildCove(scene) {
     return true;
   }
 
+  // can a shot (a sling drop, an orb) pass this point? It hits the ground, and anything standing taller than it flies.
+  function shotBlocked(x, y, z, rad = 0.08) {
+    const gh = groundAt(x, z);
+    if (gh > 0.01 && gh > y) return true;
+    for (const s of solids) {
+      if (s.dummy) continue;
+      if (Math.hypot(x - s.x, z - s.z) < s.r + rad) {
+        if (s.y0 === undefined) s.y0 = groundAt(s.x, s.z);
+        if (y < s.y0 + (s.h === undefined ? 3 : s.h)) return true;
+      }
+    }
+    for (const bx of boxes) {
+      if (x > bx.x0 - rad && x < bx.x1 + rad && z > bx.z0 - rad && z < bx.z1 + rad) {
+        if (bx.y0 === undefined) bx.y0 = groundAt((bx.x0 + bx.x1) / 2, (bx.z0 + bx.z1) / 2);
+        if (y < bx.y0 + (bx.h === undefined ? 4 : bx.h)) return true;
+      }
+    }
+    return false;
+  }
+  // a shot at this point hits a target (a switch, a crystal): returns it
+  function targetAt(x, y, z, rad = 0.1) {
+    for (const t of targets) if (Math.hypot(x - t.x, z - t.z) < t.r + rad && Math.abs(y - t.y) < t.h / 2 + rad) return t;
+    return null;
+  }
+  // the shard lands (during the first Riftfall) and the Seep comes alive
+  function setShard(on) {
+    shardGroup.visible = on;
+    shardLight.visible = on;
+    const i = solids.indexOf(shardSolid);
+    if (on && i < 0) solids.push(shardSolid);
+    if (!on && i >= 0) solids.splice(i, 1);
+  }
+  let night = 0;
+
   const fx = { sparks: null };
   let seepPower = 1;   // how awake the shard is: 0 = spent, 1 = calm, 2 = the Seep is open
   function update(dt, t, player) {
@@ -528,11 +688,14 @@ export function buildCove(scene) {
     WIND.uTime.value = t;
     sea.material.uniforms.uTime.value = t;
     beam.rotation.y = t * 0.45;
-    lampLight.intensity = 30 + Math.sin(t * 2.3) * 2;
-    windowLight.intensity = 7 + Math.sin(t * 9) * 0.4 + Math.sin(t * 13.7) * 0.3;   // a candle-ish flicker
+    // at night every warm light counts for more
+    const nk = 1 + night * 1.3;
+    lampLight.intensity = (30 + Math.sin(t * 2.3) * 2) * nk;
+    windowLight.intensity = (7 + Math.sin(t * 9) * 0.4 + Math.sin(t * 13.7) * 0.3) * nk;   // a candle-ish flicker
+    beaconLight.intensity = beacon.on ? (9 + Math.sin(t * 3) * 0.6) * nk : 0;
     shardLight.intensity = (9 + Math.sin(t * 1.3) * 2.5) * (0.35 + seepPower * 0.45);
-    for (const l of lanternLights) l.intensity = 5 + Math.sin(t * 7 + l.position.x) * 0.25;
-    fireLight.intensity = 7 + Math.sin(t * 11) * 0.8 + Math.sin(t * 17.3) * 0.55 + Math.sin(t * 5.1) * 0.4;
+    for (const l of lanternLights) l.intensity = (5 + Math.sin(t * 7 + l.position.x) * 0.25) * nk;
+    fireLight.intensity = (7 + Math.sin(t * 11) * 0.8 + Math.sin(t * 17.3) * 0.55 + Math.sin(t * 5.1) * 0.4) * nk;
     boat.position.y = 0.02 + Math.sin(t * 1.2) * 0.06;
     boat.rotation.z = Math.sin(t * 0.9) * 0.04; boat.rotation.x = Math.sin(t * 1.1 + 1) * 0.025;
     for (const gl of gulls) {
@@ -580,7 +743,7 @@ export function buildCove(scene) {
       if (Math.random() < dt * 14) {
         fx.sparks.spawn({ x: fire.x + (Math.random() - 0.5) * 0.4, y: fire.y + 0.5, z: fire.z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 0.6, vy: 1.4 + Math.random() * 1.4, vz: (Math.random() - 0.5) * 0.6, drag: 0.8, life: 1.2 + Math.random(), size: 0.07 + Math.random() * 0.05, color: Math.random() < 0.5 ? '#ffb347' : '#ff7a2a', glow: 4, flicker: 1 });
       }
-      if (Math.random() < dt * 6) {
+      if (shardGroup.visible && Math.random() < dt * 6) {
         fx.sparks.spawn({ x: shard.x + (Math.random() - 0.5) * 1.2, y: shard.y + 0.4 + Math.random() * 1.5, z: shard.z + (Math.random() - 0.5) * 1.2, vy: 0.5 + Math.random() * 0.4, vx: (Math.random() - 0.5) * 0.2, drag: 0.4, life: 2.2, size: 0.1, color: '#9ff3ff', glow: 4, flicker: 1 });
       }
     }
@@ -590,6 +753,16 @@ export function buildCove(scene) {
   spawn.y = groundAt(spawn.x, spawn.z);
   return {
     seep: SEEP_AT, setSeepPower: (k) => { seepPower = k; },
+    shotBlocked, targetAt, targets, beacon, setShard, shardOn: () => shardGroup.visible,
+    setNight: (k) => { night = k; },
+    village: VILLAGE_AT, dock,
+    spots: {
+      maren: { x: cotX - 0.4, z: cotZ + 2.9, face: 0 },
+      tobin: { x: hut.x - 1.9, z: hut.z + 0.4, face: -Math.PI / 2 },
+      wenna: { x: st.x, z: st.z + 1.0, face: Math.PI },
+      pip: { x: V.x + 2.2, z: V.z + 0.6, face: 0 },
+      beaconView: { x: 13.3, z: 19.2 },
+    },
     name: 'cove', groundAt, walkable, terrainOk, solidAt, findPath, clearLine, update, fx, dummies, solids, spawn, shard,
     debugMap: () => { const rows = []; for (let j = 0; j < N; j += 1) { let s = ''; for (let i = 0; i < N; i += 1) { const h = H[j * N + i], k = K[j * N + i]; s += h <= 0 ? '~' : k === 'sand' ? (h > 0.5 ? 's' : '.') : k === 'stone' ? '#' : k === 'path' ? '=' : String(Math.min(9, Math.floor(h))); } rows.push((H0 + j + '').padStart(4) + ' ' + s); } return rows.join('\n'); },
     sunDir: new V3(-0.7, 0.56, -0.3).normalize(),

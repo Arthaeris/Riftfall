@@ -188,3 +188,33 @@ details[open] summary.gTitle { margin-bottom: 8px; }
 .ldMsg { margin-top: 14px; max-width: 320px; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
 #loading.failed .ldBar, #loading.failed .ldTap { display: none; }
 
+
+/* ---------- the current goal ---------- */
+.quest { position: absolute; left: var(--pad-l); top: calc(var(--pad-t) + 68px); display: flex; align-items: center; gap: 8px; max-width: min(46vw, 360px);
+  font-family: var(--serif); font-style: italic; font-size: 15px; color: var(--ink-2); text-shadow: 0 1px 6px rgba(10, 6, 30, 0.8);
+  opacity: 0; transform: translateX(-6px); transition: opacity 0.6s, transform 0.6s, color 0.6s; }
+.quest.on { opacity: 0.78; transform: none; }
+.quest.fresh { opacity: 1; color: #fff; }
+.qDot { width: 7px; height: 7px; flex: none; transform: rotate(45deg); background: var(--accent-2); box-shadow: 0 0 8px rgba(255, 210, 154, 0.8); }
+.shards:not(.hidden) ~ .quest { top: calc(var(--pad-t) + 70px); }
+
+/* ---------- dialogue ---------- */
+.dlg { position: absolute; left: 0; right: 0; bottom: var(--pad-b); display: flex; justify-content: center; padding: 0 var(--pad-r) 0 var(--pad-l); pointer-events: auto !important; }
+.dlg.hidden { display: none; }
+.dlgBox { position: relative; width: min(640px, 100%); min-height: 96px; padding: 16px 22px 18px; border-radius: 20px;
+  background: linear-gradient(180deg, rgba(30, 24, 62, 0.82), rgba(20, 16, 44, 0.9)); border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 18px 40px -16px rgba(5, 2, 20, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); animation: rise 0.25s ease; }
+.dlgName { position: absolute; top: -13px; left: 18px; padding: 3px 12px; border-radius: 999px; background: #2a2154; border: 1px solid rgba(255, 210, 154, 0.5);
+  font-family: var(--serif); font-size: 15px; color: var(--accent-2); letter-spacing: 0.02em; }
+.dlgName.none { display: none; }
+.dlgText { font-size: 16.5px; line-height: 1.5; font-weight: 600; color: var(--ink); min-height: 2.9em; text-wrap: pretty; }
+.dlgMore { position: absolute; right: 18px; bottom: 10px; width: 10px; height: 10px; border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(45deg); opacity: 0; }
+.dlg.more .dlgMore { opacity: 1; animation: bob 1s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(3px) rotate(45deg); } }
+body.talking .pad, body.talking .joy, body.talking .hint { opacity: 0 !important; pointer-events: none !important; }
+body.talking .pad .act { pointer-events: none; }
+/* the sword button when it offers something else (talking) */
+.act.attack.ctx { color: var(--accent-2); border-color: rgba(255, 210, 154, 0.55); box-shadow: 0 0 0 3px rgba(255, 210, 154, 0.18), 0 10px 24px -10px rgba(8, 4, 24, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+.act.attack.ctx .pips { opacity: 0; }
+body.cine .hud, body.cine .pad, body.cine .quest { opacity: 0 !important; pointer-events: none !important; }

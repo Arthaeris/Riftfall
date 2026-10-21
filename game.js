@@ -622,7 +622,8 @@ function makeFoes(w) {
 
 // ----- going between places: a fade to black, the swap, and a fade back -----
 function travel(to) {
-  if (travelling) return;
+  if (travelling || (to === 'rift' && world === rift) || (to === 'cove' && world === cove)) return;
+  story.state.nearShard = story.state.nearDoor = false; story.state.near = null;
   travelling = { t: 0, to, swapped: false };
   P.path = null; P.vx = P.vz = 0;
   sound.sfx('portal');
@@ -1369,7 +1370,8 @@ function tick(dt) {
   const busy = started && !intro && (story.busy() || !!travelling);
   if (started && !intro && !busy) {
     // the sword button says "Talk" when someone is near: then it talks instead of swinging
-    if (ui.input.attack.pressed && story.tryTalk()) { ui.input.attack.pressed = false; ui.input.attack.down = false; }
+    // (only in the cove: there's no one to talk to and no door to open inside the Rift)
+    if (world === cove && ui.input.attack.pressed && story.tryTalk()) { ui.input.attack.pressed = false; ui.input.attack.down = false; }
     if (ui.input.tap) { if (P.state === 'move' && !ui.input.ranged.down) walkTo(ui.input.tap.x, ui.input.tap.y); ui.input.tap = null; }
     updatePlayer(simDt);
     updateProjectiles(simDt);

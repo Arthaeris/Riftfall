@@ -526,7 +526,7 @@ export function createStory(ctx) {
     S.near = n;
   }
   function tryTalk() {
-    if (S.nearShard && !S.busy) { ctx.travel('rift'); return true; }
+    if (S.nearShard && !S.busy) { S.nearShard = false; ctx.travel('rift'); return true; }
     if (S.nearDoor && !S.busy) { sleep(); return true; }
     if (S.near && !S.busy) { talk(S.near); return true; }
     return false;

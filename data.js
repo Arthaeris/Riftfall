@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -210,8 +210,21 @@ export const STORY = {
     guardian: 'Defeat the Weeping Gardener',
     heartGlass: 'Touch the heart-glass to go home',
     reportRift: 'Tell Maren what you found',
-    rest: 'Rest. Tomorrow, the Prologue ends.',
+    rest: 'Sleep in Maren\u2019s cottage',
+    morning: 'Meet Maren at the lighthouse',
+    ending: '',
+    free: 'The Prologue is complete. The sky has more to say.',
   },
+  // the Prologue in chapters, for the journal in the pause menu (each lists the steps it covers)
+  chapters: [
+    { name: 'The Keeper\u2019s Apprentice', steps: ['findMaren', 'practice', 'reportPractice'] },
+    { name: 'The Dark Beacon', steps: ['beacon', 'dusk'] },
+    { name: 'The First Riftfall', steps: ['toShard', 'seep', 'reportSeep'] },
+    { name: 'The Drowned Orchard', steps: ['enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift'] },
+    { name: 'First Light', steps: ['rest', 'morning', 'ending'] },
+  ],
+  // every step in order (saving and the journal use this)
+  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free'],
   maren: {
     findMaren: [
       'There you are. I thought the tide had taken you.',
@@ -242,9 +255,15 @@ export const STORY = {
       'You came back. And you\u2019re carrying its heart. Let me see that.',
       'An orchard under the sea, and a tree that weeps upward. Hm.',
       'That was somebody\u2019s world once. A small one. Now it\u2019s a splinter in ours.',
-      'Keep the heart-glass safe. Tomorrow we take it up the lighthouse and see what the lamp makes of it.',
+      'Keep the heart-glass safe. Sleep in the cottage tonight; the door\u2019s open. At first light we take it up the lighthouse and see what the lamp makes of it.',
     ],
-    rest: ['Go on, rest. I\u2019ll keep watch.'],
+    rest: ['Go on, the cottage. I\u2019ll keep watch. Somebody has to.'],
+    morning: [
+      'Morning, apprentice. You snore like a foghorn.',
+      'The sky didn\u2019t mend itself overnight. I didn\u2019t expect it to.',
+      'Bring the heart. Up we go, all two hundred steps. Don\u2019t look down, and don\u2019t drop it.',
+    ],
+    free: ['Go and see the village. They\u2019ll want to hear it from you.', 'Keep your blade close. The sky isn\u2019t finished with us.'],
   },
   // after the beacon is lit: night falls, then the first Riftfall
   riftfallAfter: [
@@ -258,17 +277,53 @@ export const STORY = {
     tobin: {
       before: ['The beacon went dark at noon. Didn\u2019t flicker. Just stopped, like it was listening for something.', 'Caught a fish this morning that hummed. Threw it back. Some things you don\u2019t eat.', 'Maren\u2019s up at the cottage. She\u2019s been staring at the sky all day.'],
       after: ['The sky\u2019s open like a cracked bell. My nets came up full of light.', 'Thirty years on this water. I\u2019ve never seen the stars fall up.'],
+      morning: ['The lamp\u2019s gone green as sea-glass. Fish came up to look at it all night.', 'If more of that glass falls, I\u2019m going to need a bigger boat. Or a smaller sea.'],
     },
     wenna: {
       before: ['My bread won\u2019t rise today. Or it rises and keeps on rising. I\u2019ve had to tie a loaf down with string.', 'Take a roll up to the Keeper, would you? She forgets to eat when the sky\u2019s like this.', 'Smells like rain. Rain that smells of glass. Is that a thing?'],
       after: ['Did you see it fall? Like a star with somewhere to be.', 'I\u2019ll keep the oven lit tonight. Nobody should be alone in the dark.'],
+      morning: ['First batch since the sky broke. They rose exactly right. I nearly cried.', 'Here, take a roll. Heroes need breakfast. So do apprentices.'],
     },
     pip: {
       before: ['Are you Maren\u2019s apprentice? Is that a real sword? Can I hold it? Can I\u2014 okay, no.', 'When I grow up I\u2019m going to keep the lamp too. Or be a dragon. Probably the lamp.', 'I hit a dummy once. It hit me back. Well, it fell on me.'],
       after: ['I\u2019m not scared. I\u2019m just standing very close to the well.', 'Did you fight them? What did they look like? Were they slimy? I bet they were slimy.'],
+      morning: ['You went INSIDE the shard? And came OUT? Can I come next time? I\u2019ll be very small.', 'I\u2019m going to be your apprentice. The apprentice\u2019s apprentice. That\u2019s allowed.'],
     },
   },
-  roundEnd: 'End of round 4: the Prologue ends in round 5',
+  // going to sleep in Maren's cottage
+  sleep: [{ who: '', text: 'The cottage smells of lamp oil and salt. You sleep with the heart-glass under your pillow, and it hums all night.' }],
+  // the end of the Prologue, up on the lighthouse gallery. Each beat runs, then its lines are said.
+  ending: {
+    place: [
+      { who: 'maren', text: 'Here. Set it in the lamp. Gently. It remembers being a heart.' },
+    ],
+    lamp: [
+      { who: '', text: 'The lamp drinks the light. Its beam turns the colour of the sea under the Orchard.' },
+      { who: 'maren', text: 'There. One splinter, home again. The lamp keeps it now.' },
+      { who: 'maren', text: 'Every piece that falls is a world, apprentice. Somebody has to carry them back.' },
+    ],
+    stitch: [
+      { who: '', text: 'High above, the crack draws in a little, like a wound remembering how to close.' },
+    ],
+    blur: [
+      { who: '', text: 'Then something presses against it from the other side. A smear, grey as unwet paint, with no colour in it at all.' },
+      { who: 'maren', text: '\u2026No. Not yet. You stay where I left you.' },
+      { who: 'maren', text: 'Forget you heard that.' },
+    ],
+    rain: [
+      { who: '', text: 'The sky answers. All along the horizon, glass begins to fall.' },
+    ],
+    after: [
+      { who: 'maren', text: 'Well. That\u2019s the end of quiet, then.' },
+      { who: 'maren', text: 'Lanternhold needs a keeper who can walk through doors. I\u2019m too old, and you\u2019re too stubborn to say no.' },
+      { who: 'maren', text: 'Get some breakfast. Tomorrow, you start properly.' },
+    ],
+  },
+  endCard: {
+    kicker: 'Riftfall',
+    title: 'End of the Prologue',
+    line: 'The sky over Lanternhold is still breaking. Somewhere behind it, a world without colour is waiting.',
+  },
   riftLines: {
     enter: [{ who: '', text: 'Cold water, and no water at all. You can breathe. Fruit trees sway in a current you can\u2019t feel.' }],
     treasure: 'A Seaglass Heart: your health grows by one heart',
@@ -280,6 +335,7 @@ export const STORY = {
 // ----- the light at evening and at night (game.js blends between them) -----
 export const TIMES = {
   evening: { zenith: '#1d1b4a', mid: '#5b4a8f', horizon: '#f2a37a', glow: '#ffd29a', fog: '#8f7aa8', sun: '#ffc48a', sunI: 3.6, hemiSky: '#aab4e4', hemiGround: '#6b5a48', hemiI: 1.3, grade: [1.04, 0.99, 0.97] },
+  dawn: { zenith: '#5a78bd', mid: '#a7a0d2', horizon: '#ffc59e', glow: '#ffe2b4', fog: '#b4aed4', sun: '#ffd9ae', sunI: 3.1, hemiSky: '#c3d2f2', hemiGround: '#7a6a58', hemiI: 1.4, grade: [1.03, 1.0, 0.99] },
   night: { zenith: '#05071a', mid: '#121838', horizon: '#2c2a58', glow: '#5a5a9a', fog: '#1e2246', sun: '#8fa8ff', sunI: 1.1, hemiSky: '#5a6aa8', hemiGround: '#231e36', hemiI: 0.62, grade: [0.9, 0.96, 1.12] },
 };
 
@@ -332,4 +388,10 @@ export const TEXT = {
   seepClear: 'The Seep falls quiet',
   seepRecharging: 'The shard is gathering itself',
   fallen: 'You wake by the fire',
+  // the title screen and menus
+  title: 'Riftfall',
+  titleSub: 'Prologue \u00b7 The Shattered Sky',
+  newConfirm: 'Begin a new journey? Your saved one will be replaced.',
+  saved: 'Saved',
+  morning: { name: 'First Light', region: 'Lanternhold', line: 'The sky did not mend in the night.' },
 };

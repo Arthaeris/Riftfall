@@ -1,7 +1,7 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, STORY } from '@rf/data';
+import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, STORY } from '@rf/data';
 import { buildPlayer, buildSkyblade, buildTidesling, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
 import { createStory } from '@rf/story';
 import { buildCove, buildRift } from '@rf/world';
@@ -298,6 +298,9 @@ const sound = (() => {
       case 'creak': tone('sawtooth', 110, 140, 0.8, 0.06); hiss('bandpass', 700, 900, 4, 0.8, 0.12); break;
       case 'roomClear': [0, 7, 12].forEach((st, i) => tone('triangle', 587.33 * Math.pow(2, st / 12), 0, 0.5, 0.07, sfxBus, i * 0.1)); break;
       case 'treasure': [0, 4, 7, 12, 16, 19].forEach((st, i) => tone('triangle', 523.25 * Math.pow(2, st / 12), 0, 0.7, 0.08, sfxBus, i * 0.08)); break;
+      case 'wind': hiss('bandpass', 500, 900, 0.6, 3.5, 0.18); hiss('bandpass', 1400, 700, 1.2, 3, 0.06, 0.6); break;
+      case 'blur': tone('sine', 62, 44, 5, 0.35); tone('sawtooth', 93, 88, 4.5, 0.035); hiss('lowpass', 260, 90, 0.5, 4.5, 0.22); [0, 1, 6].forEach((st, i) => tone('sine', 311 * Math.pow(2, st / 12), 0, 2.4, 0.02, sfxBus, 1 + i * 0.9)); break;
+      case 'begin': [0, 7, 12, 19].forEach((st, i) => tone('sine', 293.66 * Math.pow(2, st / 12), 0, 1.6, 0.05, sfxBus, i * 0.12)); hiss('bandpass', 2400, 5000, 2, 1.2, 0.04); break;
       case 'portal': tone('sine', 220, 880, 1.2, 0.15); hiss('bandpass', 600, 3000, 1, 1.0, 0.15); break;
       case 'riftfall': tone('sine', 98, 49, 3.5, 0.3); hiss('lowpass', 300, 80, 0.7, 3, 0.25); break;
     }
@@ -567,26 +570,33 @@ const tc = new THREE.Color(), tc2 = new THREE.Color();
 const mixCol = (target, a, b, k) => target.copy(tc.set(a)).lerp(tc2.set(b), k);
 const SUN_EVE = new V3(-0.75, 0.16, -0.64).normalize(), SUN_NIGHT = new V3(-0.75, -0.3, -0.64).normalize();
 const MOON = new V3(0.42, 0.8, -0.42).normalize();
+let timeK = 0;
+const SUN_DAWN = new V3(0.86, 0.1, -0.3).normalize(), DAWN_LIGHT = new V3(0.72, 0.6, -0.34).normalize();
+// k: 0 = evening, 1 = night, 2 = dawn
 function setTime(k) {
-  const A = TIMES.evening, B = TIMES.night, U = SKY_UNIFORMS;
-  mixCol(U.uZenith.value, A.zenith, B.zenith, k);
-  mixCol(U.uMid.value, A.mid, B.mid, k);
-  mixCol(U.uHorizon.value, A.horizon, B.horizon, k);
-  mixCol(U.uGlow.value, A.glow, B.glow, k);
-  U.uSunDir.value.copy(SUN_EVE).lerp(SUN_NIGHT, k).normalize();
-  U.uNight.value = k;
-  mixCol(scene.fog.color, A.fog, B.fog, k);
+  const dawn = k > 1, A = dawn ? TIMES.night : TIMES.evening, B = dawn ? TIMES.dawn : TIMES.night, U = SKY_UNIFORMS;
+  const u = dawn ? Math.min(1, k - 1) : k;
+  mixCol(U.uZenith.value, A.zenith, B.zenith, u);
+  mixCol(U.uMid.value, A.mid, B.mid, u);
+  mixCol(U.uHorizon.value, A.horizon, B.horizon, u);
+  mixCol(U.uGlow.value, A.glow, B.glow, u);
+  if (dawn) U.uSunDir.value.copy(SUN_NIGHT).lerp(SUN_DAWN, u).normalize();
+  else U.uSunDir.value.copy(SUN_EVE).lerp(SUN_NIGHT, u).normalize();
+  U.uNight.value = dawn ? 1 - u : u;
+  mixCol(scene.fog.color, A.fog, B.fog, u);
   scene.background.copy(scene.fog.color);
-  mixCol(sun.color, A.sun, B.sun, k);
-  sun.intensity = lerp(A.sunI, B.sunI, k);
-  mixCol(hemi.color, A.hemiSky, B.hemiSky, k);
-  mixCol(hemi.groundColor, A.hemiGround, B.hemiGround, k);
-  hemi.intensity = lerp(A.hemiI, B.hemiI, k);
-  // the sun's low evening light gives way to moonlight from high up
-  lightDir.copy(cove.sunDir).lerp(MOON, smooth(k)).normalize();
-  post.final.uniforms.grade.value.set(lerp(A.grade[0], B.grade[0], k), lerp(A.grade[1], B.grade[1], k), lerp(A.grade[2], B.grade[2], k));
-  renderer.toneMappingExposure = 1.0 + k * 0.15;
-  cove.setNight(k);
+  mixCol(sun.color, A.sun, B.sun, u);
+  sun.intensity = lerp(A.sunI, B.sunI, u);
+  mixCol(hemi.color, A.hemiSky, B.hemiSky, u);
+  mixCol(hemi.groundColor, A.hemiGround, B.hemiGround, u);
+  hemi.intensity = lerp(A.hemiI, B.hemiI, u);
+  // the sun's low evening light gives way to moonlight from high up, and the moon to the first light from the east
+  if (dawn) lightDir.copy(MOON).lerp(DAWN_LIGHT, smooth(u)).normalize();
+  else lightDir.copy(cove.sunDir).lerp(MOON, smooth(u)).normalize();
+  post.final.uniforms.grade.value.set(lerp(A.grade[0], B.grade[0], u), lerp(A.grade[1], B.grade[1], u), lerp(A.grade[2], B.grade[2], u));
+  renderer.toneMappingExposure = dawn ? 1.15 - u * 0.15 : 1.0 + u * 0.15;
+  cove.setNight(dawn ? 1 - u : u);
+  timeK = k;
 }
 
 // ----- creatures for a place (the cove's Seep, the Rift's rooms) -----
@@ -604,6 +614,9 @@ function makeFoes(w) {
     pullPlayer: (dx, dz) => { if (P.state !== 'dead' && !P.iframes) tryMove(dx, dz); },
     bossBar: (name, frac) => ui.bossBar(name, frac),
     onGuardianDown: (f) => riftEvent('guardianDown', f),
+    onKill: () => { stats.calmed++; },
+    // the Seep only wakes while the story needs it; afterwards the stone circle stays quiet
+    seepAwake: () => ['toShard', 'seep'].includes(story.state.step),
   });
 }
 
@@ -666,18 +679,21 @@ function swapTo(to) {
     setTime(1);
     // you step out beside the Seep, which has gone quiet for now
     foes.rest();
-    const S = cove.seep;
-    let spot = { x: S.x, z: S.z - S.r - 1.6 };
-    for (const a of [-Math.PI / 2, -Math.PI / 3, -2 * Math.PI / 3, 0, Math.PI]) {
-      const x = S.x + Math.cos(a) * (S.r + 1.6), z = S.z + Math.sin(a) * (S.r + 1.6);
-      if (cove.walkable(x, z, cove.groundAt(x, z), 0.6)) { spot = { x, z }; break; }
-    }
-    P.x = spot.x; P.z = spot.z; P.y = cove.groundAt(P.x, P.z); P.face = Math.atan2(S.x - P.x, S.z - P.z);
+    placeBySeep();
     ui.setMap(null);
   }
   ui.setContext(null);
   camLook.set(P.x, P.y + 0.6, P.z);
   camPos.copy(camLook).addScaledVector(camDir, camDist);
+}
+function placeBySeep() {
+  const S = cove.seep;
+  let spot = { x: S.x, z: S.z - S.r - 1.6 };
+  for (const a of [-Math.PI / 2, -Math.PI / 3, -2 * Math.PI / 3, 0, Math.PI]) {
+    const x = S.x + Math.cos(a) * (S.r + 1.6), z = S.z + Math.sin(a) * (S.r + 1.6);
+    if (cove.walkable(x, z, cove.groundAt(x, z), 0.6)) { spot = { x, z }; break; }
+  }
+  P.x = spot.x; P.z = spot.z; P.y = cove.groundAt(P.x, P.z); P.face = Math.atan2(S.x - P.x, S.z - P.z);
 }
 async function arrived(to) {
   if (to === 'rift') {
@@ -719,7 +735,133 @@ function playtestJump(where) {
     if (world !== cove) { ui.toast('You are already in the Rift'); return; }
     story.jump('enterRift');
     travel('rift');
+  } else if (where === 'morning') {
+    if (world !== cove) { ui.toast('Leave the Rift first'); return; }
+    curtainTo(1, 0.5).then(() => {
+      story.applyState('morning');
+      const d = cove.spots.lighthouseDoor;
+      P.x = d.x + 0.4; P.z = d.z + 2.2; P.y = cove.groundAt(P.x, P.z); P.face = Math.PI;
+      snapCamera();
+      curtainTo(0, 1);
+      ui.titleCard(TEXT.morning.name, TEXT.morning.region, TEXT.morning.line);
+    });
   }
+}
+
+// ----- the curtain: a fade to black the story can lower and raise -----
+const curtain = { k: 0, to: 0, speed: 1, done: null };
+function curtainTo(k, sec) {
+  return new Promise((resolve) => {
+    if (curtain.done) curtain.done();
+    curtain.to = k; curtain.speed = 1 / Math.max(0.01, sec); curtain.done = resolve;
+  });
+}
+function updateCurtain(dt) {
+  if (curtain.k === curtain.to) { if (curtain.done) { const d = curtain.done; curtain.done = null; d(); } return; }
+  curtain.k = curtain.to > curtain.k ? Math.min(curtain.to, curtain.k + dt * curtain.speed) : Math.max(curtain.to, curtain.k - dt * curtain.speed);
+}
+function snapCamera() {
+  gameplayCam(wantPos, wantLook);
+  camLook.copy(wantLook); camPos.copy(wantPos); camBlend = 0;
+}
+
+// ===========================================================================
+// Saving: one journey, kept on this device. It saves whenever the story moves on, every little while,
+// and when you leave the page. The Rift isn't saved room by room: a journey saved inside it resumes at the shard.
+// ===========================================================================
+const SAVE_KEY = 'riftfall-save';
+let stats = { time: 0, falls: 0, calmed: 0 }, savedAt = 0, saveSoon = -1, saveClock = 0, ended = false;
+function readSave() {
+  try { const d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); return d && d.v === 1 && d.step ? d : null; } catch (_) { return null; }
+}
+function writeSave() {
+  if (!started || intro) return;
+  const st = story.state;
+  const steady = world === cove && !travelling && P.state !== 'dead' && !st.ending && !st.cine;
+  const data = { v: 1, version: VERSION, step: st.step, hits: st.hits, maxHp: P.maxHp, shards: P.shards, pos: steady ? { x: +P.x.toFixed(2), z: +P.z.toFixed(2) } : null, stats: { ...stats }, ended, savedAt: Date.now() };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); savedAt = Date.now(); ui.savedMark(); } catch (_) { /* private mode: progress lives only as long as the page */ }
+}
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (_) { /* fine */ } }
+const chapterOf = (step) => STORY.chapters.find((c) => c.steps.includes(step)) || STORY.chapters[STORY.chapters.length - 1];
+// what the journal in the pause menu shows
+function journey() {
+  const step = story.state.step, now = STORY.order.indexOf(step);
+  const chapters = STORY.chapters.map((c) => {
+    const first = STORY.order.indexOf(c.steps[0]), last = STORY.order.indexOf(c.steps[c.steps.length - 1]);
+    return { name: c.name, state: now > last ? 'done' : now >= first ? 'now' : 'later' };
+  });
+  const o = STORY.objectives[step];
+  const ago = savedAt ? Math.round((Date.now() - savedAt) / 60000) : -1;
+  return {
+    objective: typeof o === 'function' ? o(story.state.hits, STORY.practiceHits) : o,
+    chapters,
+    stats: { time: stats.time, slivers: P.shards, calmed: stats.calmed, falls: stats.falls },
+    savedAgo: ago < 0 ? 'Not saved yet' : ago < 1 ? 'Saved just now' : `Saved ${ago} min ago`,
+  };
+}
+function saveAndQuit() {
+  writeSave();
+  ui.resume();
+  curtainTo(1, 0.6).then(() => location.reload());
+}
+
+// ----- the title screen and starting a journey -----
+function showTitle() {
+  const save = readSave();
+  ui.titleMenu({
+    save: save && { chapter: chapterOf(save.step).name, time: (save.stats && save.stats.time) || 0, ended: !!save.ended },
+    onContinue: () => beginJourney(save),
+    onNew: () => beginJourney(null),
+  });
+}
+async function beginJourney(save) {
+  if (started) return;
+  ui.closeTitle();
+  sound.init();
+  // iPhones only let sound start on a finished tap, so try again when the finger lifts
+  const unlock = () => sound.init();
+  addEventListener('touchend', unlock, { once: true });
+  addEventListener('click', unlock, { once: true });
+  sound.sfx('begin');
+  await curtainTo(1, 0.7);
+  ui.input.any = false;
+  if (!save) {
+    clearSave();
+    stats = { time: 0, falls: 0, calmed: 0 };
+    P.x = cove.spawn.x; P.z = cove.spawn.z; P.y = cove.spawn.y;
+    started = true;
+    intro = { t: 0, skippable: false };
+    sound.sfx('wake');
+    curtainTo(0, 1.2);
+    return;
+  }
+  // put the cove back as the journey left it
+  stats = Object.assign({ time: 0, falls: 0, calmed: 0 }, save.stats);
+  ended = !!save.ended;
+  P.maxHp = save.maxHp || P.maxHp; P.hp = P.maxHp; P.shards = save.shards || 0;
+  ui.setShards(P.shards);
+  const step = story.applyState(save.step, save.hits || 0);
+  if (save.step !== step && step === 'enterRift') { foes.rest(); placeBySeep(); }
+  else if (save.pos && cove.walkable(save.pos.x, save.pos.z, cove.groundAt(save.pos.x, save.pos.z), 0.4)) { P.x = save.pos.x; P.z = save.pos.z; P.y = cove.groundAt(P.x, P.z); }
+  else if (['morning', 'free'].includes(step)) { const d = cove.spots.lighthouseDoor; P.x = d.x + 0.4; P.z = d.z + 2.2; P.y = cove.groundAt(P.x, P.z); }
+  else { P.x = cove.spawn.x; P.z = cove.spawn.z; P.y = cove.spawn.y; }
+  P.face = Math.PI * 0.85;
+  started = true;
+  snapCamera();
+  ui.show(true);
+  sound.sfx('wake');
+  const pl = ['morning', 'free'].includes(step) ? TEXT.morning : PLACES.cove;
+  setTimeout(() => ui.titleCard(pl.name, pl.region, pl.line), 500);
+  curtainTo(0, 1.4);
+  savedAt = save.savedAt || 0;
+}
+// the end of the Prologue: save, then the card, then whatever you choose
+async function onEnding() {
+  ended = true;
+  writeSave();
+  const choice = await ui.endCard({ time: stats.time, slivers: P.shards, calmed: stats.calmed, falls: stats.falls });
+  if (choice === 'title') { saveAndQuit(); return 'title'; }
+  return 'keep';
 }
 
 // ----- getting hurt, falling, waking by the fire -----
@@ -743,6 +885,7 @@ function hurtPlayer(dmg, fx, fz) {
   return true;
 }
 function fallDown() {
+  stats.falls++;
   P.state = 'dead'; P.t = 0; P.path = null; P.kx *= 0.4; P.kz *= 0.4;
   sound.sfx('fall');
   for (const st of [ui.input.attack, ui.input.ranged]) st.down = false;
@@ -1136,7 +1279,12 @@ const wantPos = new V3(), wantLook = new V3();
 let camBlend = 0, camDist = CONFIG.camera.dist, cineView = null, camFocus = null;
 function updateCamera(dt, t) {
   gameplayCam(wantPos, wantLook);
-  if (intro) {
+  if (!started) {
+    // the title screen: a slow drift around the island at dusk
+    const a = 2.2 + t * 0.03;
+    camPos.set(6 + Math.cos(a) * 36, 21 + Math.sin(t * 0.11) * 1.5, -4 + Math.sin(a) * 36);
+    camLook.set(9 + Math.cos(a) * 6, 4.5, -6 + Math.sin(a) * 6);
+  } else if (intro) {
     if (started) intro.t += dt;
     const T = intro.t;
     // looking up at the crack in the sky, then down to the cove and the apprentice
@@ -1263,10 +1411,19 @@ function tick(dt) {
   // the screen: a red pulse when you're hurt, colour draining and a fade to black when you fall, and back
   hurtFlash = Math.max(0, hurtFlash - dt * 3.5);
   if (P.waking) { P.waking = Math.max(0, P.waking - dt * 1.1); fade = P.waking; }
+  updateCurtain(dt);
+  const dark = Math.max(fade, curtain.k);
+  // the journey's clock, and saving now and then
+  if (started && !intro) {
+    stats.time += dt;
+    if (saveSoon >= 0) { saveSoon -= dt; if (saveSoon < 0) writeSave(); }
+    saveClock += dt;
+    if (saveClock > 30 && !busy && world === cove) { saveClock = 0; writeSave(); }
+  }
   const FU = post.final.uniforms;
   cineFlash.k = Math.max(0, cineFlash.k - dt * 1.6);
   if (cineFlash.k > 0.01) { FU.flashCol.value.setRGB(cineFlash.r, cineFlash.g, cineFlash.b); FU.flash.value = cineFlash.k; }
-  else if (fade > 0) { FU.flashCol.value.setRGB(0.02, 0.01, 0.05); FU.flash.value = fade; }
+  else if (dark > 0) { FU.flashCol.value.setRGB(0.02, 0.01, 0.05); FU.flash.value = dark; }
   else { FU.flashCol.value.setRGB(0.85, 0.08, 0.16); FU.flash.value = hurtFlash * 0.22; }
   FU.sat.value = 1.08 * deadSat;
   FU.vig.value = 0.42 + (1 - deadSat) * 0.4 + hurtFlash * 0.25;
@@ -1297,6 +1454,8 @@ try {
     onPrefs: () => { applyQuality(); sound.volumes(); },
     onLocked: () => { sound.sfx('deny'); ui.toast('Abilities awaken later in the Prologue'); },
     onJump: (where) => playtestJump(where),
+    onTitle: () => saveAndQuit(),
+    journey,
     sfx: (n) => sound.sfx(n),
   });
   setupPlayer();
@@ -1308,28 +1467,25 @@ try {
     focus: (f) => { camFocus = f; },
     safe: (sec) => { P.safe = sec; },
     travel: (to) => travel(to),
+    curtain: (k, sec) => curtainTo(k, sec),
+    snapCamera: () => snapCamera(),
+    onStep: () => { saveSoon = 0.6; },
+    onEnding: () => onEnding(),
   });
   setTime(0);
   applyQuality();
-  // first frame of the opening shot, drawn behind the loading veil
-  intro = { t: 0, skippable: false };
-  gameplayCam(wantPos, wantLook);
-  camPos.copy(wantPos); camLook.copy(wantLook);
+  // the title screen's view of the island, drawn behind the loading veil
+  intro = null;
+  updateCamera(0, 0);
   scene.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
   ui.setHearts(P.hp, P.maxHp);
   requestAnimationFrame(frame);
-  loadingDone(() => {
-    sound.init();
-    // iPhones only let sound start on a finished tap, so try again when the finger lifts
-    const unlock = () => sound.init();
-    addEventListener('touchend', unlock, { once: true });
-    addEventListener('click', unlock, { once: true });
-    sound.sfx('wake');
-    started = true;
-    intro = { t: 0, skippable: false };
-    ui.input.any = false;
-  });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  // the cove is ready: lift the veil and show the title menu over it
+  loadingDone();
+  setTimeout(showTitle, 450);
+  addEventListener('pagehide', () => writeSave());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
+  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

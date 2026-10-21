@@ -1,7 +1,7 @@
 /* Riftfall — ui.js
    Everything on top of the 3D view: touch controls, keyboard & mouse, the quiet HUD, title cards,
-   hints, damage numbers, and the pause & settings sheet. */
-import { VERSION, TEXT } from '@rf/data';
+   hints, damage numbers, the title menu, the pause sheet (journey, settings, help) and the end of the Prologue. */
+import { VERSION, TEXT, STORY } from '@rf/data';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
@@ -29,6 +29,8 @@ const ICON = {
   lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5" fill="currentColor"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2.4" fill="none"/></svg>',
   talk: '<svg viewBox="0 0 48 48"><path d="M9 12h30a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4H22l-8 7v-7H9a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4z" fill="currentColor"/><circle cx="16" cy="23" r="2.6" fill="#1d1b4a"/><circle cx="24" cy="23" r="2.6" fill="#1d1b4a"/><circle cx="32" cy="23" r="2.6" fill="#1d1b4a"/></svg>',
   enter: '<svg viewBox="0 0 48 48"><path d="M12 42V18a12 12 0 0 1 24 0v24z" fill="none" stroke="currentColor" stroke-width="4"/><path d="M24 14l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="currentColor"/></svg>',
+  sleep: '<svg viewBox="0 0 48 48"><path d="M30 8a16 16 0 1 0 12 25A13 13 0 0 1 30 8z" fill="currentColor"/><path d="M34 12h6l-6 7h6" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" fill="none" opacity=".8"/></svg>',
+  lantern: '<svg viewBox="0 0 24 24"><path d="M9 4h6M12 2v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 7h10l-1 11H8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10c1.6 1.8 1.6 3.6 0 5-1.6-1.4-1.6-3.2 0-5z" fill="currentColor"/><path d="M6 20h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/></svg>',
 };
 
@@ -264,7 +266,10 @@ export function createUI(opts) {
     const k = e.key.toLowerCase();
     input.any = true;
     if (talk.lines || performance.now() - talk.ended < 400) return;   // keys go to the conversation, not the apprentice
-    if (k === 'escape' || k === 'p') { opts.isPaused() ? resume() : pause(); return; }
+    if (k === 'escape' || k === 'p') {
+      if (!opts.isStarted() || ended) { if (!sheet.classList.contains('hidden')) resume(); return; }
+      opts.isPaused() ? resume() : pause(); return;
+    }
     if (keys[k]) return;
     keys[k] = true;
     if (k === ' ' || k === 'shift' || k === 'l') { input.roll.pressed = true; e.preventDefault(); }
@@ -356,7 +361,7 @@ export function createUI(opts) {
   function advance() {
     if (!talk.lines || performance.now() - talk.last < 140) return;
     talk.last = performance.now();
-    if (talk.shown < talk.full.length) { talk.shown = talk.full.length; return; }
+    if (talk.shown < talk.full.length) { talk.shown = talk.full.length; dlg.querySelector('.dlgText').textContent = talk.full; dlg.classList.add('more'); return; }
     talk.i++;
     if (talk.i < talk.lines.length) { showLine(); return; }
     dlg.classList.add('hidden');
@@ -383,9 +388,9 @@ export function createUI(opts) {
   function setContext(kind) {
     if (kind === ctxKind) return;
     ctxKind = kind;
-    bAttack.querySelector('.ic').innerHTML = kind === 'talk' ? ICON.talk : kind === 'enter' ? ICON.enter : ICON.sword;
+    bAttack.querySelector('.ic').innerHTML = ICON[kind] || ICON.sword;
     bAttack.classList.toggle('ctx', !!kind);
-    bAttack.setAttribute('aria-label', kind === 'talk' ? 'Talk' : kind === 'enter' ? 'Enter' : 'Attack');
+    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep' }[kind] || 'Attack');
   }
 
   // ----- the guardian's health, across the top of the screen -----
@@ -462,54 +467,98 @@ export function createUI(opts) {
     setTimeout(() => { t.classList.remove('on'); setTimeout(() => t.remove(), 400); }, 2200);
   }
 
-  // ----- pause & settings -----
+  // ----- the pause sheet: your journey so far, settings, and help -----
   const sheet = el('div', 'veil hidden');
   sheet.innerHTML = `
     <div class="sheet glass" role="dialog" aria-label="Paused">
-      <div class="sheetHead"><div><div class="kicker">Lanternhold</div><h2>Paused</h2></div><button class="x" data-act="resume" aria-label="Resume">✕</button></div>
-      <button class="primary" data-act="resume">Resume</button>
-      <div class="group">
-        <div class="gTitle">Graphics</div>
-        <div class="seg" data-pref="quality">
-          <button data-v="auto">Auto</button><button data-v="high">High</button><button data-v="medium">Balanced</button><button data-v="low">Battery</button>
+      <div class="sheetHead"><div><div class="kicker shKick">Lanternhold</div><h2 class="shTitle">Paused</h2></div><button class="x" data-act="resume" aria-label="Close">✕</button></div>
+      <div class="seg tabs" role="tablist"><button data-tab="journey">Journey</button><button data-tab="settings">Settings</button><button data-tab="help">Help</button></div>
+      <section class="tab jGrid" data-tab="journey">
+        <div>
+          <div class="jObj"><i class="qDot"></i><span></span></div>
+          <ol class="chapters"></ol>
         </div>
-        <p class="sub">Auto starts on High and steps down if your phone needs it.</p>
-      </div>
-      <div class="group">
-        <div class="gTitle">Sound</div>
-        <label class="row"><span>Music</span><input type="range" min="0" max="1" step="0.05" data-pref="music"></label>
-        <label class="row"><span>Effects</span><input type="range" min="0" max="1" step="0.05" data-pref="sfx"></label>
-      </div>
-      <div class="group">
-        <div class="gTitle">Play</div>
-        <label class="row"><span>Screen shake</span><input type="checkbox" class="sw" data-pref="shake"></label>
-        <label class="row"><span>Damage numbers</span><input type="checkbox" class="sw" data-pref="numbers"></label>
-        <label class="row"><span>Left-handed buttons</span><input type="checkbox" class="sw" data-pref="lefty"></label>
-      </div>
-      <div class="group">
-        <div class="gTitle">Playtest shortcuts</div>
-        <div class="jumps"><button data-jump="riftfall">Skip to the Riftfall</button><button data-jump="rift">Go into the Rift</button></div>
-        <p class="sub">For testing only: these skip story steps. Saving arrives in round 5.</p>
-      </div>
-      <details class="group help">
-        <summary class="gTitle">Controls</summary>
-        <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
-        <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
-      </details>
-      <div class="foot">Riftfall v${VERSION} · Prologue, round 4</div>
+        <div>
+          <div class="stats"></div>
+          <button class="primary" data-act="resume">Resume</button>
+          <button class="ghost" data-act="title">Save and return to title</button>
+          <p class="sub jSaved"></p>
+        </div>
+      </section>
+      <section class="tab" data-tab="settings">
+        <div class="group">
+          <div class="gTitle">Graphics</div>
+          <div class="seg" data-pref="quality">
+            <button data-v="auto">Auto</button><button data-v="high">High</button><button data-v="medium">Balanced</button><button data-v="low">Battery</button>
+          </div>
+          <p class="sub">Auto starts on High and steps down if your phone needs it.</p>
+        </div>
+        <div class="group">
+          <div class="gTitle">Sound</div>
+          <label class="row"><span>Music</span><input type="range" min="0" max="1" step="0.05" data-pref="music"></label>
+          <label class="row"><span>Effects</span><input type="range" min="0" max="1" step="0.05" data-pref="sfx"></label>
+        </div>
+        <div class="group">
+          <div class="gTitle">Play</div>
+          <label class="row"><span>Screen shake</span><input type="checkbox" class="sw" data-pref="shake"></label>
+          <label class="row"><span>Damage numbers</span><input type="checkbox" class="sw" data-pref="numbers"></label>
+          <label class="row"><span>Left-handed buttons</span><input type="checkbox" class="sw" data-pref="lefty"></label>
+        </div>
+      </section>
+      <section class="tab help" data-tab="help">
+        <div class="group">
+          <div class="gTitle">Controls</div>
+          <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
+          <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
+        </div>
+        <div class="group">
+          <div class="gTitle">Saving</div>
+          <p>Your journey saves itself on this device whenever something happens, and every little while. Look for the small lantern in the corner.</p>
+        </div>
+        <details class="group playtest">
+          <summary class="gTitle">Playtest shortcuts</summary>
+          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button></div>
+          <p class="sub">For testing only: these skip story steps.</p>
+        </details>
+      </section>
+      <div class="foot">Riftfall v${VERSION} · Prologue</div>
     </div>`;
   root.appendChild(sheet);
+  let tab = 'journey', titleMode = false, ended = false;
+  const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+  const fmtTime = (sec) => { const m = Math.floor(sec / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  const statsHtml = (st) => [[fmtTime(st.time), 'On the island'], [st.slivers, 'Skyglass'], [st.calmed, 'Creatures calmed'], [st.falls, 'Falls']]
+    .map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
+  function setTab(t) {
+    tab = t;
+    sheet.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+    sheet.querySelectorAll('section.tab').forEach((x) => x.classList.toggle('hidden', x.dataset.tab !== t));
+  }
+  function syncJourney() {
+    const j = opts.journey && opts.journey();
+    if (!j) return;
+    $('.jObj span', sheet).textContent = j.objective || 'Wander. Nothing is asked of you right now.';
+    $('.chapters', sheet).innerHTML = j.chapters.map((c, i) => `<li class="${c.state}"><em>${ROMAN[i]}</em><span>${c.name}</span></li>`).join('');
+    $('.stats', sheet).innerHTML = statsHtml(j.stats);
+    $('.jSaved', sheet).textContent = j.savedAgo;
+  }
   function syncSheet() {
-    sheet.querySelectorAll('.seg button').forEach((b) => b.classList.toggle('on', prefs.quality === b.dataset.v));
+    sheet.querySelectorAll('[data-pref] button').forEach((b) => b.classList.toggle('on', prefs.quality === b.dataset.v));
     sheet.querySelectorAll('input[data-pref]').forEach((i) => { if (i.type === 'checkbox') i.checked = !!prefs[i.dataset.pref]; else i.value = prefs[i.dataset.pref]; });
+    sheet.classList.toggle('titleMode', titleMode);
+    $('.shTitle', sheet).textContent = titleMode ? (tab === 'help' ? 'Controls' : 'Settings') : 'Paused';
+    $('.shKick', sheet).textContent = titleMode ? 'Riftfall' : 'Lanternhold';
+    if (!titleMode) syncJourney();
   }
   sheet.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act], [data-jump], .seg button');
+    const t = e.target.closest('[data-act], [data-jump], [data-tab], .seg button');
     if (e.target === sheet) { resume(); return; }
     if (!t) return;
     if (t.dataset.act === 'resume') { resume(); return; }
+    if (t.dataset.act === 'title') { opts.onTitle && opts.onTitle(); return; }
     if (t.dataset.jump) { resume(); opts.onJump && opts.onJump(t.dataset.jump); return; }
-    if (t.parentElement.classList.contains('seg')) { prefs.quality = t.dataset.v; changed(); }
+    if (t.dataset.tab && t.parentElement.classList.contains('tabs')) { setTab(t.dataset.tab); syncSheet(); opts.sfx && opts.sfx('tick'); return; }
+    if (t.parentElement.dataset.pref === 'quality') { prefs.quality = t.dataset.v; changed(); }
   });
   sheet.addEventListener('input', (e) => {
     const i = e.target;
@@ -519,7 +568,9 @@ export function createUI(opts) {
   });
   function changed() { savePrefs(prefs); syncSheet(); applyLayout(); opts.onPrefs && opts.onPrefs(prefs); opts.sfx && opts.sfx('tick'); }
   function pause() {
-    if (opts.isPaused()) return;
+    if (opts.isPaused() || ended) return;
+    titleMode = false;
+    setTab('journey');
     syncSheet();
     sheet.classList.remove('hidden');
     opts.onPause && opts.onPause();
@@ -529,9 +580,118 @@ export function createUI(opts) {
     touches.clear(); joy.style.display = 'none'; aimRing.style.display = 'none';
     pad.querySelectorAll('.held').forEach((b) => b.classList.remove('held'));
   }
-  function resume() { sheet.classList.add('hidden'); opts.onResume && opts.onResume(); }
+  function resume() {
+    if (sheet.classList.contains('hidden')) return;
+    sheet.classList.add('hidden');
+    if (titleMode) { titleMode = false; const f = $('.tBtn', titleEl); f && f.focus(); return; }
+    opts.onResume && opts.onResume();
+  }
+  // from the title screen: the same sheet, without the journey
+  function openSettings(which) {
+    titleMode = true;
+    setTab(which);
+    syncSheet();
+    sheet.classList.remove('hidden');
+  }
   pauseBtn.addEventListener('click', () => { pause(); opts.sfx && opts.sfx('open'); });
   document.addEventListener('visibilitychange', () => { if (document.hidden && opts.isStarted()) pause(); });
+
+  // ----- "Saved": a small lantern that glows for a moment in the corner -----
+  const savedEl = el('div', 'savedMark', `<i>${ICON.lantern}</i><span>${TEXT.saved}</span>`);
+  hud.appendChild(savedEl);
+  let savedT = null;
+  function savedMark() {
+    savedEl.classList.remove('on'); void savedEl.offsetWidth; savedEl.classList.add('on');
+    clearTimeout(savedT); savedT = setTimeout(() => savedEl.classList.remove('on'), 1800);
+  }
+
+  // ----- the title menu, floating over the cove -----
+  const titleEl = el('div', 'title hidden');
+  titleEl.innerHTML = `
+    <div class="tShade"></div>
+    <div class="tCol">
+      <div class="tKicker">The Shattered Sky</div>
+      <h1 class="tMark">${TEXT.title}</h1>
+      <div class="tSub">Prologue</div>
+      <nav class="tMenu">
+        <button class="tBtn main" data-t="continue"><span>Continue</span><small></small></button>
+        <button class="tBtn" data-t="new"><span>New journey</span><small></small></button>
+        <button class="tBtn" data-t="settings"><span>Settings</span></button>
+        <button class="tBtn" data-t="help"><span>Controls</span></button>
+      </nav>
+    </div>
+    <div class="tFoot">v${VERSION} · your journey is saved on this device</div>
+    <div class="confirm hidden"><div class="cBox glass"><p>${TEXT.newConfirm}</p><div class="cBtns"><button class="ghost" data-c="no">Keep it</button><button class="primary" data-c="yes">Begin anew</button></div></div></div>`;
+  root.appendChild(titleEl);
+  let titleOpts = null;
+  function titleMenu(o) {
+    titleOpts = o;
+    const cont = $('[data-t="continue"]', titleEl), fresh = $('[data-t="new"]', titleEl);
+    cont.classList.toggle('hidden', !o.save);
+    fresh.classList.toggle('main', !o.save);
+    $('span', fresh).textContent = o.save ? 'New journey' : 'Begin';
+    $('small', fresh).textContent = o.save ? '' : 'A lighthouse, an apprentice, a sky about to break';
+    if (o.save) $('small', cont).textContent = o.save.ended ? `Prologue complete · ${fmtTime(o.save.time)}` : `${o.save.chapter} · ${fmtTime(o.save.time)}`;
+    titleEl.classList.remove('hidden', 'out');
+    void titleEl.offsetWidth;
+    titleEl.classList.add('in');
+    setTimeout(() => { const f = $('.tBtn:not(.hidden)', titleEl); f && f.focus({ preventScroll: true }); }, 50);
+  }
+  function closeTitle() { if (titleEl.classList.contains('hidden') || titleEl.classList.contains('out')) return; titleEl.classList.add('out'); titleEl.classList.remove('in'); setTimeout(() => titleEl.classList.add('hidden'), 700); }
+  titleEl.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-t], [data-c]');
+    if (!b || !titleOpts || titleEl.classList.contains('out')) return;
+    opts.sfx && opts.sfx('tick');
+    const conf = $('.confirm', titleEl);
+    if (b.dataset.c === 'no') { conf.classList.add('hidden'); return; }
+    if (b.dataset.c === 'yes') { conf.classList.add('hidden'); closeTitle(); titleOpts.onNew(); return; }
+    const t = b.dataset.t;
+    if (t === 'continue') { closeTitle(); titleOpts.onContinue(); }
+    else if (t === 'new') { if (titleOpts.save) { conf.classList.remove('hidden'); $('[data-c="no"]', conf).focus(); } else { closeTitle(); titleOpts.onNew(); } }
+    else openSettings(t);
+  });
+  // arrow keys move between the menu items
+  titleEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const list = [...titleEl.querySelectorAll('.tBtn:not(.hidden)')];
+    const i = list.indexOf(document.activeElement);
+    const n = list[(i + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length];
+    if (n) { n.focus(); e.preventDefault(); }
+  });
+
+  // ----- the end of the Prologue -----
+  const endEl = el('div', 'endCard hidden');
+  endEl.innerHTML = `
+    <div class="ecInner">
+      <div class="tcRegion">${STORY.endCard.kicker}</div>
+      <h1 class="ecTitle">${STORY.endCard.title}</h1>
+      <div class="ecRule"></div>
+      <p class="ecLine">${STORY.endCard.line}</p>
+      <div class="stats"></div>
+      <div class="ecBtns"><button class="ghost" data-e="title">Return to title</button><button class="primary" data-e="keep">Keep exploring</button></div>
+      <p class="sub">Your journey is saved. More of the sky is coming.</p>
+    </div>`;
+  root.appendChild(endEl);
+  function endCard(stats) {
+    ended = true;
+    $('.stats', endEl).innerHTML = statsHtml(stats);
+    endEl.classList.remove('hidden', 'out');
+    void endEl.offsetWidth;
+    endEl.classList.add('in');
+    return new Promise((resolve) => {
+      const on = (e) => {
+        const b = e.target.closest('[data-e]');
+        if (!b) return;
+        endEl.removeEventListener('click', on);
+        opts.sfx && opts.sfx('tick');
+        ended = false;
+        endEl.classList.add('out');
+        setTimeout(() => endEl.classList.add('hidden'), 900);
+        resolve(b.dataset.e);
+      };
+      endEl.addEventListener('click', on);
+    });
+  }
 
   // ----- the ability button shows its (still locked) charge -----
   // cooldown rings fill back up; pips show where you are in the sword combo
@@ -551,23 +711,16 @@ export function createUI(opts) {
 
   return {
     input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
+    titleMenu, closeTitle, endCard, savedMark, fmtTime,
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }
 
-// The loading veil and the first tap (which also wakes the sound on iPhones)
-export function loadingDone(onStart) {
+// The loading veil: it fades once the cove is built and drawn, and the title menu takes over
+export function loadingDone() {
   const ld = $('#loading');
-  ld.classList.add('ready');
-  const go = () => {
-    ld.removeEventListener('pointerdown', go);
-    window.removeEventListener('keydown', go);
-    ld.classList.add('gone');
-    setTimeout(() => ld.remove(), 1200);
-    onStart();
-  };
-  ld.addEventListener('pointerdown', go);
-  window.addEventListener('keydown', go);
+  ld.classList.add('ready', 'gone');
+  setTimeout(() => ld.remove(), 1200);
 }
 export function loadingFailed(msg) {
   const ld = $('#loading');

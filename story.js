@@ -1,6 +1,7 @@
 /* Riftfall — story.js
    The people of Lanternhold, talking to them, and the Prologue as it unfolds:
-   finding Maren, practice, the dock beacon, nightfall, and the first Riftfall. */
+   finding Maren, practice, the dock beacon, nightfall, the first Riftfall, a night's sleep,
+   and the end of the Prologue up on the lighthouse. Also puts the world back as it was for a saved journey. */
 import * as THREE from 'three';
 import { STORY, NPCS, TEXT } from '@rf/data';
 import { buildNpc, buildRiftCrack, SKY_UNIFORMS, Batch, MAT, clamp, lerp, TAU } from '@rf/art';
@@ -9,7 +10,8 @@ const smooth = (t) => t * t * (3 - 2 * t);
 const angTo = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 
 // ctx (from game.js): scene, world, foes, P, ui, sound, sparks, bits, shake(k), flash(r, g, b, k), setTime(k),
-//                     cine(view | null), focus(target | null), safe(seconds)
+//                     cine(view | null), focus(target | null), safe(seconds), travel(to),
+//                     curtain(k, seconds) -> Promise, onStep(step), onEnding() -> Promise<'keep' | 'title'>
 export function createStory(ctx) {
   const { scene, world, P, ui, sound, sparks, bits } = ctx;
   const S = { step: 'findMaren', hits: 0, night: 0, nightTo: 0, cine: null, busy: false, talkTarget: null };
@@ -40,13 +42,30 @@ export function createStory(ctx) {
     scene.add(m);
     return m;
   })();
-  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift'].includes(S.step);
+  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning'].includes(S.step);
+  // put someone somewhere at once (between scenes), or send them walking there
+  function place(n, spot, walk) {
+    if (walk) { n.goal = { x: spot.x, z: spot.z, face: spot.face || 0 }; return; }
+    n.goal = null; n.x = spot.x; n.z = spot.z; n.face = spot.face || 0; n.solid.x = n.x; n.solid.z = n.z; n.speed = 0;
+  }
 
   function updateNpcs(dt) {
     const now = performance.now() / 1000;
     for (const n of npcs) {
       const m = n.m;
       n.phase += dt;
+      // someone with somewhere to be walks there (Maren, going to sit by her bench)
+      if (n.goal && !n.talking) {
+        const dx = n.goal.x - n.x, dz = n.goal.z - n.z, d = Math.hypot(dx, dz);
+        if (d < 0.08) { n.x = n.goal.x; n.z = n.goal.z; n.face += angTo(n.face, n.goal.face) * Math.min(1, dt * 4); n.speed = lerp(n.speed, 0, Math.min(1, dt * 8)); if (Math.abs(angTo(n.face, n.goal.face)) < 0.05) n.goal = null; }
+        else {
+          n.speed = lerp(n.speed, 1.6, Math.min(1, dt * 5));
+          const st = Math.min(d, n.speed * dt);
+          n.x += dx / d * st; n.z += dz / d * st;
+          n.face += angTo(n.face, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
+        }
+        n.solid.x = n.x; n.solid.z = n.z;
+      }
       // Pip wanders around the well, stopping to look at things
       if (n.id === 'pip' && !n.talking) {
         if (!n.wander || n.wander.wait > 0) {
@@ -74,7 +93,7 @@ export function createStory(ctx) {
       const look = d < 5 && !n.talking ? clamp(angTo(n.face, want), -1.0, 1.0) : 0;
       m.head.rotation.y = lerp(m.head.rotation.y, look * 0.8, Math.min(1, dt * 5));
       // pose: breathing, a walk cycle for Pip, gestures while talking
-      const walk = n.speed / 2.2;
+      const walk = Math.min(1, n.speed / (n.id === 'pip' ? 2.2 : 1.6));
       const ph = n.phase * 9;
       m.legL.rotation.x = Math.sin(ph) * 0.7 * walk; m.legR.rotation.x = -Math.sin(ph) * 0.7 * walk;
       m.body.position.y = Math.sin(n.phase * 2) * 0.008 + Math.abs(Math.sin(ph)) * 0.05 * walk;
@@ -83,14 +102,14 @@ export function createStory(ctx) {
       else m.armL.rotation.set(-Math.sin(ph) * 0.6 * walk + (n.id === 'tobin' ? -0.2 : 0), 0, 0);
       m.armR.rotation.set(talkArm + Math.sin(ph) * 0.5 * walk, 0, n.talking ? -0.2 : 0);
       if (n.id === 'tobin') m.body.rotation.x = 0.08;   // a fisherman's stoop
-      m.root.position.set(n.x, world.groundAt(n.x, n.z), n.z);
+      m.root.position.set(n.x, n.yOver !== undefined ? n.yOver : world.groundAt(n.x, n.z), n.z);
       m.root.rotation.y = n.face;
       if (n.id === 'maren' && m.lamp) m.lamp.rotation.z = Math.sin(n.phase * 1.7) * 0.15;
     }
     // the marker bobs over Maren
     const mn = byId('maren');
     mark.visible = hasNews() && !S.cine;
-    mark.position.set(mn.x, world.groundAt(mn.x, mn.z) + 2.25 + Math.sin(now * 2.5) * 0.08, mn.z);
+    mark.position.set(mn.x, (mn.yOver !== undefined ? mn.yOver : world.groundAt(mn.x, mn.z)) + 2.25 + Math.sin(now * 2.5) * 0.08, mn.z);
     mark.rotation.y = now * 1.6;
   }
 
@@ -113,7 +132,8 @@ export function createStory(ctx) {
     let lines;
     if (n.id === 'maren') lines = (STORY.maren[S.step] || STORY.maren.rest).map((t) => line('maren', t));
     else {
-      const set = STORY.villagers[n.id][S.night > 0.5 ? 'after' : 'before'];
+      const V = STORY.villagers[n.id];
+      const set = ['morning', 'ending', 'free'].includes(S.step) ? V.morning : V[S.night > 0.5 ? 'after' : 'before'];
       lines = [line(n.id, set[n.line % set.length])];
       n.line++;
     }
@@ -127,17 +147,19 @@ export function createStory(ctx) {
     if (S.step === 'findMaren') setStep('practice');
     else if (S.step === 'reportPractice') { setStep('beacon'); if (world.beacon.on) beaconLit(); }
     else if (S.step === 'reportSeep') setStep('enterRift');
-    else if (S.step === 'reportRift') { setStep('rest'); ui.toast(STORY.roundEnd); sound.sfx('clear'); }
+    else if (S.step === 'reportRift') { setStep('rest'); place(byId('maren'), world.spots.marenRest, true); }
+    else if (S.step === 'morning') ending();
   }
 
   // ---------------------------------------------------------------------------
   // The Prologue, step by step
   // ---------------------------------------------------------------------------
-  function setStep(step) {
+  function setStep(step, quiet) {
     S.step = step;
     const o = STORY.objectives[step];
-    ui.setObjective(typeof o === 'function' ? o(S.hits, STORY.practiceHits) : o);
-    if (step !== 'findMaren') sound.sfx('quest');
+    ui.setObjective(typeof o === 'function' ? o(S.hits, STORY.practiceHits) : o || '');
+    if (step !== 'findMaren' && !quiet) sound.sfx('quest');
+    if (ctx.onStep) ctx.onStep(step);
   }
   function onDummyHit() {
     if (S.step !== 'practice') return;
@@ -286,18 +308,200 @@ export function createStory(ctx) {
   }
 
   // ---------------------------------------------------------------------------
+  // Little clocks for scripted scenes: wait a while, or ease a value somewhere (both run on game time,
+  // so pausing the game pauses the scene)
+  // ---------------------------------------------------------------------------
+  const timers = [], tweens = [];
+  const wait = (sec) => new Promise((resolve) => timers.push({ t: sec, resolve }));
+  function tween(obj, key, to, sec) {
+    for (let i = tweens.length - 1; i >= 0; i--) if (tweens[i].obj === obj && tweens[i].key === key) tweens.splice(i, 1);
+    tweens.push({ obj, key, from: obj[key], to, sec, t: 0 });
+  }
+  function updateTimers(dt) {
+    for (let i = timers.length - 1; i >= 0; i--) { timers[i].t -= dt; if (timers[i].t <= 0) { const r = timers[i].resolve; timers.splice(i, 1); r(); } }
+    for (let i = tweens.length - 1; i >= 0; i--) {
+      const w = tweens[i];
+      w.t += dt;
+      const k = smooth(Math.min(1, w.t / w.sec));
+      w.obj[w.key] = w.from + (w.to - w.from) * k;
+      if (k >= 1) tweens.splice(i, 1);
+    }
+  }
+  // 0 = evening, 1 = night, 2 = dawn (each half eased)
+  const timeOf = (n) => n <= 1 ? smooth(n) : 1 + smooth(n - 1);
+  const say = (lines) => ui.say(lines.map((l) => line(l.who, l.text)));
+
+  // ---------------------------------------------------------------------------
+  // A night's sleep in Maren's cottage, and morning
+  // ---------------------------------------------------------------------------
+  async function sleep() {
+    S.busy = true;
+    ui.setContext(null);
+    sound.sfx('doorOpen');
+    await ctx.curtain(1, 1.1);
+    await say(STORY.sleep);
+    // while the screen is dark: dawn, and Maren goes up to the lighthouse
+    S.night = S.nightTo = 2;
+    ctx.setTime(2);
+    place(byId('maren'), world.spots.marenMorning);
+    const door = world.spots.cottageDoor;
+    P.x = door.x; P.z = door.z + 0.9; P.y = world.groundAt(P.x, P.z); P.face = 0.6;
+    ctx.snapCamera();
+    await wait(0.6);
+    sound.sfx('wake');
+    ctx.curtain(0, 1.6);
+    ui.titleCard(TEXT.morning.name, TEXT.morning.region, TEXT.morning.line);
+    S.busy = false;
+    setStep('morning');
+  }
+
+  // ---------------------------------------------------------------------------
+  // The end of the Prologue: up on the lighthouse gallery, the heart-glass goes into the lamp,
+  // the crack starts to close, something presses back from the other side, and the sky rains glass
+  // ---------------------------------------------------------------------------
+  let rainT = 0, rainLeft = 0;
+  async function ending() {
+    if (S.ending) return;
+    S.ending = true; S.busy = true;
+    setStep('ending', true);
+    ui.setContext(null);
+    const G = world.spots.gallery, crackDir = world.crackDir, mn = byId('maren');
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    ui.show(false);
+    document.body.classList.add('cine');
+    ctx.safe(999);
+    await ctx.curtain(1, 1.0);
+    // up the two hundred steps: the two of you on the gallery, either side of the lamp
+    P.x = G.x + 0.95; P.z = G.z + 0.4; P.y = G.y; P.face = -Math.PI / 2 - 0.3;
+    place(mn, { x: G.x - 0.95, z: G.z + 0.4, face: Math.PI / 2 + 0.3 });
+    mn.yOver = G.y;
+    const galleryShot = { pos: V(G.x + 1.2, G.y + 2.6, G.z + 7.2), look: V(G.x, G.y + 1.0, G.z), k: 0.0000001 };
+    ctx.cine(galleryShot);
+    await wait(0.4);
+    ctx.curtain(0, 1.4);
+    sound.sfx('wind');
+    await wait(1.6);
+    await say(STORY.ending.place);
+    // the heart goes into the lamp
+    ctx.cine({ pos: V(G.x + 0.4, G.y + 1.7, G.z + 4.4), look: V(G.x, G.y + 1.0, G.z), k: 0.04 });
+    await wait(0.9);
+    world.setLamp(1);
+    sound.sfx('treasure');
+    ctx.flash(0.62, 0.98, 1, 0.55);
+    ctx.shake(0.15);
+    for (let i = 0; i < 40; i++) { const a = Math.random() * TAU; sparks.spawn({ x: G.x, y: G.y + 1.3, z: G.z, vx: Math.cos(a) * 2.2, vy: Math.random() * 2.5, vz: Math.sin(a) * 2.2, drag: 2, grav: 1, life: 1.2, size: 0.16, color: i % 3 ? '#9ff3ff' : '#ff9fe0', glow: 3 }); }
+    await wait(2.4);
+    await say(STORY.ending.lamp);
+    // look up: the crack begins to close
+    const skyFrom = V(G.x - 1.4, G.y + 1.2, G.z + 4.6);
+    ctx.cine({ pos: skyFrom, look: skyFrom.clone().addScaledVector(crackDir, 60), k: 0.025 });
+    await wait(2.4);
+    sound.sfx('shimmer');
+    tween(SKY_UNIFORMS.uCrackGrow, 'value', 0.68, 3.2);
+    await wait(3.2);
+    await say(STORY.ending.stitch);
+    // ... and something presses back
+    sound.sfx('blur');
+    tween(SKY_UNIFORMS.uBlur, 'value', 1, 4.5);
+    tween(SKY_UNIFORMS.uCrackPower, 'value', 0.7, 4.5);
+    ctx.shake(0.25);
+    await wait(4.2);
+    await say(STORY.ending.blur);
+    // the sky answers: the Blur withdraws, the crack tears wide again, and glass falls everywhere
+    tween(SKY_UNIFORMS.uBlur, 'value', 0, 1.2);
+    tween(SKY_UNIFORMS.uCrackGrow, 'value', 1, 0.8);
+    tween(SKY_UNIFORMS.uCrackPower, 'value', 1.6, 0.8);
+    sound.sfx('crack'); sound.sfx('riftfall');
+    ctx.flash(1, 1, 1, 0.6);
+    ctx.shake(0.7);
+    await wait(0.9);
+    ctx.cine({ pos: V(G.x + 7, G.y + 2.5, G.z + 13), look: V(G.x - 8, G.y + 9, G.z - 40), k: 0.02 });
+    rainLeft = 7;
+    await wait(2.6);
+    await say(STORY.ending.rain);
+    await wait(2.4);
+    tween(SKY_UNIFORMS.uCrackPower, 'value', 1, 2);
+    // back on the gallery: the two of you turn to the sea
+    P.face = 0.15; mn.face = -0.15;
+    ctx.cine({ pos: V(G.x + 0.3, G.y + 2.0, G.z + 6.0), look: V(G.x, G.y + 1.0, G.z + 0.3), k: 0.03 });
+    await wait(2.0);
+    await say(STORY.ending.after);
+    await ctx.curtain(1, 1.6);
+    // set everything down for afterwards: back on the ground by the lighthouse door, the lamp sea-green
+    rainLeft = 0;
+    mn.yOver = undefined;
+    place(mn, world.spots.marenMorning);
+    const d = world.spots.lighthouseDoor;
+    P.x = d.x + 0.6; P.z = d.z + 0.6; P.y = world.groundAt(P.x, P.z); P.face = 0;
+    ctx.cine(null);
+    ctx.snapCamera();
+    ctx.safe(0);
+    S.ending = false;
+    setStep('free', true);
+    const choice = await ctx.onEnding();
+    if (choice === 'title') return;
+    document.body.classList.remove('cine');
+    ui.show(true);
+    S.busy = false;
+    await ctx.curtain(0, 1.4);
+  }
+  // glass raining into the sea all along the horizon
+  function updateRain(dt) {
+    if (rainLeft <= 0) return;
+    rainLeft -= dt;
+    rainT -= dt;
+    if (rainT > 0) return;
+    rainT = 0.08 + Math.random() * 0.14;
+    const G = world.spots.gallery;
+    const from = new THREE.Vector3(G.x, 0, G.z).addScaledVector(world.crackDir, 80);
+    from.x += (Math.random() - 0.5) * 50; from.y = 55 + Math.random() * 20;
+    const a = -Math.PI * (0.05 + Math.random() * 0.9), r = 55 + Math.random() * 70;   // somewhere out to sea, north of the island
+    const to = new THREE.Vector3(G.x + Math.cos(a) * r, -1, G.z + Math.sin(a) * r);
+    streaks.push({ from, to, t: 0, dur: 1.0 + Math.random() * 0.9 });
+    if (Math.random() < 0.25) sound.sfx('streak');
+  }
+
+  // ---------------------------------------------------------------------------
+  // A saved journey: put the cove back as it stood at that step (also used by the playtest shortcuts)
+  // ---------------------------------------------------------------------------
+  function applyState(step, hits = 0) {
+    const O = STORY.order, at = (x) => O.indexOf(x);
+    // the Rift is grown fresh each time, so a journey saved inside it resumes at the shard
+    if (['rift', 'guardian', 'heartGlass'].includes(step)) step = 'enterRift';
+    if (step === 'seep') step = 'toShard';
+    if (step === 'ending') step = 'morning';
+    if (at(step) < 0) step = 'findMaren';
+    S.riftIn = undefined; S.cine = null; S.hits = hits;
+    if (at(step) > at('beacon')) world.beacon.light();
+    if (step === 'dusk') { setStep('beacon', true); beaconLit(); return 'beacon'; }
+    if (at(step) >= at('toShard')) {
+      S.night = S.nightTo = 1; ctx.setTime(1);
+      SKY_UNIFORMS.uCrackPower.value = 1; SKY_UNIFORMS.uCrackGrow.value = 1;
+      world.setShard(true);
+    }
+    const mn = byId('maren');
+    if (at(step) >= at('rest')) place(mn, world.spots.marenRest);
+    if (at(step) >= at('morning')) { S.night = S.nightTo = 2; ctx.setTime(2); place(mn, world.spots.marenMorning); }
+    if (step === 'free') world.setLamp(1, true);
+    setStep(step, true);
+    return step;
+  }
+
+  // ---------------------------------------------------------------------------
   // Every frame
   // ---------------------------------------------------------------------------
   function update(dt) {
     updateNpcs(dt);
     updateStreaks(dt);
+    updateRain(dt);
     // evening into night
     if (S.night !== S.nightTo) {
       S.night = S.nightTo > S.night ? Math.min(S.nightTo, S.night + dt / 7) : Math.max(S.nightTo, S.night - dt / 7);
-      ctx.setTime(smooth(S.night));
+      ctx.setTime(timeOf(S.night));
     }
     if (S.riftIn !== undefined) { S.riftIn -= dt; if (S.riftIn <= 0) { S.riftIn = undefined; startRiftfall(); } }
     if (S.cine) updateCine(dt);
+    updateTimers(dt);
     // the Seep is waiting for you once the shard is down
     if (S.step === 'toShard' && world.shardOn() && ctx.foes.seep.sealed) setStep('seep');
     if (S.step === 'seep' && !ctx.foes.seep.sealed) setStep('toShard');   // you fell and woke by the fire: try again
@@ -313,22 +517,27 @@ export function createStory(ctx) {
       const a = performance.now() / 300 + Math.random() * 0.6, rr = 0.9 + Math.random() * 0.5;
       sparks.spawn({ x: sh.x + Math.cos(a) * rr, y: world.groundAt(sh.x, sh.z) + 0.3 + Math.random() * 2, z: sh.z + Math.sin(a) * rr, vx: -Math.sin(a) * 1.2, vz: Math.cos(a) * 1.2, vy: 0.6, drag: 0.5, life: 1.2, size: 0.14, color: Math.random() < 0.5 ? '#9ff3ff' : '#ff9fe0', glow: 3, flicker: 1 });
     }
+    // at the end of the long night, the cottage door offers sleep
+    const door = world.spots.cottageDoor;
+    S.nearDoor = S.step === 'rest' && !S.busy && P.state === 'move' && Math.hypot(P.x - door.x, P.z - door.z) < 1.7;
     // the sword button offers "Talk" when someone is close and nothing is fighting you
     const n = !S.busy && P.state === 'move' && !ctx.foes.seep.sealed ? nearestTalker() : null;
-    ui.setContext(S.nearShard ? 'enter' : n ? 'talk' : null);
+    ui.setContext(S.nearShard ? 'enter' : S.nearDoor ? 'sleep' : n ? 'talk' : null);
     S.near = n;
   }
   function tryTalk() {
     if (S.nearShard && !S.busy) { ctx.travel('rift'); return true; }
+    if (S.nearDoor && !S.busy) { sleep(); return true; }
     if (S.near && !S.busy) { talk(S.near); return true; }
     return false;
   }
   function begin() { setStep('findMaren'); }
 
-  return { update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, say: (lines) => ui.say(lines.map((l) => line(l.who, l.text))), busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
+  return { update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, applyState, say, busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
     // for testing: skip ahead
     if (step === 'beacon') { setStep('beacon'); }
     else if (step === 'riftfall') { beaconLit(); S.riftIn = 0.1; }
+    else if (step === 'morning' || step === 'free') applyState(step);
     else if (step === 'night' || step === 'enterRift') { S.night = S.nightTo = 1; S.riftIn = undefined; ctx.setTime(1); SKY_UNIFORMS.uCrackPower.value = 1; SKY_UNIFORMS.uCrackGrow.value = 1; world.setShard(true); world.beacon.light(); setStep(step === 'night' ? 'toShard' : 'enterRift'); }
     else setStep(step);
   } };

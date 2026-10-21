@@ -174,6 +174,7 @@ export function buildCove(scene) {
   const lhX = 21.5, lhZ = -15.5;
   const lh = PROPS.lighthouse(b, g, lhX, cellH(lhX, lhZ), lhZ);
   solids.push({ x: lhX, z: lhZ, r: 1.75, h: 12 }); take(lhX, lhZ, 2);
+  take(lhX, lhZ + 3.5, 2);   // keep the way to the lighthouse door clear
   const cotX = 1.5, cotZ = -16.5, cotY = cellH(cotX, cotZ);
   PROPS.cottage(b, g, cotX, cotY, cotZ, 0);
   boxes.push({ x0: cotX - 2.3, z0: cotZ - 1.9, x1: cotX + 2.3, z1: cotZ + 1.9, h: 5 }); take(cotX, cotZ, 3);
@@ -490,6 +491,15 @@ export function buildCove(scene) {
   const lampLight = new THREE.PointLight(0xffd59a, 30, 22, 1.6);
   lampLight.position.set(lhX, lh.lampY, lhZ);
   scene.add(lampLight);
+  // once the heart-glass is set in it, the lamp turns to sea-glass: a turning heart inside, and a cooler beam
+  const lampHeart = buildHeartGlass();
+  lampHeart.scale.setScalar(0.55);
+  lampHeart.position.set(lhX, lh.lampY + 0.05, lhZ);
+  lampHeart.visible = false;
+  scene.add(lampHeart);
+  const LAMP_WARM = new THREE.Color('#ffe2a0').multiplyScalar(0.9), LAMP_SEA = new THREE.Color('#9ff3ff').multiplyScalar(1.05);
+  const LIGHT_WARM = new THREE.Color(0xffd59a), LIGHT_SEA = new THREE.Color('#8ff0ff');
+  let lampK = 0, lampTo = 0;
   const windowLight = new THREE.PointLight(0xffb86b, 7, 7, 1.6);
   windowLight.position.set(cotX + 0.9, cotY + 1.6, cotZ + 2.3);
   scene.add(windowLight);
@@ -688,6 +698,12 @@ export function buildCove(scene) {
     WIND.uTime.value = t;
     sea.material.uniforms.uTime.value = t;
     beam.rotation.y = t * 0.45;
+    if (lampK !== lampTo) lampK = lampTo > lampK ? Math.min(lampTo, lampK + dt / 2.2) : Math.max(lampTo, lampK - dt / 2.2);
+    beamMat.uniforms.uColor.value.copy(LAMP_WARM).lerp(LAMP_SEA, lampK);
+    lampLight.color.copy(LIGHT_WARM).lerp(LIGHT_SEA, lampK);
+    lampHeart.visible = lampK > 0.02;
+    lampHeart.scale.setScalar(0.55 * Math.min(1, lampK * 1.6));
+    lampHeart.rotation.y = t * 0.9;
     // at night every warm light counts for more
     const nk = 1 + night * 1.3;
     lampLight.intensity = (30 + Math.sin(t * 2.3) * 2) * nk;
@@ -762,7 +778,14 @@ export function buildCove(scene) {
       wenna: { x: st.x, z: st.z + 1.0, face: Math.PI },
       pip: { x: V.x + 2.2, z: V.z + 0.6, face: 0 },
       beaconView: { x: 13.3, z: 19.2 },
+      cottageDoor: { x: cotX - 0.6, z: cotZ + 2.2 },
+      marenRest: { x: cotX + 2.6, z: cotZ + 2.9, face: -0.4 },
+      lighthouseDoor: { x: lhX, z: lhZ + 2.6 },
+      marenMorning: { x: lhX - 1.5, z: lhZ + 2.4, face: 0.5 },
+      // up on the gallery, beside the lamp (y is the gallery floor)
+      gallery: { x: lhX, y: lh.lampY - 0.55, z: lhZ },
     },
+    setLamp: (k, instant) => { lampTo = k; if (instant) lampK = k; },
     name: 'cove', groundAt, walkable, terrainOk, solidAt, findPath, clearLine, update, fx, dummies, solids, spawn, shard,
     debugMap: () => { const rows = []; for (let j = 0; j < N; j += 1) { let s = ''; for (let i = 0; i < N; i += 1) { const h = H[j * N + i], k = K[j * N + i]; s += h <= 0 ? '~' : k === 'sand' ? (h > 0.5 ? 's' : '.') : k === 'stone' ? '#' : k === 'path' ? '=' : String(Math.min(9, Math.floor(h))); } rows.push((H0 + j + '').padStart(4) + ' ' + s); } return rows.join('\n'); },
     sunDir: new V3(-0.7, 0.56, -0.3).normalize(),

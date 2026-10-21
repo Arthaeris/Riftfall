@@ -565,12 +565,13 @@ export const SKY_UNIFORMS = {
   uCrackPower: { value: 0 },     // 0 until the first Riftfall
   uCrackGrow: { value: 1 },      // 0 -> 1: the crack spreading out from its first point
   uNight: { value: 0 },          // 0 = evening, 1 = night
+  uBlur: { value: 0 },           // 0 -> 1: the Blur pressing against the crack from the other side
   uMoonDir: { value: new V3(0.55, 0.5, -0.67).normalize() },
 };
 export const SKY_GLSL = /* glsl */`
 uniform float uTime;
 uniform vec3 uZenith, uMid, uHorizon, uGlow, uSunDir, uCrackDir, uCrack;
-uniform float uCrackPower, uCrackGrow, uNight;
+uniform float uCrackPower, uCrackGrow, uNight, uBlur;
 uniform vec3 uMoonDir;
 float h21(vec2 p) { p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
 vec2 h22(vec2 p) { float n = h21(p); return vec2(n, h21(p + n)); }
@@ -640,9 +641,21 @@ vec3 skyColor(vec3 dir) {
     float reach = uCrackGrow * 1.05;
     float gm = 1.0 - smoothstep(reach - 0.06, reach, r);
     float front = exp(-abs(r - reach) * 28.0) * step(uCrackGrow, 0.999);
-    c = mix(c, beyond * 1.3, hole * uCrackPower * gm);
-    c += uCrack * (ray * 2.4 + ring * 1.8 + core * 2.2 + halo * 0.12) * pulse * uCrackPower * gm;
-    c += uCrack * front * (ray * 7.0 + ring * 5.0 + 0.25) * uCrackPower;
+    // the Blur: a grey smear pressing in from the other side. It drains the colour out of the sky and the light
+    // out of the crack where it presses, and drags slowly sideways
+    float bm = 0.0;
+    if (uBlur > 0.001) {
+      vec2 bq = q - vec2(0.05 + sin(uTime * 0.21) * 0.05, -0.02);
+      float smear = sin(bq.x * 22.0 + uTime * 0.7 + sin(bq.y * 11.0) * 1.6) * 0.5 + 0.5;
+      float shape = smoothstep(0.85, 0.05, length(bq * vec2(0.6, 1.2)));
+      bm = clamp(shape * (0.7 + 0.3 * smear) * uBlur * 1.4, 0.0, 0.97);
+    }
+    float lit = 1.0 - bm;
+    c = mix(c, beyond * 1.3, hole * uCrackPower * gm * lit);
+    c += uCrack * (ray * 2.4 + ring * 1.8 + core * 2.2 + halo * 0.12) * pulse * uCrackPower * gm * lit;
+    c += uCrack * front * (ray * 7.0 + ring * 5.0 + 0.25) * uCrackPower * lit;
+    float lum = min(dot(c, vec3(0.3, 0.5, 0.2)), 1.0);
+    c = mix(c, vec3(0.13, 0.13, 0.15) + lum * 0.18 + vec3(0.06) * ray, bm);
   }
   return c;
 }`;

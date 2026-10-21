@@ -577,6 +577,7 @@ export function createFoes(ctx) {
   }
   function die(f, nx, nz) {
     f.alive = false; f.hittable = false;
+    if (ctx.onKill) ctx.onKill(f);
     const hy = f.y + (f.kind === 'bellfish' ? f.D.hover : 0.35);
     const cols = f.kind === 'mirrorpuddle' ? ['#3f9fc4', '#62c3e0', '#ff9f7a'] : f.kind === 'bellfish' ? ['#e2a5d8', '#f2c8e9', '#ffd27a'] : ['#6b4a33', '#7a5236', '#ffc46b'];
     for (let i = 0; i < 18; i++) {
@@ -706,7 +707,7 @@ export function createFoes(ctx) {
     const inside = Math.hypot(P.x - S.x, P.z - S.z);
     if (seep.state === 'idle') {
       world.setSeepPower(1 + Math.sin(performance.now() / 600) * 0.15);
-      if (inside < S.r - 1.0 && !ctx.playerDead() && world.shardOn()) seal();
+      if (inside < S.r - 1.0 && !ctx.playerDead() && world.shardOn() && (!ctx.seepAwake || ctx.seepAwake())) seal();
     } else if (seep.state === 'rising') {
       seep.rise = Math.min(1, seep.t / 0.9);
       world.setSeepPower(1 + seep.rise);

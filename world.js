@@ -1,6 +1,6 @@
 /* Riftfall — world.js
-   Places: the ground you walk on, what stands on it, what lives in it, and what you can't walk through.
-   Places: Lanternhold and the Keeper's Cove, the first Rift, Gullcliff Caves and the Sunken Belfry (both built by buildCaves), Brinemoor, and the Glass Sea. *
+   Places: the ground you walk on, what stands on it, what lives in it, and what you can't walk through:
+   Lanternhold's Keeper's Cove, the first Rift, Gullcliff Caves and the Sunken Belfry (both from buildCaves), Brinemoor, and the Glass Sea. */
 import * as THREE from 'three';
 import { PALETTE, RIFT } from '@rf/data';
 import { Batch, MAT, PROPS, ORCHARD, rng, fbm, noise, col, shade, pick, clamp, lerp, TAU, buildSea, buildSky, buildGrass, buildBoat, buildDummy, buildFish, buildChest, buildHeartGlass, buildKeepsake, buildKitchen, buildSails, buildGate, buildSailboat, buildBelfryTower, buildMiniIsland, causticMaterial, CAUSTICS, WIND, SKY_UNIFORMS } from '@rf/art';

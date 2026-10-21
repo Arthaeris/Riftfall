@@ -512,6 +512,8 @@ function startRoll() {
   P.rollDir.set(d.x, d.z);
   P.face = Math.atan2(d.x, d.z);
   P.state = 'roll'; P.t = 0; P.rollBuf = 0; P.swing = null; P.path = null;
+  // rolling out of a run carries the run's speed: further, and back into running at the end
+  P.rollRun = !!P.running || (ui.input.run && Math.hypot(P.vx, P.vz) > CONFIG.player.speed * 1.1);
   sound.sfx('roll');
   dust(P.x, P.y, P.z, 5, 1);
   ui.hideHint('roll');
@@ -1079,7 +1081,11 @@ function giveTool(id) { if (!tools.owned.includes(id)) tools.owned.push(id); too
 // the line: a brass hook on a thread of sky-glass
 const tether = (() => {
   const g = new THREE.Group();
-  const line = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#bff6ff').multiplyScalar(1.6) }));
+  // a thread of sky-glass: a bright core inside a fainter glow
+  const line = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#dffbff').multiplyScalar(2.2) }));
+  const glowLine = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#7fe8ff').multiplyScalar(1.2), transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }));
+  glowLine.scale.set(3, 3, 1); line.add(glowLine);
+  line.castShadow = false;
   const hb = new Batch(777);
   hb.box(0.16, 0.16, 0.3, '#e0b85a', 0, 0, 0); for (const sx of [-1, 1]) hb.box(0.06, 0.06, 0.24, '#c9a24a', sx * 0.12, 0, 0.14, { rotY: sx * 0.6 });
   const head = hb.mesh(); head.matrixAutoUpdate = true; head.castShadow = false;
@@ -1134,9 +1140,11 @@ function tetherDir(aim) {
 function useTool(aim) {
   if (tools.cur === 'tether') {
     if (hook || tetherCd > 0 || P.state !== 'move') return;
-    const dir = tetherDir(aim);
-    P.face = Math.atan2(dir.x, dir.z);
+    let dir = tetherDir(aim);
     const tg = tetherTarget(dir);
+    // a target found: aim straight at it, so the hook lands on it
+    if (tg) { const dx = tg.x - P.x, dz = tg.z - P.z, l = Math.hypot(dx, dz) || 1; dir = { x: dx / l, z: dz / l }; }
+    P.face = Math.atan2(dir.x, dir.z);
     const len = tg ? Math.hypot(tg.x - P.x, tg.z - P.z) : TOOLS.tether.range;
     hook = { dir, tg, len, d: 0, back: false, hy: P.y + 1.0 };
     tether.g.visible = true;
@@ -1178,22 +1186,40 @@ function updateHook(dt) {
       } else if (h.tg.kind === 'foe') {
         const f = h.tg.o;
         sound.sfx('tetherBite');
-        if (f.alive) foes.tethered(f);
+        const r = f.alive ? foes.tethered(f) : null;
         h.back = true;
+        // something that comes away is reeled in on the line, still hooked
+        if (r && r.reel) { h.reel = f; h.reelT = 0; }
       }
     }
+  } else if (h.reel) {
+    // reeling a creature in: the line stays on it while it's dragged across the floor toward you
+    const f = h.reel;
+    h.reelT += dt;
+    const dx = P.x - f.x, dz = P.z - f.z, d = Math.hypot(dx, dz);
+    if (!f.alive || d < 1.5 || h.reelT > 0.6) { hook = null; tetherCd = T.cooldown; tether.g.visible = false; return; }
+    const step = Math.min(d - 1.4, 11 * dt);
+    foes.drag(f, dx / d * step, dz / d * step);
+    if (Math.random() < 0.7) dust(f.x, f.y, f.z, 1, 0.4);
+    drawLine(hx, hy, hz, f.x, f.y + 0.5, f.z);
+    return;
   } else {
     h.len -= T.speed * 1.3 * dt;
     if (h.len <= 0) { hook = null; tetherCd = T.cooldown; tether.g.visible = false; return; }
   }
+  // the hook flies from your hand straight to the target (or out along your aim), and back
+  const full = h.tg ? Math.hypot(h.tg.x - P.x, h.tg.z - P.z) || 1 : 1;
   const dd = h.back ? h.len : Math.min(h.d, h.len);
-  const ex = P.x + h.dir.x * dd, ez = P.z + h.dir.z * dd;
-  const ey = h.tg && !h.back ? lerp(hy, h.tg.y, Math.min(1, dd / Math.max(0.01, h.len))) : hy;
+  let ex, ey, ez;
+  if (h.tg) {
+    const k = clamp(dd / full, 0, 1);
+    ex = lerp(hx, h.tg.x, k); ez = lerp(hz, h.tg.z, k); ey = lerp(hy, h.tg.y, k) + Math.sin(k * Math.PI) * 0.25;
+  } else { ex = P.x + h.dir.x * dd; ez = P.z + h.dir.z * dd; ey = hy; }
   drawLine(hx, hy, hz, ex, ey, ez);
 }
 function drawLine(ax, ay, az, bx, by, bz) {
   const dx = bx - ax, dy = by - ay, dz = bz - az, l = Math.hypot(dx, dy, dz) || 0.001;
-  tether.line.scale.set(0.035, 0.035, l);
+  tether.line.scale.set(0.045, 0.045, l);
   tether.line.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
   tether.line.lookAt(bx, by, bz);
   tether.head.position.set(bx, by, bz);
@@ -1212,7 +1238,7 @@ function tetherFly(dt) {
   m.root.position.set(P.x, P.y, P.z); m.root.rotation.y = P.face; m.root.visible = true;
   m.armR.rotation.set(-2.6, 0, 0); m.armL.rotation.set(-0.4, 0, 0.3);
   m.legL.rotation.x = 0.5; m.legR.rotation.x = -0.3;
-  if (k < 0.92) drawLine(P.x, P.y + 1.4, P.z, F.ring.x, F.ring.y, F.ring.z); else tether.g.visible = false;
+  if (k < 0.94) drawLine(P.x + Math.sin(P.face) * 0.2, P.y + 1.5, P.z + Math.cos(P.face) * 0.2, F.ring.x, F.ring.y, F.ring.z); else tether.g.visible = false;
   if (Math.random() < 0.6) sparks.spawn({ x: P.x, y: P.y + 0.8, z: P.z, life: 0.3, size: 0.1, color: '#bff6ff', glow: 2, drag: 4 });
   if (k >= 1) {
     P.state = 'move'; P.t = 0; P.y = F.y1; P.fly = null; tether.g.visible = false;
@@ -1386,6 +1412,8 @@ function deadUpdate(dt) {
     foes.reset();
     ui.bossBar(null);
     if (world.onFell) world.onFell();
+    // in the caves, everything that lives there is back in its place, the guardian included
+    if (world === caves) { populateCaves(); if (story.state.step === 'cavesBoss') story.setStep('caves', true); }
     P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.groundAt(P.x, P.z);
     P.vx = P.vz = P.kx = P.kz = 0;
     P.hp = P.maxHp; P.invuln = 1.5;
@@ -1421,7 +1449,8 @@ function updatePlayer(dt) {
     const p = Math.min(1, P.t / R.duration);
     // a soft push off and a glide that keeps some speed at the end, so you roll straight back into running
     const f = (u) => 0.58 * u + 0.42 * (1 - (1 - u) * (1 - u));
-    const dist = (f(p) - f(Math.max(0, (P.t - dt) / R.duration))) * R.distance;
+    const runK = P.rollRun ? CONFIG.player.runMul : 1;
+    const dist = (f(p) - f(Math.max(0, (P.t - dt) / R.duration))) * R.distance * runK;
     const ox = P.x, oz = P.z;
     tryMove(P.rollDir.x * dist, P.rollDir.y * dist);
     moved = Math.hypot(P.x - ox, P.z - oz);
@@ -1432,9 +1461,10 @@ function updatePlayer(dt) {
     if (p >= 1) {
       P.state = 'move'; P.t = 0; P.iframes = false; P.rollCd = R.cooldown;
       // leave the roll at a running pace in the roll's direction; the stick takes over from there
-      const exit = Math.min(C.speed, R.distance * 0.58 / R.duration);
+      const exit = P.rollRun ? C.speed * C.runMul : Math.min(C.speed, R.distance * 0.58 / R.duration);
       P.vx = P.rollDir.x * exit; P.vz = P.rollDir.y * exit;
-      P.walkK = Math.min(1, exit / C.speed);
+      P.walkK = 1;
+      if (P.rollRun) P.running = true;
       resetPose(true);
       dust(P.x, P.y, P.z, 2, 0.5);
     }
@@ -1949,7 +1979,7 @@ try {
   bits = createBits(scene, 320);
   world.fx.sparks = sparks;
   foesCove = foes = makeFoes(cove, coveRoot);
-  scene.add(aimMark, tapRing);
+  scene.add(aimMark, tapRing, tether.g);
   ui = createUI({
     canvas, prefs,
     isPaused: () => paused,

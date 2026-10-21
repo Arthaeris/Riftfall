@@ -539,7 +539,7 @@ export function buildCove(scene) {
   const wallX = 31, gateZ = -14.5;
   for (const [z0, z1] of [[-44.5, gateZ - 1.3], [gateZ + 1.3, -5.2]]) {
     at(wallX, (z0 + z1) / 2);
-    PROPS.stoneWall(b, wallX, z0, wallX, z1, cellH(wallX, z0), cellH(wallX, z1), r);
+    PROPS.stoneWall(b, wallX, z0, wallX, z1, cellH(wallX, z0), cellH(wallX, z1), r, cellH);
     for (let z = z0; z <= z1; z += 0.5) solids.push({ x: wallX, z, r: 0.45, h: 1.2 });
   }
   const gateMesh = buildGate(2.2);
@@ -641,7 +641,7 @@ export function buildCove(scene) {
     const mx = 54, mz = 30, my = cellH(mx, mz);
     at(mx, mz);
     for (const [x0, z0, x1, z1] of [[mx - 3, mz - 3, mx + 3, mz - 3], [mx - 3, mz - 3, mx - 3, mz + 1.5], [mx + 3, mz - 3, mx + 3, mz + 3]]) {
-      PROPS.stoneWall(b, x0, z0, x1, z1, my, my, r);
+      PROPS.stoneWall(b, x0, z0, x1, z1, my, my, r, cellH);
       for (let t = 0; t <= 1; t += 0.12) solids.push({ x: lerp(x0, x1, t), z: lerp(z0, z1, t), r: 0.45, h: 1.2 });
     }
     b.box(0.5, 4.2, 0.5, '#6b4a33', mx, my + 2.1, mz + 3.4); b.box(2.6, 0.3, 0.3, '#5d3d26', mx, my + 4.1, mz + 3.4, { rotZ: 0.6 });

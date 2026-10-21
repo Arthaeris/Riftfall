@@ -624,23 +624,42 @@ vec3 skyColor(vec3 dir) {
     float fu = fract(uj);
     float dRay = min(fu, 1.0 - fu) * (6.2831853 / NS) * r;
     float len = 0.22 + 0.75 * h21(vec2(floor(uj + 0.5), 7.0));
-    float ray = (1.0 - smoothstep(0.0012, 0.0045 + 0.004 * r, dRay)) * smoothstep(len, len * 0.55, r) * smoothstep(0.015, 0.05, r);
+    // the main fractures: a bright core with a cyan-to-rose fringe either side, thicker near the impact
+    float wid = 0.0010 + 0.0034 * r + 0.0016 * smoothstep(0.12, 0.0, r);
+    float reachRay = smoothstep(len, len * 0.55, r) * smoothstep(0.012, 0.045, r);
+    float ray = (1.0 - smoothstep(wid * 0.45, wid, dRay)) * reachRay;
+    float rayFringe = (1.0 - smoothstep(wid, wid * 3.2, dRay)) * reachRay;
     float rk = r * 7.0 + h21(vec2(sector, 1.0)) * 0.9;
     float fr = fract(rk);
     float dRing = min(fr, 1.0 - fr) / 7.0;
     float ringOn = step(0.3, h21(vec2(sector, floor(rk + 0.5)))) * smoothstep(0.5, 0.38, r) * smoothstep(0.05, 0.09, r);
-    float ring = (1.0 - smoothstep(0.0012, 0.004, dRing)) * ringOn;
-    float hole = step(0.86, h21(vec2(sector, floor(rk)) + 5.0)) * step(r, 0.3) * step(0.07, r);
+    float ring = (1.0 - smoothstep(0.0010, 0.0034, dRing)) * ringOn;
+    float ringFringe = (1.0 - smoothstep(0.0034, 0.009, dRing)) * ringOn;
+    float paneId = h21(vec2(sector, floor(rk)) + 5.0);
+    float hole = step(0.86, paneId) * step(r, 0.3) * step(0.07, r);
     float core = smoothstep(0.09, 0.0, r);
     float halo = smoothstep(0.6, 0.0, r);
     float pulse = 0.85 + 0.15 * sin(uTime * 1.3) + 0.08 * sin(uTime * 3.7 + r * 12.0);
-    // through the missing pieces: a shifting, many-coloured sky from somewhere else
+    // light runs outward along the fractures in slow beads, each fracture in its own rhythm
+    float flow = pow(0.5 + 0.5 * sin(r * 38.0 - uTime * 2.4 + sector * 1.7), 8.0) * smoothstep(0.03, 0.1, r);
+    // the panes between the fractures: each a piece of glass at its own angle, catching the light its own way
+    float inside = smoothstep(0.5, 0.06, r) * (1.0 - hole);
+    float paneTilt = (h21(vec2(sector * 1.3, floor(rk) + 9.0)) - 0.5);
+    float glint = pow(max(0.0, sin(uTime * 0.55 + paneId * 31.0)), 24.0);
+    // through the missing pieces: a shifting, many-coloured sky from somewhere else, with stars that aren't ours
     vec3 beyond = mix(vec3(0.98, 0.55, 0.92), vec3(0.35, 0.95, 1.0), 0.5 + 0.5 * sin(ang * 2.0 + uTime * 0.35 + r * 9.0));
     beyond = mix(beyond, vec3(1.0, 0.85, 0.5), 0.5 + 0.5 * sin(q.x * 30.0 - uTime * 0.6) * sin(q.y * 26.0));
-    // while it's spreading, only the part inside its reach shows, with a bright front running outward
+    #ifndef SKY_LQ
+      vec2 sq = q * 90.0 + vec2(uTime * 0.6, 0.0);
+      float st2 = h21(floor(sq));
+      beyond += vec3(1.0, 0.95, 1.0) * step(0.965, st2) * smoothstep(0.35, 0.0, length(fract(sq) - 0.5)) * (0.6 + 0.4 * sin(uTime * 4.0 + st2 * 40.0)) * 1.6;
+      beyond *= 0.75 + 0.25 * sin(r * 60.0 - uTime * 1.2);
+    #endif
+    // while it's spreading, only the part inside its reach shows, with a bright, crackling front running outward
     float reach = uCrackGrow * 1.05;
     float gm = 1.0 - smoothstep(reach - 0.06, reach, r);
-    float front = exp(-abs(r - reach) * 28.0) * step(uCrackGrow, 0.999);
+    float crackle = 0.65 + 0.35 * h21(vec2(floor(uTime * 24.0), sector));
+    float front = exp(-abs(r - reach) * 28.0) * step(uCrackGrow, 0.999) * crackle;
     // the Blur: a grey smear pressing in from the other side. It drains the colour out of the sky and the light
     // out of the crack where it presses, and drags slowly sideways
     float bm = 0.0;
@@ -651,9 +670,35 @@ vec3 skyColor(vec3 dir) {
       bm = clamp(shape * (0.7 + 0.3 * smear) * uBlur * 1.4, 0.0, 0.97);
     }
     float lit = 1.0 - bm;
-    c = mix(c, beyond * 1.3, hole * uCrackPower * gm * lit);
-    c += uCrack * (ray * 2.4 + ring * 1.8 + core * 2.2 + halo * 0.12) * pulse * uCrackPower * gm * lit;
-    c += uCrack * front * (ray * 7.0 + ring * 5.0 + 0.25) * uCrackPower * lit;
+    float P0 = uCrackPower * gm * lit;
+    // the panes: each tints the sky behind it a little lighter or darker, and now and then one flashes
+    c *= 1.0 + paneTilt * 0.22 * inside * P0;
+    c += uCrack * glint * inside * 0.35 * P0;
+    // the holes: the other sky, with a burning rim where the glass broke away
+    c = mix(c, beyond * 1.3, hole * P0);
+    #ifndef SKY_LQ
+      float rim = hole * (1.0 - smoothstep(0.0, 0.012, min(dRay, dRing * 1.3)));
+      c += vec3(1.0, 0.75, 0.95) * rim * 2.4 * P0;
+      // finer cracks webbing the panes near the heart of the impact
+      float fine = crackLines(q * 16.0 + vec2(sector * 3.1, floor(rk) * 1.7));
+      float fineL = (1.0 - smoothstep(0.0, 0.03, fine)) * smoothstep(0.36, 0.08, r) * smoothstep(0.02, 0.07, r) * (1.0 - hole);
+      c += uCrack * fineL * 0.55 * P0;
+      // long faint streaks reaching past the cracks, like light through a scratched lens
+      float streak = (1.0 - smoothstep(0.0, 0.006, dRay)) * smoothstep(1.1, 0.3, r) * smoothstep(len * 0.6, len, r) * 0.18;
+      c += uCrack * streak * P0;
+      // sparks where a ring meets a fracture
+      c += vec3(1.0) * ray * ringFringe * 3.0 * (0.6 + 0.4 * sin(uTime * 6.0 + sector)) * P0;
+    #endif
+    // the fractures themselves: white-hot core, coloured fringe, beads of light running outward
+    // (softer by day, when the sky around them is already bright)
+    P0 *= mix(0.42, 1.0, clamp(uNight * 1.4, 0.0, 1.0));
+    vec3 fringeCol = mix(uCrack, vec3(1.0, 0.62, 0.9), smoothstep(0.05, 0.4, r));
+    c += (vec3(1.0) * ray * 1.6 + uCrack * ray * 1.2 + fringeCol * (rayFringe - ray) * 0.9) * pulse * P0;
+    c += (vec3(1.0) * ring * 1.1 + fringeCol * (ringFringe - ring) * 0.7) * pulse * P0;
+    c += vec3(1.0, 0.97, 0.9) * flow * rayFringe * 2.2 * P0;
+    c += uCrack * (core * 2.4 + halo * (0.1 + 0.05 * sin(uTime * 0.9))) * pulse * P0;
+    c += vec3(1.0) * pow(core, 3.0) * 2.0 * P0;
+    c += uCrack * front * (ray * 7.0 + ring * 5.0 + rayFringe * 2.0 + 0.25) * uCrackPower * lit;
     float lum = min(dot(c, vec3(0.3, 0.5, 0.2)), 1.0);
     c = mix(c, vec3(0.13, 0.13, 0.15) + lum * 0.18 + vec3(0.06) * ray, bm);
   }
@@ -704,7 +749,7 @@ export function buildSea(shoreTex, rect) {
         gl_Position = projectionMatrix * mvPosition;
         #include <fog_vertex>
       }`,
-    fragmentShader: SKY_GLSL + /* glsl */`
+    fragmentShader: '#define SKY_LQ\n' + SKY_GLSL + /* glsl */`
       uniform sampler2D uShore;
       uniform vec4 uRect;
       uniform vec3 uDeep, uSea, uShallow, uSand, uFoam;
@@ -1716,14 +1761,22 @@ Object.assign(PROPS, {
     for (let k = 0; k < 4; k++) b.box(0.3, 0.12, 0.3, '#ffffff', x + (k - 1.5) * w * 0.22, y + 0.1, z + ((k % 2) - 0.5) * d * 0.4, { jitter: 0.1 });
   },
   // the keepers' wall: a low dry-stone wall
-  stoneWall(b, x0, z0, x1, z1, y0, y1, r) {
+  // ground(x, z), if given, is the ground height: each stone sits on the ground beneath it and reaches down
+  // past the next step, so the wall never floats or shows a gap where the ground drops
+  stoneWall(b, x0, z0, x1, z1, y0, y1, r, ground) {
     const n = Math.max(1, Math.round(Math.hypot(x1 - x0, z1 - z0) / 0.9));
     const a = Math.atan2(x1 - x0, z1 - z0);
     for (let i = 0; i < n; i++) {
       const t = (i + 0.5) / n;
+      const x = lerp(x0, x1, t), z = lerp(z0, z1, t);
+      let g0 = lerp(y0, y1, t), lo = g0;
+      if (ground) { g0 = ground(x, z); lo = Math.min(g0, ground(x - 0.5, z - 0.5), ground(x + 0.5, z + 0.5), ground(x - 0.5, z + 0.5), ground(x + 0.5, z - 0.5)); }
+      const top = g0 + 0.95 + r() * 0.2, bot = lo - 0.3;
       const c = pick(PALETTE.stone, r);
-      b.box(0.8, 0.95 + r() * 0.2, 0.95, c, lerp(x0, x1, t), lerp(y0, y1, t) + 0.5, lerp(z0, z1, t), { rotY: a, top: shade(c, 1.1) });
-      if (r() < 0.4) b.box(0.7, 0.12, 0.6, '#6f9a4a', lerp(x0, x1, t), lerp(y0, y1, t) + 1.05, lerp(z0, z1, t), { rotY: a, jitter: 0.1 });
+      b.box(0.8, top - bot, 1.0, c, x, (top + bot) / 2, z, { rotY: a, top: shade(c, 1.1) });
+      // a darker course of stones along the foot
+      b.box(0.86, 0.3, 1.04, shade(c, 0.85), x, g0 + 0.15, z, { rotY: a });
+      if (r() < 0.4) b.box(0.7, 0.12, 0.6, '#6f9a4a', x, top + 0.05, z, { rotY: a, jitter: 0.1 });
     }
   },
   // the mouth of Gullcliff Caves: a rock arch with barnacles glowing faintly, and an old keepers' sign

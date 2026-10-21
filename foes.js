@@ -383,9 +383,9 @@ export function createFoes(ctx) {
     if (f.kind === 'barnacle') {
       if (f.state === 'loose' || f.state === 'crawl') return { pull: true };
       f.state = 'loose'; f.t = 0; f.wasLoose = true; sound.sfx('snap'); ctx.shake(0.2);
-      const tp = toPlayer(f); const d = Math.max(0, tp.d - 1.3); moveFoe(f, tp.x * d * 0.85, tp.z * d * 0.85);
       ctx.number('Pulled off!', f.x, f.y + 1.2, f.z, false);
-      return { pull: false };
+      for (let i = 0; i < 10; i++) bits.spawn({ x: f.x, y: f.y + 0.5, z: f.z, vx: (Math.random() - 0.5) * 3, vy: 2 + Math.random() * 2, vz: (Math.random() - 0.5) * 3, life: 1, size: 0.08, color: '#7d7a86', floor: f.y });
+      return { reel: true };
     }
     if (f.kind === 'barnaclemother') {
       // the plate facing you comes away
@@ -401,16 +401,13 @@ export function createFoes(ctx) {
       for (let i = 0; i < 16; i++) sparks.spawn({ x: f.x + Math.sin(pl.a) * 1.6, y: f.y + 1.6, z: f.z + Math.cos(pl.a) * 1.6, vx: (Math.random() - 0.5) * 3, vy: Math.random() * 3, vz: (Math.random() - 0.5) * 3, grav: 6, life: 0.6, size: 0.14, color: '#d8d0c4', glow: 1.2 });
       return { pull: false };
     }
-    if (f.kind === 'doorcrab') { f.state = 'door'; f.t = 0; return { pull: true }; }
-    // small creatures are yanked toward you and dazed
+    if (f.kind === 'doorcrab') { f.state = 'door'; f.t = 0; return { reel: false }; }
+    // small creatures are reeled in and dazed
     if (['shardmite', 'mirrorpuddle', 'bellfish', 'lullabypod'].includes(f.kind)) {
-      const tp = toPlayer(f);
-      const d = Math.max(0, tp.d - 1.4);
-      f.kx -= tp.x * d * 5; f.kz -= tp.z * d * 5;
-      if (f.kind !== 'lullabypod') { f.state = f.kind === 'bellfish' ? 'stagger' : f.kind === 'shardmite' ? 'stun' : 'stagger'; f.t = 0; }
-      return { pull: true };
+      if (f.kind !== 'lullabypod') { f.state = f.kind === 'shardmite' ? 'stun' : 'stagger'; f.t = 0; }
+      return { reel: true };
     }
-    return { pull: true };
+    return { reel: false };
   }
 
   // ---------------------------------------------------------------------------
@@ -1144,5 +1141,7 @@ export function createFoes(ctx) {
     seep.state = 'spent'; seep.t = 0; seep.rise = 0; seep.wave = -1;
     barrier.group.visible = false;
   }
-  return { update, hit, targets, reset, rest, spawn, tethered, list: foes, seep, dropHeart, dropSliver, slowAt, flood, alive: () => foes.some((f) => f.alive) };
+  // dragged along by the Tether (walls still stop it)
+  function drag(f, dx, dz) { moveFoe(f, dx, dz); f.stunT = 0.3; if (f.state === 'loose') f.t = Math.min(f.t, 0.2); }
+  return { update, hit, targets, reset, rest, spawn, tethered, drag, list: foes, seep, dropHeart, dropSliver, slowAt, flood, alive: () => foes.some((f) => f.alive) };
 }

@@ -281,6 +281,7 @@ const sound = (() => {
       case 'wake': [0, 7, 12].forEach((st, i) => tone('sine', 392 * Math.pow(2, st / 12), 0, 0.9, 0.06, sfxBus, i * 0.2)); break;
       case 'blip': tone('sine', 880, 0, 0.05, 0.03); break;
       case 'voice': tone('triangle', 300 + Math.random() * 160, 0, 0.045, 0.025); break;
+      case 'heal': [0, 4, 7, 12].forEach((st, i) => tone('sine', 523.25 * Math.pow(2, st / 12), 0, 0.9, 0.05, sfxBus, i * 0.11)); hiss('bandpass', 3000, 6000, 2, 0.8, 0.03); break;
       case 'quest': [0, 5, 9].forEach((st, i) => tone('sine', 659.25 * Math.pow(2, st / 12), 0, 0.5, 0.06, sfxBus, i * 0.09)); break;
       case 'beacon': [0, 4, 7, 11, 14].forEach((st, i) => tone('sine', 587.33 * Math.pow(2, st / 12), 0, 0.9, 0.05, sfxBus, i * 0.07)); tone('sine', 146.8, 0, 1.4, 0.15); break;
       case 'crack': for (let i = 0; i < 6; i++) hiss('highpass', 3000 + i * 600, 0, 1, 0.08, 0.3, i * 0.06); tone('sine', 2200, 1100, 1.2, 0.06); tone('sine', 55, 30, 3, 0.4); break;
@@ -544,7 +545,9 @@ function locomote(dt, speedMul, canTurn) {
     dx = lerp(tx, Math.sin(P.face), 0.45); dz = lerp(tz, Math.cos(P.face), 0.45);
     const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
   }
-  const sp = C.speed * mag * speedMul * foes.slowAt(P.x, P.z);
+  // running (the boot button or Shift): faster, but not while throwing or swinging
+  P.running = ui.input.run && speedMul === 1 && mag > 0.3;
+  const sp = C.speed * mag * speedMul * foes.slowAt(P.x, P.z) * (P.running ? C.runMul : 1);
   const wx = dx * sp, wz = dz * sp;
   const ddx = wx - P.vx, ddz = wz - P.vz, dl = Math.hypot(ddx, ddz);
   const acc = (mag > 0 ? C.accel : C.decel) * dt;
@@ -601,9 +604,10 @@ function setTime(k) {
 
 // ----- creatures for a place (the cove's Seep, the Rift's rooms) -----
 const proj = new V3();
-function makeFoes(w) {
+// each place keeps its creatures under its own root, so nothing from one place shows in the other
+function makeFoes(w, root) {
   return createFoes({
-    scene, world: w, P, sparks, bits, sound,
+    scene: root, world: w, P, sparks, bits, sound,
     hurtPlayer, shake, hitStop: (t) => { stop = Math.max(stop, t); },
     number: (text, x, y, z, heavy) => { proj.set(x, y, z).project(camera); ui.number(text, (proj.x + 1) / 2 * view.w, (1 - proj.y) / 2 * view.h, heavy); },
     addSkyglass: (n) => { P.shards += n; ui.setShards(P.shards, true); },
@@ -617,6 +621,7 @@ function makeFoes(w) {
     onKill: () => { stats.calmed++; },
     // the Seep only wakes while the story needs it; afterwards the stone circle stays quiet
     seepAwake: () => ['toShard', 'seep'].includes(story.state.step),
+    bossHold: () => !!bossIntro,
   });
 }
 
@@ -654,12 +659,13 @@ function swapTo(to) {
   foes.reset();
   ui.bossBar(null);
   if (to === 'rift') {
+    guardianSeen = false;
     if (!rift) {
       riftRoot = new THREE.Group();
       scene.add(riftRoot);
       rift = buildRift(riftRoot, (Date.now() % 100000) | 0);
       rift.fx.sparks = sparks;
-      foesRift = makeFoes(rift);
+      foesRift = makeFoes(rift, riftRoot);
       rift.attach({ P, foes: foesRift, sound, shake, onEvent: riftEvent, onMap: () => ui.setMap(rift.mapState()) });
       // a thin layer of water that rises when the Gardener weeps
       floodPlane = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshLambertMaterial({ color: '#3fb5c8', transparent: true, opacity: 0.32, depthWrite: false }));
@@ -706,10 +712,46 @@ async function arrived(to) {
     ui.titleCard('The Keeper\u2019s Cove', 'Lanternhold', 'Home, with a heart of glass.');
   }
 }
+// ----- little clocks on game time (pausing the game pauses them) -----
+const gTimers = [];
+const gwait = (sec) => new Promise((resolve) => gTimers.push({ t: sec, resolve }));
+function updateGTimers(dt) { for (let i = gTimers.length - 1; i >= 0; i--) { gTimers[i].t -= dt; if (gTimers[i].t <= 0) { const r = gTimers[i].resolve; gTimers.splice(i, 1); r(); } } }
+
+// ----- a guardian's entrance: a short scene before the fight. Nothing can hurt you while it plays,
+// and the guardian only hangs there and looks at you until it's over. Seen once per visit. -----
+let bossIntro = null, guardianSeen = false;
+async function guardianIntro(rm) {
+  story.setStep('guardian');
+  if (guardianSeen) return;
+  guardianSeen = true;
+  bossIntro = { rm };
+  P.safe = 99; P.path = null; P.vx = P.vz = 0;
+  ui.show(false);
+  document.body.classList.add('cine');
+  // low on the floor, looking up into the dark as it comes down
+  cineView = { pos: new V3(rm.cx + 3.4, 0.8, rm.cz + 4.6), look: new V3(rm.cx - 0.3, 5.2, rm.cz - 1.5), k: 0.02 };
+  const g = () => foes.list.find((f) => f.kind === 'gardener' && f.alive);
+  let w = 0;
+  while ((!g() || g().state === 'emerge') && w < 8) { await gwait(0.1); w += 0.1; }
+  const f = g();
+  if (f) {
+    // closer: up at its eyes
+    cineView = { pos: new V3(f.x + 2.4, 5.6, f.z + 6.0), look: new V3(f.x, 4.7, f.z), k: 0.025 };
+    const C = STORY.riftLines.guardianCard;
+    ui.titleCard(C.name, C.region, C.line);
+    await gwait(3.6);
+    await story.say(STORY.riftLines.guardian);
+  }
+  // back to you
+  cineView = null; camBlend = 1.4;
+  document.body.classList.remove('cine');
+  ui.show(true);
+  bossIntro = null;
+  P.safe = 1.2;
+}
 async function riftEvent(name, arg) {
   if (name === 'guardian') {
-    story.setStep('guardian');
-    await story.say(STORY.riftLines.guardian);
+    guardianIntro(arg);
   } else if (name === 'guardianDown') {
     rift.guardianDown(arg);
     story.setStep('heartGlass');
@@ -747,6 +789,32 @@ function playtestJump(where) {
       ui.titleCard(TEXT.morning.name, TEXT.morning.region, TEXT.morning.line);
     });
   }
+}
+
+// ----- the island map: where you are, who's about, and where the story wants you -----
+let isleFrame = 0;
+function objectiveSpot() {
+  const st = story.state.step, sp = cove.spots;
+  const maren = story.people().find((n) => n.id === 'maren');
+  if (['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning'].includes(st)) return maren;
+  if (st === 'practice') return sp.trainingGround;
+  if (st === 'beacon') return sp.beaconView;
+  if (['toShard', 'seep', 'enterRift'].includes(st)) return cove.seep;
+  if (st === 'rest') return sp.cottageDoor;
+  return null;
+}
+function updateIslandMap() {
+  const show = started && !intro && world === cove && !story.state.cine && !story.state.ending;
+  if (!show) { if (isleFrame !== -1) { ui.islandMap(null); isleFrame = -1; } return; }
+  isleFrame = 1;
+  const news = story.hasNews();
+  const o = STORY.objectives[story.state.step];
+  ui.islandMap({
+    x: P.x, z: P.z, face: P.face,
+    people: story.people().map((n) => ({ ...n, news: n.id === 'maren' && news })),
+    goal: objectiveSpot(),
+    objective: typeof o === 'function' ? o(story.state.hits, STORY.practiceHits) : o,
+  });
 }
 
 // ----- the curtain: a fade to black the story can lower and raise -----
@@ -1016,7 +1084,7 @@ function updatePlayer(dt) {
   if (walking) {
     walkPose(dt, P.walkK);
     const fall = Math.floor(P.phase / Math.PI);
-    if (fall !== P.lastFall && P.walkK > 0.25) { P.lastFall = fall; sound.sfx('step', 0.6 + P.walkK * 0.4); if (Math.random() < 0.5) dust(P.x, P.y, P.z, 1, 0.35); }
+    if (fall !== P.lastFall && P.walkK > 0.25) { P.lastFall = fall; sound.sfx('step', 0.6 + P.walkK * 0.4); if (P.running || Math.random() < 0.5) dust(P.x, P.y, P.z, P.running ? 2 : 1, 0.35); }
   }
   // the camera leads a little toward where you're heading, smoothly
   P.leadX = lerp(P.leadX || 0, P.vx * 0.24, damp(0.15, dt));
@@ -1367,7 +1435,7 @@ function tick(dt) {
   if (travelling) updateTravel(dt);
   if (floodPlane) floodPlane.position.y = -0.3 + foesRift.flood.k * 0.42;
   ui.talkFrame(dt);
-  const busy = started && !intro && (story.busy() || !!travelling);
+  const busy = started && !intro && (story.busy() || !!travelling || !!bossIntro);
   if (started && !intro && !busy) {
     // the sword button says "Talk" when someone is near: then it talks instead of swinging
     // (only in the cove: there's no one to talk to and no door to open inside the Rift)
@@ -1410,10 +1478,16 @@ function tick(dt) {
   sparks.update(dt);
   bits.update(dt);
   updateCamera(dt, time);
+  // the sea travels with the camera, so it reaches the horizon whichever way you look
+  if (world === cove) cove.sea.position.set(camera.position.x, -0.08, camera.position.z);
   // the screen: a red pulse when you're hurt, colour draining and a fade to black when you fall, and back
   hurtFlash = Math.max(0, hurtFlash - dt * 3.5);
   if (P.waking) { P.waking = Math.max(0, P.waking - dt * 1.1); fade = P.waking; }
   updateCurtain(dt);
+  if (started) updateGTimers(dt);
+  // once you've walked a good while, a quiet word about running
+  if (started && !intro && !P.runHinted && P.state === 'move' && (P.walkK || 0) > 0.8 && !ui.input.run) { P.walkT = (P.walkT || 0) + dt; if (P.walkT > 12) { P.runHinted = true; ui.showHint('run', TEXT.hintRun, 6000); } }
+  updateIslandMap();
   const dark = Math.max(fade, curtain.k);
   // the journey's clock, and saving now and then
   if (started && !intro) {
@@ -1445,7 +1519,7 @@ try {
   sparks = createSparks(scene, 700);
   bits = createBits(scene, 320);
   world.fx.sparks = sparks;
-  foesCove = foes = makeFoes(cove);
+  foesCove = foes = makeFoes(cove, coveRoot);
   scene.add(aimMark, tapRing);
   ui = createUI({
     canvas, prefs,
@@ -1462,7 +1536,7 @@ try {
   });
   setupPlayer();
   story = createStory({
-    scene, world, foes, P, ui, sound, sparks, bits, shake,
+    scene: coveRoot, world, foes, P, ui, sound, sparks, bits, shake,
     flash: (r, g, b, k) => { Object.assign(cineFlash, { r, g, b, k }); },
     setTime,
     cine: (v) => { cineView = v; },
@@ -1476,6 +1550,8 @@ try {
   });
   setTime(0);
   applyQuality();
+  // the island map turns with the view, so "up" on the map is "up" on the screen
+  ui.buildMap(cove.mapInfo, -Math.PI / 2 - Math.atan2(camFwd.z, camFwd.x));
   // the title screen's view of the island, drawn behind the loading veil
   intro = null;
   updateCamera(0, 0);

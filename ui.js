@@ -31,6 +31,8 @@ const ICON = {
   enter: '<svg viewBox="0 0 48 48"><path d="M12 42V18a12 12 0 0 1 24 0v24z" fill="none" stroke="currentColor" stroke-width="4"/><path d="M24 14l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="currentColor"/></svg>',
   sleep: '<svg viewBox="0 0 48 48"><path d="M30 8a16 16 0 1 0 12 25A13 13 0 0 1 30 8z" fill="currentColor"/><path d="M34 12h6l-6 7h6" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" fill="none" opacity=".8"/></svg>',
   lantern: '<svg viewBox="0 0 24 24"><path d="M9 4h6M12 2v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 7h10l-1 11H8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10c1.6 1.8 1.6 3.6 0 5-1.6-1.4-1.6-3.2 0-5z" fill="currentColor"/><path d="M6 20h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  rest: '<svg viewBox="0 0 48 48"><path d="M24 6c3 7 11 11 11 21a11 11 0 0 1-22 0c0-5 3-8 5-11 1 4 3 5 5 5-2-6 0-11 1-15z" fill="currentColor"/><path d="M24 27c2 3 5 5 5 9a5 5 0 0 1-10 0c0-3 3-5 5-9z" fill="#1d1b4a" opacity=".55"/><path d="M10 42h28" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg>',
+  run: '<svg viewBox="0 0 48 48"><path d="M20 10h8l1 14 10 5c2 1 3 3 3 5v3H18l-3-4z" fill="currentColor"/><path d="M18 37h24v3H18z" fill="currentColor" opacity=".7"/><path d="M4 18h10M2 25h11M5 32h9" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".75"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/></svg>',
 };
 
@@ -84,6 +86,7 @@ export function createUI(opts) {
     attack: { down: false, pressed: false, aim: { x: 0, y: 0, active: false } },
     ranged: { down: false, pressed: false, aim: { x: 0, y: 0, active: false } },
     roll: { pressed: false },
+    run: false,       // running (the boot button, or Shift held)
     ability: { pressed: false },
     tap: null,        // a quick tap on the ground: { x, y } on the stage, the game walks you there
     mouse: { x: 0, y: 0, has: false },
@@ -116,6 +119,12 @@ export function createUI(opts) {
   const bRanged = mkBtn('ranged', ICON.sling, 'Sling');
   const bRoll = mkBtn('roll', ICON.roll, 'Roll');
   const bAbility = mkBtn('ability hidden', ICON.spark, 'Ability');   // appears once an ability is unlocked
+  // running, like running shoes: tap to run, tap again to walk (or hold Shift)
+  const bRun = mkBtn('run', ICON.run, 'Run');
+  bRun.setAttribute('aria-pressed', 'false');
+  let runOn = false;
+  function setRun(on) { runOn = on; bRun.classList.toggle('on', on); bRun.setAttribute('aria-pressed', String(on)); }
+  bRun.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); input.any = true; setRun(!runOn); pulse(bRun); opts.sfx && opts.sfx('tick'); });
   root.appendChild(pad);
   const joy = el('div', 'joy', '<div class="knob"></div>');
   root.appendChild(joy);
@@ -272,7 +281,7 @@ export function createUI(opts) {
     }
     if (keys[k]) return;
     keys[k] = true;
-    if (k === ' ' || k === 'shift' || k === 'l') { input.roll.pressed = true; e.preventDefault(); }
+    if (k === ' ' || k === 'l') { input.roll.pressed = true; e.preventDefault(); }
     if (k === 'j') { input.attack.down = true; input.attack.pressed = true; }
     if (k === 'k') { input.ranged.down = true; input.ranged.pressed = true; }
   });
@@ -290,6 +299,7 @@ export function createUI(opts) {
     const ax = (keys.arrowright ? 1 : 0) - (keys.arrowleft ? 1 : 0), ay = (keys.arrowdown ? 1 : 0) - (keys.arrowup ? 1 : 0);
     if (ax || ay) { const l = Math.hypot(ax, ay); input.ranged.down = true; input.ranged.aim.active = true; input.ranged.aim.x = ax / l; input.ranged.aim.y = ay / l; input._ka = true; }
     else if (input._ka) { input.ranged.down = false; input.ranged.aim.active = false; input._ka = false; }
+    input.run = runOn || !!keys.shift;
   }
 
   function pulse(b) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); }
@@ -390,7 +400,7 @@ export function createUI(opts) {
     ctxKind = kind;
     bAttack.querySelector('.ic').innerHTML = ICON[kind] || ICON.sword;
     bAttack.classList.toggle('ctx', !!kind);
-    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep' }[kind] || 'Attack');
+    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep', rest: 'Rest' }[kind] || 'Attack');
   }
 
   // ----- the guardian's health, across the top of the screen -----
@@ -408,6 +418,7 @@ export function createUI(opts) {
   // ----- the map of the Rift: rooms you've seen, the one you're in, the guardian's and the treasure -----
   const map = el('div', 'miniMap hidden');
   hud.appendChild(map);
+  map.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); map.classList.toggle('big'); opts.sfx && opts.sfx('tick'); });
   let mapKey = '';
   function setMap(state) {
     if (!state) { map.classList.add('hidden'); mapKey = ''; return; }
@@ -422,6 +433,164 @@ export function createUI(opts) {
     map.style.gridTemplateRows = `repeat(${j1 - j0 + 1}, 16px)`;
     map.innerHTML = shown.map((rm) => `<i class="mr ${rm.visited ? 'v' : 's'} ${rm.here ? 'here' : ''} ${rm.type}" style="grid-column:${rm.i - i0 + 1};grid-row:${rm.j - j0 + 1}"></i>`).join('');
   }
+
+  // ----- the island map: a small round map in the corner that turns with the view, and a full map on tap -----
+  const isle = el('div', 'isleMap hidden', '<canvas></canvas><i class="imRing"></i>');
+  hud.appendChild(isle);
+  const isleCv = $('canvas', isle);
+  const bigMap = el('div', 'veil mapVeil hidden');
+  bigMap.innerHTML = `<div class="mapSheet glass" role="dialog" aria-label="Map">
+      <div class="mapCv"><canvas></canvas></div>
+      <div class="mapSide">
+        <div class="kicker">Map</div><h2>Lanternhold</h2>
+        <div class="jObj"><i class="qDot"></i><span></span></div>
+        <ul class="mapKey"><li><i class="mk you"></i>You</li><li><i class="mk goal"></i>Where you're headed</li><li><i class="mk ppl"></i>People</li></ul>
+        <button class="ghost" data-act="closeMap">Back to the game</button>
+      </div>
+      <button class="x" data-act="closeMap" aria-label="Close map">✕</button>
+    </div>`;
+  root.appendChild(bigMap);
+  const bigCv = $('canvas', bigMap);
+  let mapBase = null, mapInfo = null, mapRot = 0, mapState = null, mapOpen = false, mapTick = 0;
+  const S_PX = 6;   // pixels per world unit in the drawn base map
+  function shadeHex(hex, k) {
+    const n = parseInt(hex.slice(1), 16);
+    const c = (v) => Math.max(0, Math.min(255, Math.round(v * k)));
+    return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
+  }
+  // draw the island once: ground by kind and height, cliffs, houses, the dock, the lighthouse
+  function buildMap(info, rot) {
+    mapInfo = info; mapRot = rot;
+    const { N, H0, H, K } = info;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = N * S_PX;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#2a6f8f'; g.fillRect(0, 0, cv.width, cv.height);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const h = H[j * N + i], k = K[j * N + i];
+      let c;
+      if (h <= 0.01) c = h < -1.2 ? '#2a6f8f' : h < -0.5 ? '#36869f' : '#47a3bb';
+      else if (k === 'sand') c = '#ead6a6';
+      else if (k === 'path') c = '#d2bd94';
+      else if (k === 'stone') c = shadeHex('#a39d91', 0.9 + h * 0.03);
+      else c = shadeHex('#5f9c46', 0.82 + Math.min(h, 6) * 0.06);
+      g.fillStyle = c;
+      g.fillRect(i * S_PX, j * S_PX, S_PX, S_PX);
+      // a cliff edge where the ground drops to the south or east
+      const hs = j + 1 < N ? H[(j + 1) * N + i] : -2, he = i + 1 < N ? H[j * N + i + 1] : -2;
+      if (h > 0.01 && hs < h - 0.5) { g.fillStyle = 'rgba(30,40,24,0.55)'; g.fillRect(i * S_PX, j * S_PX + S_PX - 2, S_PX, 2); }
+      if (h > 0.01 && he < h - 0.5) { g.fillStyle = 'rgba(30,40,24,0.35)'; g.fillRect(i * S_PX + S_PX - 2, j * S_PX, 2, S_PX); }
+      if (h > 0.01 && h < 0.6 && (hs <= 0.01 || he <= 0.01)) { g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(i * S_PX, j * S_PX, S_PX, S_PX); }
+    }
+    const X = (x) => (x - H0) * S_PX, Z = (z) => (z - H0) * S_PX;
+    // houses
+    for (const b of info.boxes) {
+      g.fillStyle = '#8c5a55'; g.fillRect(X(b.x0), Z(b.z0), (b.x1 - b.x0) * S_PX, (b.z1 - b.z0) * S_PX);
+      g.strokeStyle = 'rgba(40,20,30,0.6)'; g.lineWidth = 2; g.strokeRect(X(b.x0) + 1, Z(b.z0) + 1, (b.x1 - b.x0) * S_PX - 2, (b.z1 - b.z0) * S_PX - 2);
+    }
+    // the dock
+    const d = info.dock;
+    g.fillStyle = '#8b5e3c'; g.fillRect(X(d.x0), Z(d.z0), (d.x1 - d.x0) * S_PX, (d.z1 - d.z0) * S_PX);
+    // landmarks drawn into the ground
+    for (const p of info.places) {
+      if (p.icon === 'circle') { g.strokeStyle = 'rgba(200,240,255,0.8)'; g.lineWidth = 3; g.beginPath(); g.arc(X(p.x), Z(p.z), 6.2 * S_PX, 0, Math.PI * 2); g.stroke(); }
+      if (p.icon === 'ring') { g.strokeStyle = 'rgba(110,78,54,0.9)'; g.lineWidth = 3; g.beginPath(); g.arc(X(p.x), Z(p.z), 4.4 * S_PX, 0.55, Math.PI * 2 - 0.55); g.stroke(); }
+      if (p.icon === 'lighthouse') { g.fillStyle = '#f2ece0'; g.beginPath(); g.arc(X(p.x), Z(p.z), 1.6 * S_PX, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#c94a3f'; g.lineWidth = 4; g.stroke(); }
+    }
+    mapBase = cv;
+  }
+  // where a world point lands on a map drawn with centre (cx, cz) at screen (ox, oy) and scale sc (px per unit)
+  function proj(x, z, cx, cz, ox, oy, sc) {
+    const dx = (x - cx) * sc, dz = (z - cz) * sc, c = Math.cos(mapRot), s2 = Math.sin(mapRot);
+    return { x: ox + dx * c - dz * s2, y: oy + dx * s2 + dz * c };
+  }
+  function drawMap(cv, cx, cz, sc, big) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = cv.clientWidth, Hh = cv.clientHeight;
+    if (!W || !Hh || !mapBase || !mapState) return;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(Hh * dpr); }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, Hh);
+    g.fillStyle = '#2a6f8f'; g.fillRect(0, 0, W, Hh);
+    const ox = W / 2, oy = Hh / 2;
+    g.save();
+    g.translate(ox, oy); g.rotate(mapRot); g.scale(sc / S_PX, sc / S_PX);
+    g.translate(-(cx - mapInfo.H0) * S_PX, -(cz - mapInfo.H0) * S_PX);
+    g.imageSmoothingEnabled = false;
+    g.drawImage(mapBase, 0, 0);
+    g.restore();
+    const t = performance.now() / 1000;
+    const R = Math.min(W, Hh) / 2 - 7;
+    const edge = (p) => { if (big) return p; const dx = p.x - ox, dy = p.y - oy, l = Math.hypot(dx, dy); return l > R ? { x: ox + dx / l * R, y: oy + dy / l * R, out: true } : p; };
+    // places, named on the big map
+    if (big) {
+      g.font = '600 13px Fraunces, Georgia, serif'; g.textAlign = 'center';
+      for (const p of mapInfo.places) {
+        const q = proj(p.x, p.z, cx, cz, ox, oy, sc);
+        g.fillStyle = 'rgba(14,10,38,0.55)'; const w = g.measureText(p.name).width + 12;
+        g.beginPath(); g.roundRect(q.x - w / 2, q.y - 27, w, 18, 9); g.fill();
+        g.fillStyle = '#fff4e4'; g.fillText(p.name, q.x, q.y - 14);
+      }
+    }
+    // people
+    for (const n of mapState.people) {
+      const q = edge(proj(n.x, n.z, cx, cz, ox, oy, sc));
+      if (q.out) continue;
+      g.fillStyle = n.news ? '#ffd29a' : '#f6f2ff';
+      g.strokeStyle = 'rgba(14,10,38,0.8)'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(q.x, q.y, big ? 4.5 : 3, 0, Math.PI * 2); g.fill(); g.stroke();
+    }
+    // where you're headed: a glowing diamond (held at the rim of the small map when it's further away)
+    if (mapState.goal) {
+      const q = edge(proj(mapState.goal.x, mapState.goal.z, cx, cz, ox, oy, sc));
+      const s3 = (big ? 7 : 5) * (1 + Math.sin(t * 4) * 0.12);
+      g.save(); g.translate(q.x, q.y); g.rotate(Math.PI / 4);
+      g.shadowColor = 'rgba(255,210,154,0.9)'; g.shadowBlur = 8;
+      g.fillStyle = '#ffd29a'; g.fillRect(-s3 / 2, -s3 / 2, s3, s3);
+      g.restore();
+    }
+    // you: an arrow pointing the way you face
+    const me = proj(mapState.x, mapState.z, cx, cz, ox, oy, sc);
+    const a = Math.atan2(Math.cos(mapState.face), Math.sin(mapState.face)) + mapRot;
+    const L = big ? 9 : 7;
+    g.save(); g.translate(me.x, me.y); g.rotate(a);
+    g.shadowColor = 'rgba(159,243,255,0.9)'; g.shadowBlur = 8;
+    g.fillStyle = '#e6fcff'; g.strokeStyle = '#1d1b4a'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(L, 0); g.lineTo(-L * 0.7, L * 0.65); g.lineTo(-L * 0.35, 0); g.lineTo(-L * 0.7, -L * 0.65); g.closePath(); g.fill(); g.stroke();
+    g.restore();
+  }
+  // every frame from the game: where you are, who's where, and the goal. state = null hides the map
+  function islandMap(state) {
+    mapState = state;
+    isle.classList.toggle('hidden', !state);
+    if (!state || !mapBase) return;
+    if (mapOpen) { drawMap(bigCv, mapInfo.H0 + mapInfo.N / 2, mapInfo.H0 + mapInfo.N / 2, bigCv.clientWidth / (mapInfo.N * 1.4), true); return; }
+    if ((mapTick = (mapTick + 1) % 2) === 0) drawMap(isleCv, state.x, state.z, 3.6, false);
+  }
+  function openMap() {
+    if (!mapState || mapOpen) return;
+    mapOpen = true;
+    $('.jObj span', bigMap).textContent = mapState.objective || 'Wander. Nothing is asked of you right now.';
+    $('.jObj', bigMap).classList.toggle('hidden', !mapState.objective);
+    bigMap.classList.remove('hidden');
+    opts.onPause && opts.onPause();
+    opts.sfx && opts.sfx('open');
+    requestAnimationFrame(() => drawMap(bigCv, mapInfo.H0 + mapInfo.N / 2, mapInfo.H0 + mapInfo.N / 2, bigCv.clientWidth / (mapInfo.N * 1.4), true));
+  }
+  function closeMap() {
+    if (!mapOpen) return;
+    mapOpen = false;
+    bigMap.classList.add('hidden');
+    opts.onResume && opts.onResume();
+  }
+  isle.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); openMap(); });
+  bigMap.addEventListener('click', (e) => { if (e.target === bigMap || e.target.closest('[data-act="closeMap"]')) closeMap(); });
+  window.addEventListener('keydown', (e) => {
+    const k = e.key.toLowerCase();
+    if (k === 'm' && opts.isStarted() && !talk.lines) { mapOpen ? closeMap() : (!opts.isPaused() && openMap()); }
+    else if (k === 'escape' && mapOpen) { e.stopImmediatePropagation(); closeMap(); }
+  }, true);
 
   // ----- hints: small, once, then gone -----
   let hintKey = null, hintT = null;
@@ -711,7 +880,7 @@ export function createUI(opts) {
 
   return {
     input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
-    titleMenu, closeTitle, endCard, savedMark, fmtTime,
+    titleMenu, closeTitle, endCard, savedMark, fmtTime, buildMap, islandMap, closeMap, mapIsOpen: () => mapOpen,
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

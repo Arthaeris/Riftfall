@@ -340,7 +340,8 @@ export function createStory(ctx) {
     sound.sfx('doorOpen');
     await ctx.curtain(1, 1.1);
     await say(STORY.sleep);
-    // while the screen is dark: dawn, and Maren goes up to the lighthouse
+    // while the screen is dark: a full night's rest, dawn, and Maren goes up to the lighthouse
+    P.hp = P.maxHp;
     S.night = S.nightTo = 2;
     ctx.setTime(2);
     place(byId('maren'), world.spots.marenMorning);
@@ -353,6 +354,24 @@ export function createStory(ctx) {
     ui.titleCard(TEXT.morning.name, TEXT.morning.region, TEXT.morning.line);
     S.busy = false;
     setStep('morning');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Resting by the campfire: a short sit, and your hearts are full again
+  // ---------------------------------------------------------------------------
+  async function restAtFire() {
+    S.busy = true;
+    ui.setContext(null);
+    const fire = world.spots.campfire;
+    P.face = Math.atan2(fire.x - P.x, fire.z - P.z);
+    await ctx.curtain(0.85, 0.6);
+    P.hp = P.maxHp;
+    sound.sfx('heal');
+    for (let i = 0; i < 16; i++) sparks.spawn({ x: P.x + (Math.random() - 0.5) * 0.8, y: P.y + 0.3 + Math.random(), z: P.z + (Math.random() - 0.5) * 0.8, vy: 1.2, life: 1.0, size: 0.14, color: i % 2 ? '#ff8a96' : '#ffd29a', glow: 2.4 });
+    await wait(0.5);
+    await ctx.curtain(0, 0.8);
+    ui.toast(TEXT.rested);
+    S.busy = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -520,20 +539,26 @@ export function createStory(ctx) {
     // at the end of the long night, the cottage door offers sleep
     const door = world.spots.cottageDoor;
     S.nearDoor = S.step === 'rest' && !S.busy && P.state === 'move' && Math.hypot(P.x - door.x, P.z - door.z) < 1.7;
+    // the campfire offers a rest when you're hurt
+    const fire = world.spots.campfire;
+    S.nearFire = !S.busy && P.state === 'move' && P.hp < P.maxHp && !ctx.foes.seep.sealed && Math.hypot(P.x - fire.x, P.z - fire.z) < 2.4;
     // the sword button offers "Talk" when someone is close and nothing is fighting you
     const n = !S.busy && P.state === 'move' && !ctx.foes.seep.sealed ? nearestTalker() : null;
-    ui.setContext(S.nearShard ? 'enter' : S.nearDoor ? 'sleep' : n ? 'talk' : null);
+    ui.setContext(S.nearShard ? 'enter' : S.nearDoor ? 'sleep' : n ? 'talk' : S.nearFire ? 'rest' : null);
     S.near = n;
   }
   function tryTalk() {
     if (S.nearShard && !S.busy) { S.nearShard = false; ctx.travel('rift'); return true; }
     if (S.nearDoor && !S.busy) { sleep(); return true; }
+    if (S.nearFire && !S.near && !S.busy) { restAtFire(); return true; }
     if (S.near && !S.busy) { talk(S.near); return true; }
     return false;
   }
   function begin() { setStep('findMaren'); }
 
-  return { update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, applyState, say, busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
+  // where people are, and whether Maren has something to say (for the map)
+  const people = () => npcs.map((n) => ({ id: n.id, x: n.x, z: n.z }));
+  return { people, hasNews, update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, applyState, say, busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
     // for testing: skip ahead
     if (step === 'beacon') { setStep('beacon'); }
     else if (step === 'riftfall') { beaconLit(); S.riftIn = 0.1; }

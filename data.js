@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.5.1';
+export const VERSION = '0.6.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -11,6 +11,7 @@ export const CONFIG = {
     decel: 24,             // slowing down when you let go
     turnRate: 11,          // how fast you can turn (radians per second)
     deadzone: 0.12,        // stick travel ignored around the centre
+    runMul: 1.6,           // running is this much faster than walking
     radius: 0.32,          // collision size
     hearts: 5,             // max health in hearts (each heart = 2 half-hearts)
     stepUp: 0.55,          // highest ledge you can walk up without stairs
@@ -328,6 +329,7 @@ export const STORY = {
     enter: [{ who: '', text: 'Cold water, and no water at all. You can breathe. Fruit trees sway in a current you can\u2019t feel.' }],
     treasure: 'A Seaglass Heart: your health grows by one heart',
     guardian: [{ who: '', text: 'Something hangs from the dark above, upside down, weeping. Its tears rise.' }],
+    guardianCard: { name: 'The Weeping Gardener', region: 'Guardian of the Drowned Orchard', line: 'It still tends a world that is gone.' },
     cleared: [{ who: '', text: 'The orchard goes still. Where the Gardener hung, a heart of glass is left, glowing.' }],
   },
 };
@@ -393,5 +395,7 @@ export const TEXT = {
   titleSub: 'Prologue \u00b7 The Shattered Sky',
   newConfirm: 'Begin a new journey? Your saved one will be replaced.',
   saved: 'Saved',
+  rested: 'You rest by the fire. Your hearts are full again.',
+  hintRun: 'Tap the boot to run \u00b7 tap again to walk',
   morning: { name: 'First Light', region: 'Lanternhold', line: 'The sky did not mend in the night.' },
 };

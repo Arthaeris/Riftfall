@@ -368,6 +368,7 @@ export function createFoes(ctx) {
   // ---------------------------------------------------------------------------
   const slows = [];   // frost patches from fallen snow-fruit: they slow you
   const flood = { k: 0, to: 0 };
+  function endAttack(f, next) { clearActs(f); f.state = 'idle'; f.t = 0; f.next = next; }
   function gardener(f, dt) {
     const D = f.D, m = f.m;
     f.t += dt;
@@ -390,9 +391,23 @@ export function createFoes(ctx) {
     m.crown.rotation.y += dt * (0.15 + phase * 0.1);
     m.fruit.forEach((fr, i) => { fr.rotation.z = Math.sin(now * 1.5 + i) * 0.2; });
     m.heart.scale.setScalar(1 + Math.sin(now * 3) * 0.08);
-    // tears falling upward from its eyes
-    if (Math.random() < dt * 8) { const e = m.eyes[Math.random() < 0.5 ? 0 : 1]; const p = e.getWorldPosition(tmp); sparks.spawn({ x: p.x, y: p.y, z: p.z + 0.1, vy: 1.4, vx: (Math.random() - 0.5) * 0.3, life: 1.4, size: 0.12, color: '#9ff3ff', glow: 2.4, drag: 0.2 }); }
+    // tears rising from its many eyes
+    if (Math.random() < dt * (8 + phase * 4)) { const e = m.eyes[Math.floor(Math.random() * m.eyes.length)]; const p = e.getWorldPosition(tmp); sparks.spawn({ x: p.x, y: p.y, z: p.z + 0.06, vy: 1.4, vx: (Math.random() - 0.5) * 0.3, life: 1.4, size: 0.1, color: '#9ff3ff', glow: 2.4, drag: 0.2 }); }
+    // the eyes blink, out of step with each other; the hanging roots and the arms drift in a current you can't feel
+    for (const L of m.lids) {
+      L.t -= dt;
+      if (L.t <= 0) { L.t = 1.5 + Math.random() * 4; L.b = 0.18; }
+      L.b = Math.max(0, (L.b || 0) - dt);
+      L.m.scale.y = L.b > 0 ? 1 : 0.05;
+    }
+    m.tendrils.forEach((chain, i) => chain.forEach((seg, j) => { seg.rotation.x = Math.sin(now * 1.1 + i * 1.7 + j * 0.6) * (0.12 + j * 0.06); seg.rotation.z = Math.cos(now * 0.9 + i) * (0.08 + j * 0.05); }));
+    m.elbows.forEach((e, i) => { e.rotation.x = 0.4 + Math.sin(now * 0.8 + i * 1.3) * 0.18 - (f.state === 'sweep' ? 0.55 : 0); });
+    m.fingers.forEach((fg, i) => { fg.rotation.x = 0.3 + Math.sin(now * 2 + i) * 0.25; });
+    f.flinch = Math.max(0, (f.flinch || 0) - dt * 4);
+    m.hang.position.x = Math.sin(now * 40) * 0.06 * f.flinch;
     f.barY = 0;
+    // while it's being introduced, it only hangs there and looks at you
+    if (ctx.bossHold && ctx.bossHold()) return;
     // attacks
     if (f.state === 'up') { f.state = 'idle'; f.t = 0; f.next = 1.6; }
     if (f.state === 'idle') {
@@ -449,7 +464,7 @@ export function createFoes(ctx) {
           if (Math.hypot(P.x - a.x, P.z - a.z) < 1.45) ctx.hurtPlayer(D.dmg, a.x, a.z);
           rootSpike(a.x, f.y, a.z);
         }
-        f.acts = []; f.state = 'idle'; f.next = D.every[phase];
+        endAttack(f, D.every[phase]);
       }
     } else if (f.state === 'fruit') {
       let done = true;
@@ -468,10 +483,10 @@ export function createFoes(ctx) {
           sound.sfx('splat');
           if (Math.hypot(P.x - a.x, P.z - a.z) < 0.95) ctx.hurtPlayer(1, a.x, a.z);
           if (a.kind === 'snow') {
-            // a patch of frost that slows you for a few seconds
-            const pm = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), new THREE.MeshBasicMaterial({ color: '#dff4ff', transparent: true, opacity: 0.55, depthWrite: false }));
-            pm.rotation.x = -Math.PI / 2; pm.position.set(a.x, f.y + 0.03, a.z); scene.add(pm);
-            slows.push({ x: a.x, z: a.z, r: 1.4, t: 5, m: pm });
+            // a patch of frost with ice spikes in it: it slows you for a few seconds, then melts away
+            const pm = buildFrost(1.4);
+            pm.position.set(a.x, f.y + 0.02, a.z); scene.add(pm);
+            slows.push({ x: a.x, z: a.z, r: 1.4, t: 3.5, life: 3.5, m: pm });
             for (let i = 0; i < 14; i++) sparks.spawn({ x: a.x + (Math.random() - 0.5) * 2, y: f.y + 0.2, z: a.z + (Math.random() - 0.5) * 2, vy: 0.6, life: 0.8, size: 0.12, color: '#ffffff', glow: 1.6 });
           } else if (a.kind === 'sun') {
             ring({ x: a.x, z: a.z, y: f.y - 1.1, D: { hover: 1.2, orbs: 8, orbSpeed: 3.2, orbLife: 2.6, orbR: 0.2, dmg: 1 } });
@@ -483,7 +498,7 @@ export function createFoes(ctx) {
           }
         }
       }
-      if (done && f.t > 0.5) { f.acts = []; f.state = 'idle'; f.next = D.every[phase]; }
+      if (done && f.t > 0.5) { endAttack(f, D.every[phase]); }
     } else if (f.state === 'sweep') {
       const a = f.acts[0];
       const tellT = 1.0, sweepT = 0.45;
@@ -497,12 +512,30 @@ export function createFoes(ctx) {
         const pa = Math.atan2(P.x - f.x, P.z - f.z), pd = Math.hypot(P.x - f.x, P.z - f.z);
         if (!a.hit && pd < D.sweepR && pd > 1.0 && Math.abs(angTo(ang, pa)) < 0.35) { if (ctx.hurtPlayer(D.dmg, f.x, f.z)) a.hit = true; }
         if (Math.random() < 0.8) sparks.spawn({ x: f.x + Math.sin(ang) * D.sweepR * 0.7, y: f.y + 0.8, z: f.z + Math.cos(ang) * D.sweepR * 0.7, life: 0.4, size: 0.3, color: '#7cc35e', glow: 1.4 });
-        if (k >= 1) { scene.remove(a.g); f.acts = []; f.state = 'idle'; f.next = D.every[phase]; }
+        if (k >= 1) { endAttack(f, D.every[phase]); }
       }
     } else if (f.state === 'stagger') {
       if (f.t > 0.3) { f.state = 'idle'; f.t = 0; f.next = 0.8; }
     }
     ctx.bossBar(D.name, Math.max(0, frac));
+  }
+  // a frost patch: a pale icy disc with a rim and a few ice spikes standing in it
+  function buildFrost(r) {
+    const g = new THREE.Group();
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 28), new THREE.MeshBasicMaterial({ color: new THREE.Color('#bfe9ff').multiplyScalar(1.15), transparent: true, opacity: 0.5, depthWrite: false }));
+    disc.rotation.x = -Math.PI / 2; g.add(disc);
+    const rim = new THREE.Mesh(new THREE.RingGeometry(r - 0.12, r, 28), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffffff').multiplyScalar(1.6), transparent: true, opacity: 0.7, depthWrite: false }));
+    rim.rotation.x = -Math.PI / 2; rim.position.y = 0.01; g.add(rim);
+    const b = new Batch(98);
+    for (let i = 0; i < 9; i++) { const a = Math.random() * TAU, d = Math.random() * r * 0.85, h = 0.25 + Math.random() * 0.45; b.box(0.14, h, 0.14, i % 2 ? '#e8f8ff' : '#a9e2ff', Math.cos(a) * d, h / 2, Math.sin(a) * d, { rotX: (Math.random() - 0.5) * 0.5, rotZ: (Math.random() - 0.5) * 0.5 }); }
+    const spikes = b.mesh(); spikes.matrixAutoUpdate = true; g.add(spikes);
+    g.userData = { disc, spikes };
+    return g;
+  }
+  // take away everything an attack put on the floor: warnings, falling fruit, the sweep arc
+  function clearActs(f) {
+    for (const a of f.acts || []) { if (a.g && a.g.group) scene.remove(a.g.group); else if (a.g) scene.remove(a.g); if (a.sh) scene.remove(a.sh); if (a.fr) scene.remove(a.fr); }
+    f.acts = [];
   }
   // a root spike that stays up for a moment after a burst
   function rootSpike(x, y, z) {
@@ -521,9 +554,15 @@ export function createFoes(ctx) {
     for (let i = slows.length - 1; i >= 0; i--) {
       const z = slows[i];
       z.t -= dt;
-      z.m.material.opacity = Math.min(0.55, z.t * 0.4);
+      // it melts: the disc fades and the spikes sink over the last second
+      const k = Math.min(1, z.t);
+      z.m.userData.disc.material.opacity = 0.5 * k;
+      z.m.userData.spikes.scale.set(1, Math.max(0.01, k), 1);
+      if (Math.random() < dt * 6) sparks.spawn({ x: z.x + (Math.random() - 0.5) * z.r * 1.6, y: z.m.position.y + 0.2, z: z.z + (Math.random() - 0.5) * z.r * 1.6, vy: 0.5, life: 0.7, size: 0.1, color: '#ffffff', glow: 1.8 });
       if (z.t <= 0) { scene.remove(z.m); slows.splice(i, 1); }
     }
+    // standing in frost: you sparkle with cold, so it's clear why you're slow
+    if (slows.some((z) => Math.hypot(P.x - z.x, P.z - z.z) < z.r) && Math.random() < dt * 14) sparks.spawn({ x: P.x + (Math.random() - 0.5) * 0.6, y: P.y + 0.2 + Math.random() * 1.2, z: P.z + (Math.random() - 0.5) * 0.6, vy: 0.4, life: 0.6, size: 0.1, color: '#dff4ff', glow: 2 });
     flood.k += (flood.to - flood.k) * Math.min(1, dt * 0.8);
   }
   // how fast you can move here: frost patches and the flood slow you
@@ -569,7 +608,9 @@ export function createFoes(ctx) {
     sound.sfx('hit', 0.7);
     ctx.number(String(dmg), f.x, hy + 0.7, f.z, heavy);
     // a heavy hit (or any hit on a creature mid-warning, for the puddle) knocks it out of what it was doing
-    if (f.hp > 0 && (heavy || (f.kind === 'mirrorpuddle' && f.state === 'tell'))) {
+    // (the guardian has poise: it flinches, but never drops what it's doing, so its warnings always play out)
+    if (f.kind === 'gardener' && f.hp > 0) { f.flinch = 1; }
+    else if (f.hp > 0 && (heavy || (f.kind === 'mirrorpuddle' && f.state === 'tell'))) {
       if (f.state !== 'under' && f.state !== 'tell' || f.kind === 'mirrorpuddle') { f.state = 'stagger'; f.t = 0; f.m.body.position.x = 0; f.tellGlow = 0; }
     }
     if (f.hp <= 0) die(f, nx, nz);
@@ -590,7 +631,7 @@ export function createFoes(ctx) {
     if (f.kind === 'gardener') {
       ctx.bossBar(null);
       flood.to = 0;
-      for (const a of f.acts || []) { if (a.g && a.g.group) scene.remove(a.g.group); else if (a.g) scene.remove(a.g); if (a.sh) scene.remove(a.sh); if (a.fr) scene.remove(a.fr); }
+      clearActs(f);
       for (let i = 0; i < 40; i++) { const a = Math.random() * TAU, sp = 2 + Math.random() * 5; bits.spawn({ x: f.x, y: f.y + 2 + Math.random() * 3, z: f.z, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 4, vz: Math.sin(a) * sp, life: 2, size: 0.12 + Math.random() * 0.18, color: ['#4e3a30', '#3f7a5a', '#4a8a66'][i % 3], floor: f.y }); }
       if (ctx.onGuardianDown) ctx.onGuardianDown(f);
     }
@@ -823,12 +864,14 @@ export function createFoes(ctx) {
 
   // you fell: everything in the Seep goes quiet again, nothing is lost
   function reset() {
-    for (const f of foes) { scene.remove(f.m.root); scene.remove(f.bar.group); if (f.crack) scene.remove(f.crack); if (f.glyph) scene.remove(f.glyph.group); }
+    for (const f of foes) { if (f.acts) clearActs(f); scene.remove(f.m.root); scene.remove(f.bar.group); if (f.crack) scene.remove(f.crack); if (f.glyph) scene.remove(f.glyph.group); }
     foes.length = 0;
     for (const o of orbs) scene.remove(o.m);
     orbs.length = 0;
     for (const z of slows) scene.remove(z.m);
     slows.length = 0;
+    for (const e of effects) scene.remove(e.m);
+    effects.length = 0;
     flood.k = 0; flood.to = 0;
     if (!S) return;
     if (seep.sealed) unseal(true);

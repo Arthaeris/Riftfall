@@ -744,12 +744,23 @@ export function buildSea(shoreTex, rect) {
         col += vec3(1.0, 0.8, 0.55) * spec * 2.5;
         float glint = step(0.93, n2(p * 9.0 + t * 1.5)) * step(0.5, n2(p * 1.3 - t * 0.2)) * 0.6;
         col += vec3(1.0, 0.9, 0.8) * glint * (1.0 - foam);
+        // far out, the sea melts into the sky at the horizon, so it never ends at an edge
+        float dist = length(vW.xz - cameraPosition.xz);
+        vec3 horizon = skyColor(normalize(vec3(-V.x, 0.015, -V.z)));
+        float haze = smoothstep(40.0, 380.0, dist);
+        col = mix(col, horizon, haze);
+        // near the island, the scene's own fog still softens it a little
+        #ifdef USE_FOG
+          float fogK = smoothstep(fogNear, fogFar * 1.6, vFogDepth) * 0.5 * (1.0 - haze);
+          col = mix(col, fogColor, fogK);
+        #endif
         gl_FragColor = vec4(col, 1.0);
-        #include <fog_fragment>
       }`,
   });
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(320, 320, 64, 64), mat);
+  // a wide sheet that travels with the camera (the shader works in world space, so the waves stay put)
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1300, 1300, 130, 130), mat);
   m.rotation.x = -Math.PI / 2;
+  m.frustumCulled = false;
   m.position.y = -0.08;
   m.receiveShadow = false;
   return m;
@@ -1081,47 +1092,128 @@ export function buildFoe(kind) {
     for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + 0.4; K.box(body, 0.5, 0.06, 0.12, '#5c8f3e', Math.cos(a) * 0.4, 0.03, Math.sin(a) * 0.4).rotation.y = -a; }
     root.add(blob(1.0, 1.0));
   } else if (kind === 'gardener') {
-    // a great tree hanging upside down from a crack in the dark above; its crown sways near the ground,
-    // there's a face in its trunk, and the fruit are tiny worlds
+    // a great tree hanging upside down from a crack in the dark above. Its trunk is twisted and covered
+    // in eyes that blink out of step; its crown hangs near the floor with jointed, many-fingered branches,
+    // roots trail down from it like hair, its fruit are tiny worlds, and its heart glows in a cage of roots
     const hang = pivot(body, 0, 0, 0);
     out.hang = hang;
-    const bark = ['#4e3a30', '#5d463a', '#433128'];
-    for (let k = 0; k < 7; k++) K.box(hang, 1.2 - k * 0.04, 0.6, 1.1 - k * 0.04, bark[k % 3], (k % 2 - 0.5) * 0.06, 3.6 + k * 0.6, 0);
-    // roots spreading into the ceiling crack
-    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; const r2 = pivot(hang, Math.cos(a) * 0.4, 7.6, Math.sin(a) * 0.4); r2.rotation.set(Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9); K.box(r2, 0.2, 1.6, 0.2, bark[k % 3], 0, 0.7, 0); }
-    // the face
-    out.eyes = [];
-    for (const x of [-0.26, 0.26]) { K.box(hang, 0.24, 0.18, 0.04, '#120a24', x, 4.6, 0.56); out.eyes.push(K.box(hang, 0.12, 0.08, 0.02, '#9ff3ff', x, 4.58, 0.585, 2.6)); }
-    K.box(hang, 0.36, 0.12, 0.04, '#120a24', 0, 4.15, 0.56);
-    // the crown, hanging low, with branches out to the sides
-    out.branches = [];
+    const bark = ['#4e3a30', '#5d463a', '#433128', '#3a2a22'];
+    const moss = ['#3f7a5a', '#4f8a5e'];
+    const small = [];   // little parts that shouldn't cast shadows
+    // the trunk: octagonal, twisting as it rises, thickening toward the roots in the ceiling
+    for (let k = 0; k < 8; k++) {
+      const seg = pivot(hang, 0, 3.55 + k * 0.56, 0);
+      seg.rotation.y = k * 0.17;
+      const w = 1.0 + k * 0.05;
+      K.box(seg, w, 0.6, w * 0.82, bark[k % 3], 0, 0, 0);
+      K.box(seg, w * 0.86, 0.6, w * 0.86, bark[(k + 1) % 3], 0, 0, 0).rotation.y = Math.PI / 4;
+      // bark plates and moss
+      if (k % 2 === 0) K.box(seg, 0.08, 0.5, w * 0.5, bark[3], w * 0.52, 0.02, 0.1);
+      if (k % 3 === 1) K.box(seg, w * 0.5, 0.18, 0.08, moss[k % 2], -0.1, -0.22, w * 0.43);
+    }
+    // roots spreading up into the ceiling crack, each in two crooked pieces
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * TAU + 0.2;
+      const r1 = pivot(hang, Math.sin(a) * 0.5, 7.9, Math.cos(a) * 0.5);
+      r1.rotation.set(Math.cos(a) * 0.95, 0, -Math.sin(a) * 0.95);
+      K.box(r1, 0.24, 1.2, 0.24, bark[k % 4], 0, 0.55, 0);
+      const r2 = pivot(r1, 0, 1.1, 0);
+      r2.rotation.set(Math.cos(a) * 0.5, 0, -Math.sin(a) * 0.5);
+      K.box(r2, 0.15, 1.1, 0.15, bark[(k + 1) % 4], 0, 0.5, 0);
+    }
+    // eyes: a dark socket, a pale glow, an iris and a pupil, and a lid of bark that drops when it blinks
+    out.eyes = []; out.lids = [];
+    const eye = (parent, a, y, r, sz) => {
+      const e = pivot(parent, Math.sin(a) * r, y, Math.cos(a) * r);
+      e.rotation.y = a;
+      small.push(K.box(e, sz * 1.7, sz * 1.15, 0.05, '#120a24', 0, 0, 0));
+      small.push(K.box(e, sz * 1.35, sz * 0.82, 0.03, '#e8fbff', 0, 0, 0.03, 1.7));
+      const iris = K.box(e, sz * 0.6, sz * 0.6, 0.03, '#9ff3ff', 0, 0, 0.05, 3.4);
+      small.push(iris);
+      small.push(K.box(e, sz * 0.24, sz * 0.24, 0.02, '#0a0618', 0, 0, 0.07));
+      const lid = K.box(e, sz * 1.5, sz * 1.0, 0.04, bark[1], 0, 0, 0.09);
+      lid.scale.y = 0.05;
+      small.push(lid);
+      out.eyes.push(iris);
+      out.lids.push({ m: lid, t: Math.random() * 4 });
+    };
+    eye(hang, 0, 4.55, 0.62, 0.34);                         // the great eye, where a face would be
+    eye(hang, 0.5, 5.15, 0.6, 0.16); eye(hang, -0.5, 5.15, 0.6, 0.16);
+    eye(hang, 0.95, 4.0, 0.6, 0.18); eye(hang, -0.95, 4.25, 0.6, 0.15);
+    eye(hang, 1.75, 5.6, 0.62, 0.2); eye(hang, -1.6, 6.1, 0.64, 0.17);
+    eye(hang, 0.35, 6.6, 0.66, 0.15); eye(hang, -0.25, 3.85, 0.58, 0.12);
+    eye(hang, 2.7, 4.7, 0.6, 0.18); eye(hang, 0.15, 7.2, 0.68, 0.13);
+    // the crown, hanging low: layered leaves, clusters round the edge, and seeds of light
     const crown = pivot(hang, 0, 3.2, 0);
     out.crown = crown;
-    const leaf = ['#3f7a5a', '#4a8a66', '#356a4e'];
+    const leaf = ['#3f7a5a', '#4a8a66', '#356a4e', '#2f5e47'];
     K.box(crown, 2.6, 0.9, 2.4, leaf[0], 0, -0.4, 0);
-    K.box(crown, 2.0, 0.7, 1.9, leaf[1], 0, -1.0, 0);
+    K.box(crown, 2.2, 0.7, 2.2, leaf[1], 0, -1.0, 0).rotation.y = Math.PI / 4;
     K.box(crown, 1.2, 0.5, 1.1, leaf[2], 0, -1.45, 0);
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * TAU, rr = 1.25 + (k % 3) * 0.15, sz = 0.55 + (k % 4) * 0.12;
+      K.box(crown, sz, sz * 0.8, sz, leaf[k % 4], Math.sin(a) * rr, -0.55 - (k % 2) * 0.35, Math.cos(a) * rr).rotation.y = a;
+    }
+    for (let k = 0; k < 7; k++) { const a = k * 2.3; small.push(K.box(crown, 0.12, 0.12, 0.12, '#c6f8ff', Math.sin(a) * 1.05, -0.9 - (k % 3) * 0.2, Math.cos(a) * 1.0, 2.4)); }
+    // eyes in the crown too
+    eye(crown, 0.15, -0.55, 1.22, 0.2); eye(crown, 2.1, -0.75, 1.2, 0.16); eye(crown, -2.2, -0.6, 1.2, 0.17); eye(crown, -0.9, -1.05, 1.1, 0.14);
+    // jointed branches: upper arm, an elbow, a forearm, and a hand of three twig fingers
+    out.branches = []; out.elbows = []; out.fingers = [];
     for (let k = 0; k < 6; k++) {
       const a = (k / 6) * TAU + 0.3;
-      const br = pivot(crown, 0, -0.3, 0);
-      br.rotation.y = a;
-      K.box(br, 0.22, 0.22, 2.2, bark[k % 3], 0, 0, 1.4);
-      K.box(br, 1.0, 0.6, 1.0, leaf[k % 3], 0, -0.2, 2.5);
-      out.branches.push(br);
+      const sh = pivot(crown, 0, -0.3, 0);
+      sh.rotation.y = a;
+      K.box(sh, 0.26, 0.26, 1.4, bark[k % 3], 0, 0, 1.3);
+      K.box(sh, 0.6, 0.45, 0.6, leaf[k % 4], 0, 0.2, 1.1);
+      const el = pivot(sh, 0, 0, 2.0);
+      el.rotation.x = 0.4;
+      K.box(el, 0.2, 0.2, 1.2, bark[(k + 1) % 3], 0, 0, 0.6);
+      K.box(el, 0.28, 0.28, 0.28, bark[3], 0, 0, 0);
+      const hand = pivot(el, 0, 0, 1.2);
+      for (const fy of [-0.45, 0, 0.45]) {
+        const fg = pivot(hand, 0, 0, 0);
+        fg.rotation.y = fy;
+        small.push(K.box(fg, 0.07, 0.07, 0.5, bark[2], 0, 0, 0.25));
+        small.push(K.box(fg, 0.09, 0.09, 0.09, '#9ff3ff', 0, 0, 0.52, 1.8));
+        out.fingers.push(fg);
+      }
+      out.branches.push(sh); out.elbows.push(el);
     }
-    // fruit: little worlds. A snowy one, a sunny one, a sea one, a forest one.
+    // roots trailing down from the crown like hair, each in four swaying pieces, with a bead of light at the tip
+    out.tendrils = [];
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * TAU + 0.4, rr = 0.55 + (k % 2) * 0.35;
+      let par = pivot(crown, Math.sin(a) * rr, -1.5, Math.cos(a) * rr);
+      const chain = [par];
+      for (let j = 0; j < 4; j++) {
+        small.push(K.box(par, 0.09, 0.42, 0.09, bark[(k + j) % 4], 0, -0.2, 0));
+        if (j < 3) { par = pivot(par, 0, -0.4, 0); chain.push(par); }
+      }
+      small.push(K.box(par, 0.12, 0.12, 0.12, '#9ff3ff', 0, -0.45, 0, 2.2));
+      out.tendrils.push(chain);
+    }
+    // fruit: little worlds. A snowy one, a sunny one with a ring, a sea one, a forest one.
     out.fruit = [];
     [['#f4fbff', '#cfe8ff'], ['#ffd36b', '#f29a3a'], ['#4fb2d4', '#2a6f8f'], ['#7cc35e', '#3f7a3a']].forEach(([c1, c2], k) => {
       const a = (k / 4) * TAU + 0.8, f = pivot(crown, Math.cos(a) * 1.3, -1.3, Math.sin(a) * 1.2);
       K.box(f, 0.03, 0.4, 0.03, '#4e3a30', 0, 0.2, 0);
       K.box(f, 0.36, 0.36, 0.36, c1, 0, -0.1, 0, 1.5); K.box(f, 0.2, 0.12, 0.38, c2, 0.04, -0.05, 0, 1.4);
+      if (k === 1) K.box(f, 0.6, 0.03, 0.6, '#ffe9a8', 0, -0.1, 0, 1.6).rotation.z = 0.35;
+      if (k === 3) K.box(f, 0.08, 0.16, 0.08, '#4e3a30', 0.06, 0.12, 0.06);
       out.fruit.push(f);
     });
-    // its heart: a glowing core under the crown, where the hits land
+    // its heart: a glowing core under the crown, held in a cage of roots, where the hits land
     out.heart = K.box(crown, 0.5, 0.5, 0.5, '#9ff3ff', 0, -1.85, 0, 2.6);
+    // its heart lights the floor and the underside of the crown
+    const glowL = new THREE.PointLight('#8ff0ff', 7, 9, 1.6);
+    glowL.position.set(0, -1.6, 0.6); glowL.castShadow = false;
+    crown.add(glowL);
+    for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + Math.PI / 4; K.box(crown, 0.08, 0.85, 0.08, bark[k % 3], Math.sin(a) * 0.38, -1.85, Math.cos(a) * 0.38); }
+    K.box(crown, 0.7, 0.08, 0.7, bark[2], 0, -2.3, 0);
+    for (const m of small) m.userData.noShadow = true;
     root.add(blob(3.4, 3.4));
   }
-  root.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.castShadow = true; });
+  root.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.castShadow = !o.userData.noShadow; });
   return out;
 }
 

@@ -779,6 +779,8 @@ export function buildCove(scene) {
       pip: { x: V.x + 2.2, z: V.z + 0.6, face: 0 },
       beaconView: { x: 13.3, z: 19.2 },
       cottageDoor: { x: cotX - 0.6, z: cotZ + 2.2 },
+      campfire: { x: fire.x, z: fire.z },
+      trainingGround: { x: tgX, z: tgZ },
       marenRest: { x: cotX + 2.6, z: cotZ + 2.9, face: -0.4 },
       lighthouseDoor: { x: lhX, z: lhZ + 2.6 },
       marenMorning: { x: lhX - 1.5, z: lhZ + 2.4, face: 0.5 },
@@ -786,6 +788,21 @@ export function buildCove(scene) {
       gallery: { x: lhX, y: lh.lampY - 0.55, z: lhZ },
     },
     setLamp: (k, instant) => { lampTo = k; if (instant) lampK = k; },
+    sea,
+    // what the map needs: heights and ground kinds per cell, house footprints, and named places
+    mapInfo: {
+      N, H0, H, K, boxes,
+      places: [
+        { name: 'Lighthouse', x: lhX, z: lhZ, icon: 'lighthouse' },
+        { name: 'Maren\u2019s cottage', x: cotX, z: cotZ, icon: 'house' },
+        { name: 'Lanternhold', x: VILLAGE_AT.x, z: VILLAGE_AT.z, icon: 'village' },
+        { name: 'Training ring', x: tgX, z: tgZ, icon: 'ring' },
+        { name: 'Stone circle', x: SEEP_AT.x, z: SEEP_AT.z, icon: 'circle' },
+        { name: 'Dock', x: (dock.x0 + dock.x1) / 2, z: dock.z1 - 2, icon: 'dock' },
+        { name: 'Campfire', x: fire.x, z: fire.z, icon: 'fire' },
+      ],
+      dock,
+    },
     name: 'cove', groundAt, walkable, terrainOk, solidAt, findPath, clearLine, update, fx, dummies, solids, spawn, shard,
     debugMap: () => { const rows = []; for (let j = 0; j < N; j += 1) { let s = ''; for (let i = 0; i < N; i += 1) { const h = H[j * N + i], k = K[j * N + i]; s += h <= 0 ? '~' : k === 'sand' ? (h > 0.5 ? 's' : '.') : k === 'stone' ? '#' : k === 'path' ? '=' : String(Math.min(9, Math.floor(h))); } rows.push((H0 + j + '').padStart(4) + ' ' + s); } return rows.join('\n'); },
     sunDir: new V3(-0.7, 0.56, -0.3).normalize(),
@@ -935,10 +952,11 @@ export function buildRift(root, seed = 7) {
         place(x, z);
       }
     }
-    // jellyfish lanterns float over every room
-    for (let k = 0; k < 3; k++) ORCHARD.jelly(glow, rm.cx + (r() - 0.5) * (RW - 4), 3.4 + r() * 1.2, rm.cz + (r() - 0.5) * (RD - 4), r);
+    // jellyfish lanterns float over every room (but not the guardian's: it needs the space, and its own light)
+    const calm = rm.type !== 'guardian';
+    for (let k = 0; k < 3; k++) { const jx = rm.cx + (r() - 0.5) * (RW - 4), jy = 3.4 + r() * 1.2, jz = rm.cz + (r() - 0.5) * (RD - 4); if (calm) ORCHARD.jelly(glow, jx, jy, jz, r); }
     // fish swimming circles
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < (calm ? 3 : 0); k++) {
       const f = buildFish(pick(['#ffb38a', '#9fd8ff', '#ffd36b', '#ff8fd0', '#c6f8ff'], r));
       root.add(f);
       decor.push({ m: f, cx: rm.cx + (r() - 0.5) * 6, cz: rm.cz + (r() - 0.5) * 4, rad: 1.5 + r() * 3, y: 1.8 + r() * 1.8, sp: (0.4 + r() * 0.5) * (r() < 0.5 ? -1 : 1), ph: r() * TAU });

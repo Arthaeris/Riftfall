@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.1.2';
+export const VERSION = '0.2.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -69,6 +69,67 @@ export const WEAPONS = {
   },
 };
 
+// ----- the player getting hurt -----
+export const HURT = {
+  invuln: 0.9,           // seconds you can't be hurt again after a hit (you flicker)
+  knock: 6,              // how hard a hit pushes you back
+  respawnDelay: 2.6,     // seconds from falling to waking by the fire
+};
+
+// ----- creatures from the Rifts -----
+// hp: health. dmg: in half hearts. r: body size for hits. Every attack has a warning (tell) you can read and roll through.
+export const FOES = {
+  mirrorpuddle: {
+    name: 'Mirrorpuddle',
+    desc: 'A walking puddle that reflects a different sky than the one above it.',
+    hp: 30, r: 0.5, dmg: 1, speed: 1.7,
+    hopEvery: 0.55,        // the little hops it moves in
+    reach: 3.4,            // starts its leap from this far
+    tell: 0.5,             // crouch before the leap
+    leap: 0.42,            // time in the air
+    leapDist: 3.2,
+    rest: 0.9,             // catching its breath after a leap
+    knockTaken: 1.0,       // how far your hits push it
+    drops: [2, 3],         // Skyglass slivers, min and max
+  },
+  bellfish: {
+    name: 'Bellfish',
+    desc: 'A jellyfish with a tiny drowned room inside its bell. The lamp in there is still lit.',
+    hp: 26, r: 0.55, dmg: 1, speed: 1.4,
+    hover: 1.5,            // floats this high
+    keep: [4.5, 7],        // likes to stay this far from you
+    every: [2.6, 3.6],     // seconds between volleys
+    tell: 0.75,            // its lamp swells before it rings
+    orbs: 10, orbSpeed: 3.4, orbLife: 3.4, orbR: 0.22,
+    knockTaken: 0.6,
+    drops: [2, 4],
+  },
+  rootscript: {
+    name: 'Rootscript',
+    desc: 'A hand of roots that writes glowing letters on the ground before it bursts up beneath you.',
+    hp: 36, r: 0.5, dmg: 2, speed: 3.2,
+    up: 1.8,               // how long it stays above ground (that's when you can hit it)
+    under: 1.2,            // how long it travels below ground
+    tell: 0.95,            // the ring of letters before it bursts
+    burstR: 1.25,
+    knockTaken: 0.2,
+    drops: [3, 4],
+  },
+};
+
+// ----- the Seep: the clearing where the fallen shard leaks creatures into Lanternhold -----
+export const SEEP = {
+  name: 'The Seep',
+  line: 'Where the shard fell, something keeps crawling out.',
+  waves: [
+    ['mirrorpuddle', 'mirrorpuddle', 'mirrorpuddle'],
+    ['mirrorpuddle', 'mirrorpuddle', 'bellfish'],
+    ['rootscript', 'bellfish', 'mirrorpuddle', 'mirrorpuddle'],
+  ],
+  recharge: 25,          // seconds before the shard stirs again after you clear it
+  heartChance: 0.18,     // chance a creature leaves a heart behind (more likely when you're hurt)
+};
+
 // ----- places -----
 export const PLACES = {
   cove: {
@@ -113,4 +174,9 @@ export const TEXT = {
   hintAttack: 'Hold to keep swinging · drag the button to aim',
   hintRoll: 'Roll through attacks',
   dummy: ['Thwack!', 'Oof.', 'Driftwood holds.', 'Again!'],
+  seepSealed: 'The shard seals the clearing',
+  seepWave: (n, of) => `Wave ${n} of ${of}`,
+  seepClear: 'The Seep falls quiet',
+  seepRecharging: 'The shard is gathering itself',
+  fallen: 'You wake by the fire',
 };

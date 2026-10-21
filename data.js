@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -128,6 +128,84 @@ export const SEEP = {
   ],
   recharge: 25,          // seconds before the shard stirs again after you clear it
   heartChance: 0.18,     // chance a creature leaves a heart behind (more likely when you're hurt)
+};
+
+// ----- the people of Lanternhold -----
+export const NPCS = {
+  maren: { name: 'Maren', color: '#ffd29a', role: 'The Keeper' },
+  tobin: { name: 'Tobin', color: '#f2c94c', role: 'Fisherman' },
+  wenna: { name: 'Wenna', color: '#ff9f80', role: 'Baker' },
+  pip: { name: 'Pip', color: '#9fd8ff', role: 'Trouble' },
+};
+
+// ----- the Prologue, step by step. Each step has an objective line; Maren's lines are said when you talk to her. -----
+export const STORY = {
+  practiceHits: 12,
+  objectives: {
+    findMaren: 'Find Maren by her cottage, up the stairs',
+    practice: (n, of) => `Strike the practice dummies (${n}/${of})`,
+    reportPractice: 'Return to Maren',
+    beacon: 'Relight the dock beacon: hit its crystal with your sling',
+    toShard: 'Go to the stone circle where the shard fell',
+    seep: 'Survive the Seep',
+    reportSeep: 'Return to Maren',
+    rest: 'Rest. The Rift can wait for morning.',
+  },
+  maren: {
+    findMaren: [
+      'There you are. I thought the tide had taken you.',
+      'The light\u2019s going early tonight, and the sky has been loud since noon. Can you hear it? Like a glass about to sing.',
+      'Never mind. If you\u2019re to keep this lamp with me, you need a steady arm. That blade I gave you isn\u2019t for opening letters.',
+      'The old training ring is down past the stairs, to the west. Twelve good hits on those dummies.',
+      'Hold the sword to keep swinging. And roll if something swings back. Not that dummies do.',
+    ],
+    practice: ['Twelve hits. I\u2019m counting.'],
+    reportPractice: [
+      'Hm. Not bad. Not good either, but not bad.',
+      'Now: the dock beacon has gone dark. Tobin swears it went out on its own, but Tobin swears about a lot of things.',
+      'Its crystal sits on the old sea stack past the end of the dock. You can\u2019t wade out there.',
+      'Stand at the end of the dock and wake it with your sling. Crystals like that answer to a good hit.',
+    ],
+    beacon: ['The end of the dock. Aim for the crystal in the brass cage.'],
+    toShard: ['The stone circle in the meadow. Go.'],
+    seep: ['Don\u2019t stand there talking to me. Go!'],
+    reportSeep: [
+      'You\u2019re still in one piece. Good.',
+      'I\u2019ve kept this lamp a long time, and the sky has never cracked. Not in living memory.',
+      'That shard is only the first. Tomorrow we\u2019ll see where it leads.',
+      'Keep the slivers you gathered, apprentice. We\u2019ll need every one.',
+    ],
+    rest: ['Go on, rest. I\u2019ll keep watch.'],
+  },
+  // after the beacon is lit: night falls, then the first Riftfall
+  riftfallAfter: [
+    { who: '', text: 'A sound like the whole sky drawing breath.' },
+    { who: 'maren', text: 'Apprentice! Did you see where that one came down?' },
+    { who: 'maren', text: 'The old stone circle in the meadow. Whatever fell with it won\u2019t stay put for long.' },
+    { who: 'maren', text: 'Go. And mind yourself: that glass doesn\u2019t just fall. Things climb out of it.' },
+  ],
+  // what the villagers say, before and after the sky breaks. Each talk shows the next line.
+  villagers: {
+    tobin: {
+      before: ['The beacon went dark at noon. Didn\u2019t flicker. Just stopped, like it was listening for something.', 'Caught a fish this morning that hummed. Threw it back. Some things you don\u2019t eat.', 'Maren\u2019s up at the cottage. She\u2019s been staring at the sky all day.'],
+      after: ['The sky\u2019s open like a cracked bell. My nets came up full of light.', 'Thirty years on this water. I\u2019ve never seen the stars fall up.'],
+    },
+    wenna: {
+      before: ['My bread won\u2019t rise today. Or it rises and keeps on rising. I\u2019ve had to tie a loaf down with string.', 'Take a roll up to the Keeper, would you? She forgets to eat when the sky\u2019s like this.', 'Smells like rain. Rain that smells of glass. Is that a thing?'],
+      after: ['Did you see it fall? Like a star with somewhere to be.', 'I\u2019ll keep the oven lit tonight. Nobody should be alone in the dark.'],
+    },
+    pip: {
+      before: ['Are you Maren\u2019s apprentice? Is that a real sword? Can I hold it? Can I\u2014 okay, no.', 'When I grow up I\u2019m going to keep the lamp too. Or be a dragon. Probably the lamp.', 'I hit a dummy once. It hit me back. Well, it fell on me.'],
+      after: ['I\u2019m not scared. I\u2019m just standing very close to the well.', 'Did you fight them? What did they look like? Were they slimy? I bet they were slimy.'],
+    },
+  },
+  roundEnd: 'End of round 3: the Tutorial Rift opens in round 4',
+};
+
+// ----- the light at evening and at night (game.js blends between them) -----
+export const TIMES = {
+  evening: { zenith: '#1d1b4a', mid: '#5b4a8f', horizon: '#f2a37a', glow: '#ffd29a', fog: '#8f7aa8', sun: '#ffc48a', sunI: 3.6, hemiSky: '#aab4e4', hemiGround: '#6b5a48', hemiI: 1.3, grade: [1.04, 0.99, 0.97] },
+  night: { zenith: '#05071a', mid: '#121838', horizon: '#2c2a58', glow: '#5a5a9a', fog: '#1e2246', sun: '#8fa8ff', sunI: 1.1, hemiSky: '#5a6aa8', hemiGround: '#231e36', hemiI: 0.62, grade: [0.9, 0.96, 1.12] },
 };
 
 // ----- places -----

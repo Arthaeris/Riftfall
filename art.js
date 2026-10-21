@@ -353,10 +353,10 @@ export const PROPS = {
     for (let i = 0; i < 4; i++) b.box(0.12, 0.12, 0.12, pick(['#ffd1e0', '#fff1b8', '#ffb38a'], r), (r() - 0.5) * 1.6, 1.8 + r() * 1.2, 0.86, { jitter: 0 });
     b.pop();
   },
-  pine(b, x, y, z, r, s = 1) {
+  pine(b, x, y, z, r, s = 1, cols) {
     b.push(x, y, z, r() * TAU, 0, 0, s);
     b.box(0.26, 1.0, 0.26, '#6a4630', 0, 0.5, 0);
-    const c = pick(['#2f6f4f', '#2a6448', '#357a57'], r);
+    const c = pick(cols || ['#2f6f4f', '#2a6448', '#357a57'], r);
     const tiers = [[1.8, 0.9], [1.45, 1.55], [1.1, 2.15], [0.75, 2.7], [0.4, 3.15]];
     for (const [w, ty] of tiers) {
       b.box(w, 0.55, w, shade(c, 0.9 + r() * 0.2), 0, ty, 0, { ao: 0.75 });
@@ -401,8 +401,8 @@ export const PROPS = {
     g.box(0.18, 0.26, 0.18, '#ffc46b', 0.4, 1.52, 0, { glow: 3.2, jitter: 0 });
     g.pop();
   },
-  flowers(b, x, y, z, r) {
-    const c = pick(['#f4f0ff', '#ffd54f', '#ff8fb1', '#9fd4ff', '#ffb36b', '#c9a0ff'], r);
+  flowers(b, x, y, z, r, cols) {
+    const c = pick(cols || ['#f4f0ff', '#ffd54f', '#ff8fb1', '#9fd4ff', '#ffb36b', '#c9a0ff'], r);
     for (let i = 0; i < 3; i++) {
       const fx = x + (r() - 0.5) * 0.7, fz = z + (r() - 0.5) * 0.7, h = 0.18 + r() * 0.16;
       b.box(0.04, h, 0.04, '#4f8f3a', fx, y + h / 2, fz, { jitter: 0 });
@@ -686,6 +686,7 @@ export function buildSea(shoreTex, rect) {
     uShallow: { value: col(PALETTE.seaShallow).clone() },
     uSand: { value: col('#d8c08c').clone() },
     uFoam: { value: col(PALETTE.foam).clone() },
+    uLevel: { value: -0.08 },   // the sea level, which moves with the tide
   }]);
   for (const k of Object.keys(SKY_UNIFORMS)) uniforms[k] = SKY_UNIFORMS[k];
   const mat = new THREE.ShaderMaterial({
@@ -707,6 +708,7 @@ export function buildSea(shoreTex, rect) {
       uniform sampler2D uShore;
       uniform vec4 uRect;
       uniform vec3 uDeep, uSea, uShallow, uSand, uFoam;
+      uniform float uLevel;
       varying vec3 vW;
       #include <fog_pars_fragment>
       float n2(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -715,7 +717,7 @@ export function buildSea(shoreTex, rect) {
         vec2 uv = (vW.xz - uRect.xy) / uRect.zw;
         float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
         float ground = mix(-4.0, texture2D(uShore, clamp(uv, 0.0, 1.0)).r * 8.0 - 4.0, inside);
-        float depth = max(0.0, -ground);
+        float depth = max(0.0, uLevel + 0.08 - ground);
         // ripples: a few moving noise layers bend the normal
         vec2 p = vW.xz;
         float t = uTime;
@@ -772,11 +774,10 @@ export function buildSea(shoreTex, rect) {
 export const WIND = { uTime: { value: 0 } };
 export function buildGrass(spots) {
   const b = new Batch(5);
-  b.box(0.09, 0.38, 0.05, '#ffffff', 0, 0.19, 0, { ao: 0.5, jitter: 0 });
-  b.box(0.08, 0.3, 0.05, '#ffffff', 0.1, 0.14, 0.04, { ao: 0.5, jitter: 0, rotZ: -0.3, rotY: 0.6 });
-  b.box(0.08, 0.32, 0.05, '#ffffff', -0.09, 0.15, -0.03, { ao: 0.5, jitter: 0, rotZ: 0.3, rotY: -0.5 });
-  b.box(0.08, 0.24, 0.05, '#ffffff', 0.02, 0.11, -0.09, { ao: 0.5, jitter: 0, rotX: 0.35, rotY: 1.4 });
-  b.box(0.07, 0.2, 0.05, '#ffffff', -0.03, 0.1, 0.1, { ao: 0.5, jitter: 0, rotX: -0.35, rotY: 2.2 });
+  // three blades; no bottoms and no tops (nobody sees them), so a tuft is 24 triangles
+  b.box(0.09, 0.38, 0.05, '#ffffff', 0, 0.19, 0, { ao: 0.5, jitter: 0, skip: 8 });
+  b.box(0.08, 0.3, 0.05, '#ffffff', 0.1, 0.14, 0.04, { ao: 0.5, jitter: 0, rotZ: -0.3, rotY: 0.6, skip: 12 });
+  b.box(0.08, 0.32, 0.05, '#ffffff', -0.09, 0.15, -0.03, { ao: 0.5, jitter: 0, rotZ: 0.3, rotY: -0.5, skip: 12 });
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   mat.onBeforeCompile = (s) => {
     s.uniforms.uTime = WIND.uTime;
@@ -1077,6 +1078,87 @@ export function buildFoe(kind) {
     out.void.visible = false;
     out.door = door;
     root.add(blob(1.4, 1.2));
+  } else if (kind === 'shardmite') {
+    // a splinter of sky on six needle legs, with a glint of an eye
+    const glass = ['#8fe9ff', '#bff6ff', '#5fd6ec'];
+    K.box(body, 0.36, 0.2, 0.46, glass[0], 0, 0.3, 0, 1.25);
+    K.box(body, 0.22, 0.28, 0.2, glass[1], 0, 0.42, -0.08, 1.4);
+    K.box(body, 0.14, 0.22, 0.14, glass[2], 0.06, 0.52, 0.06, 1.3).rotation.z = 0.4;
+    K.box(body, 0.06, 0.05, 0.03, '#ffffff', -0.07, 0.34, 0.24, 3);
+    K.box(body, 0.06, 0.05, 0.03, '#ffffff', 0.07, 0.34, 0.24, 3);
+    out.legs = [];
+    for (const s of [1, -1]) for (const zz of [-0.14, 0, 0.14]) {
+      const lg = pivot(body, s * 0.16, 0.28, zz);
+      K.box(lg, 0.26, 0.04, 0.04, '#3f6f8f', s * 0.13, 0, 0);
+      K.box(lg, 0.04, 0.24, 0.04, '#3f6f8f', s * 0.26, -0.12, 0);
+      lg.rotation.z = s * 0.25;
+      out.legs.push({ lg, s, zz });
+    }
+    out.mandibles = [-1, 1].map((s) => { const md = pivot(body, s * 0.08, 0.26, 0.24); K.box(md, 0.04, 0.04, 0.14, '#e8fbff', 0, 0, 0.06, 1.6); md.rotation.y = s * 0.3; return md; });
+    root.add(blob(0.6, 0.7));
+  } else if (kind === 'barnacle') {
+    // a cone of shell stuck to the rock, with a mouth that opens to spit
+    const shell = ['#cfc6b8', '#b8ae9e', '#d8d0c4', '#a89e8e'];
+    out.shell = pivot(body, 0, 0, 0);
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; K.box(out.shell, 0.34, 0.7, 0.2, shell[k % 4], Math.cos(a) * 0.28, 0.35, Math.sin(a) * 0.28).rotation.y = -a; }
+    K.box(out.shell, 0.8, 0.3, 0.8, shell[3], 0, 0.15, 0);
+    out.mouth = pivot(body, 0, 0.72, 0);
+    out.lids = [-1, 1].map((s) => { const l = pivot(out.mouth, s * 0.12, 0, 0); K.box(l, 0.24, 0.08, 0.36, shell[2], s * 0.12, 0, 0); return l; });
+    out.inner = K.box(body, 0.3, 0.1, 0.3, '#ff8a96', 0, 0.68, 0, 1.4);
+    out.feather = [];
+    for (let k = 0; k < 3; k++) { const fe = pivot(body, (k - 1) * 0.08, 0.75, 0); K.box(fe, 0.04, 0.35, 0.04, '#ffb3c0', 0, 0.17, 0, 1.3); fe.rotation.z = (k - 1) * 0.4; out.feather.push(fe); }
+    root.add(blob(0.8, 0.8));
+  } else if (kind === 'barnaclemother') {
+    // a hill of shell in the middle of the pool: plates round her, a hundred little mouths, eyes in the cracks
+    const shell = ['#cfc6b8', '#b8ae9e', '#d8d0c4', '#a89e8e', '#9a9080'];
+    const core = pivot(body, 0, 0, 0);
+    out.core = core;
+    K.box(core, 3.0, 1.2, 3.0, '#6f6c78', 0, 0.6, 0);
+    K.box(core, 2.4, 1.4, 2.4, '#e8a0a8', 0, 1.7, 0);   // her soft body, under the plates
+    K.box(core, 1.8, 1.0, 1.8, '#f0b4bc', 0, 2.7, 0);
+    out.soft = K.box(core, 1.1, 0.8, 1.1, '#ffc6cc', 0, 3.5, 0, 1.1);
+    // eyes in the soft flesh, peering out where the plates part
+    out.eyes = [];
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU + 0.2; const e = K.box(core, 0.16, 0.16, 0.06, '#1a1020', Math.cos(a) * 1.22, 1.6 + (k % 3) * 0.55, Math.sin(a) * 1.22); e.rotation.y = -a + Math.PI / 2; out.eyes.push(K.box(core, 0.08, 0.08, 0.04, '#9ff3ff', Math.cos(a) * 1.25, 1.62 + (k % 3) * 0.55, Math.sin(a) * 1.25, 2.6)); }
+    // the crown: a ring of spires, with a mouth at the top that spits
+    out.crown = pivot(core, 0, 3.9, 0);
+    for (let k = 0; k < 7; k++) { const a = (k / 7) * TAU; const sp = pivot(out.crown, Math.cos(a) * 0.55, 0, Math.sin(a) * 0.55); sp.rotation.set(Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4); K.box(sp, 0.26, 1.1, 0.26, shell[k % 5], 0, 0.5, 0); K.box(sp, 0.16, 0.3, 0.16, '#ff8a96', 0, 1.1, 0, 1.3); }
+    out.mouthGlow = K.box(out.crown, 0.5, 0.2, 0.5, '#ff8a96', 0, 0.3, 0, 1.6);
+    // feathery feeding arms that comb the water above her
+    out.cirri = [];
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * TAU + 0.25;
+      let par = pivot(out.crown, Math.cos(a) * 0.25, 0.35, Math.sin(a) * 0.25);
+      par.rotation.set(Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5);
+      const chain = [par];
+      for (let j = 0; j < 4; j++) { K.box(par, 0.08, 0.36, 0.08, j % 2 ? '#ffb3c0' : '#ff9fae', 0, 0.18, 0, 1.15); K.box(par, 0.22, 0.04, 0.04, '#ffd0d8', 0, 0.3, 0, 1.2); if (j < 3) { par = pivot(par, 0, 0.36, 0); chain.push(par); } }
+      out.cirri.push(chain);
+    }
+    // four great plates, each a slab of crusted shell with barnacles on it. The Tether tears them off.
+    out.plates = [];
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * TAU + Math.PI / 4;
+      const pl = pivot(core, Math.sin(a) * 1.7, 0.2, Math.cos(a) * 1.7);
+      pl.rotation.y = a;
+      // each plate leans in toward the top, so together they make a cone of shell, not a box
+      const lean = pivot(pl, 0, 0, 0);
+      lean.rotation.x = -0.32;
+      const sl = pivot(lean, 0, 0, 0);
+      K.box(sl, 2.0, 1.2, 0.4, shell[k % 5], 0, 0.6, 0);
+      K.box(sl, 1.7, 1.0, 0.38, shell[(k + 1) % 5], 0, 1.65, -0.02);
+      K.box(sl, 1.3, 0.9, 0.36, shell[(k + 2) % 5], 0, 2.55, -0.04);
+      K.box(sl, 2.1, 0.18, 0.46, shell[(k + 3) % 5], 0, 1.15, 0.02);
+      K.box(sl, 1.8, 0.16, 0.44, shell[(k + 4) % 5], 0, 2.1, 0.01);
+      // little barnacles crusted on, each with a dark mouth
+      for (let i = 0; i < 6; i++) { const bx = -0.75 + (i % 3) * 0.75 + (i > 2 ? 0.35 : 0), by = 0.35 + (i > 2 ? 1.25 : 0) + (i % 2) * 0.3; K.box(sl, 0.3, 0.26, 0.24, shell[(k + i) % 5], bx, by, 0.26); K.box(sl, 0.12, 0.06, 0.1, '#2a1a24', bx, by + 0.14, 0.3); }
+      // a brass-coloured ring of old shell on each plate, where the Tether bites
+      const ringP = pivot(sl, 0, 1.75, 0.3);
+      for (let i = 0; i < 8; i++) { const b2 = (i / 8) * TAU; K.box(ringP, 0.08, 0.14, 0.06, '#e0b85a', Math.cos(b2) * 0.2, Math.sin(b2) * 0.2, 0, 1.2).rotation.z = b2; }
+      out.plates.push({ p: pl, sl, a, on: true, ring: ringP });
+    }
+    // little mouths all over her lower shell
+    for (let k = 0; k < 14; k++) { const a = Math.random() * TAU, h = 0.3 + Math.random() * 0.8; K.box(core, 0.22, 0.2, 0.22, shell[k % 5], Math.cos(a) * 1.5, h, Math.sin(a) * 1.5); }
+    root.add(blob(4.2, 4.2));
   } else if (kind === 'lullabypod') {
     // a woven cocoon; light shows through its seams more and more until it hatches
     const silk = ['#d8cfe6', '#c9bedc', '#e6def0'];
@@ -1342,6 +1424,7 @@ const NPC_LOOKS = {
   tobin: { body: 'a', hair: 0, skin: '#d4a07c', hairColor: '#8a6a4a', tunic: '#e0b23a', trim: '#c79a28', scarf: '#3f6f8f', pants: '#3a3a48', boots: '#2f3a44' },
   wenna: { body: 'b', hair: 1, skin: '#f1c8a0', hairColor: '#a0522d', tunic: '#c46a4a', trim: '#f4ead2', scarf: '#f4ead2', pants: '#5a4a6a', boots: '#4a3020' },
   pip: { body: 'a', hair: 2, skin: '#f5d2b0', hairColor: '#e0a040', tunic: '#5fa8d6', trim: '#ffffff', scarf: '#e0573f', pants: '#4a5a8a', boots: '#5d3d26' },
+  ennis: { body: 'a', hair: 0, skin: '#c99a78', hairColor: '#e8e4dc', tunic: '#4a5a3a', trim: '#c9a24a', scarf: '#8a4a2a', pants: '#3a3226', boots: '#2a1e18' },
 };
 export function buildNpc(kind) {
   const m = buildPlayer(NPC_LOOKS[kind]);
@@ -1370,6 +1453,17 @@ export function buildNpc(kind) {
     box(m.body, 0.4, 0.3, 0.29, '#f4ead2', 0, 0.36, 0.01);
     for (const [x, y] of [[-0.06, 0.05], [0.08, -0.12], [-0.1, -0.2]]) box(m.torso, 0.04, 0.04, 0.025, '#ffffff', x, y, 0.15);
     box(m.head, 0.42, 0.1, 0.42, '#e0573f', 0, 0.42, -0.01);
+  } else if (kind === 'ennis') {
+    // the lamplighter: a flat cap, a white moustache, and a long pole with a little flame at its tip
+    box(m.head, 0.44, 0.07, 0.48, '#3a4a2e', 0, 0.42, 0.03);
+    box(m.head, 0.38, 0.1, 0.38, '#4a5a3a', 0, 0.47, -0.02);
+    box(m.head, 0.24, 0.05, 0.04, '#e8e4dc', 0, -0.02, 0.19);
+    const pole = pivot(m.handR, 0, 0, 0.02);
+    pole.rotation.x = -0.25;
+    box(pole, 0.04, 1.9, 0.04, '#6b4a33', 0, 0.55, 0);
+    box(pole, 0.12, 0.05, 0.12, '#3a3a44', 0, 1.5, 0);
+    box(pole, 0.07, 0.1, 0.07, '#ffd36b', 0, 1.56, 0, 3.4);
+    m.pole = pole;
   } else if (kind === 'pip') {
     // a kid with a wooden sword, just like yours
     m.root.scale.setScalar(0.78);
@@ -1489,5 +1583,219 @@ export function causticMaterial() {
       float caus = pow(max(0.0, 1.0 - abs(c1 + c2) * 0.6), 6.0);
       totalEmissiveRadiance += vec3(0.35, 0.85, 0.9) * caus * 0.35 * clamp(vWn.y, 0.0, 1.0);`);
   };
+  return m;
+}
+
+
+// ---------------------------------------------------------------------------
+// Lanternhold, the bigger island: waystones, Tether rings, the Knot, the boathouse, the windmill,
+// brambles, salt pans, the keepers' wall, the cave mouth, keepsakes
+// ---------------------------------------------------------------------------
+Object.assign(PROPS, {
+  fern(b, x, y, z, r) {
+    b.push(x, y, z, r() * TAU);
+    for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU; b.box(0.12, 0.06, 0.62, k % 2 ? '#3f8a4a' : '#4a9a52', Math.sin(a) * 0.24, 0.24, Math.cos(a) * 0.24, { rotY: a, rotX: -0.55, jitter: 0.1 }); }
+    b.box(0.14, 0.18, 0.14, '#356a3e', 0, 0.09, 0);
+    b.pop();
+  },
+  mushrooms(b, x, y, z, r) {
+    for (let k = 0; k < 3; k++) {
+      const mx = x + (r() - 0.5) * 0.6, mz = z + (r() - 0.5) * 0.6, h = 0.14 + r() * 0.16;
+      b.box(0.06, h, 0.06, '#efe6d6', mx, y + h / 2, mz, { jitter: 0 });
+      b.box(0.22, 0.08, 0.22, k % 2 ? '#d84a4a' : '#e8a04a', mx, y + h + 0.03, mz, { top: k % 2 ? '#e86060' : '#f0b860' });
+    }
+  },
+  heather(b, x, y, z, r) {
+    for (let k = 0; k < 4; k++) b.box(0.3 + r() * 0.2, 0.18 + r() * 0.12, 0.3 + r() * 0.2, pick(['#8a5a9a', '#9a6aaa', '#7a4a8a', '#5f7a4a'], r), x + (r() - 0.5) * 0.7, y + 0.1, z + (r() - 0.5) * 0.7, { jitter: 0.1 });
+  },
+  hayBale(b, x, y, z, r) {
+    b.push(x, y, z, r() * TAU);
+    b.box(0.9, 0.7, 0.9, '#d8b860', 0, 0.35, 0, { top: '#e8c870' });
+    b.box(0.94, 0.08, 0.94, '#a88a40', 0, 0.2, 0); b.box(0.94, 0.08, 0.94, '#a88a40', 0, 0.5, 0);
+    b.pop();
+  },
+  // a lantern waystone: a carved stone pillar with an iron cage on top. Light it once and you can travel to it.
+  waystone(b, x, y, z, rot = 0) {
+    b.push(x, y, z, rot);
+    b.box(1.0, 0.3, 1.0, '#8e8c99', 0, 0.15, 0, { top: '#a3a1ad' });
+    b.box(0.62, 1.5, 0.62, '#9a96a2', 0, 1.05, 0, { top: '#aeaab6' });
+    b.box(0.68, 0.12, 0.68, '#7f7b88', 0, 0.55, 0);
+    b.box(0.68, 0.12, 0.68, '#7f7b88', 0, 1.55, 0);
+    // a carved knot on its face
+    b.box(0.3, 0.06, 0.04, '#c9a24a', 0, 1.05, 0.32); b.box(0.06, 0.3, 0.04, '#c9a24a', 0, 1.05, 0.32);
+    b.box(0.2, 0.2, 0.03, '#b08a3a', 0, 1.05, 0.335, { rotZ: 0.785 });
+    // the iron cage
+    for (const [px, pz] of [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]]) b.box(0.05, 0.55, 0.05, '#2c2c36', px, 1.92, pz);
+    b.box(0.6, 0.08, 0.6, '#3a3a44', 0, 1.64, 0);
+    b.box(0.62, 0.1, 0.62, '#3a3a44', 0, 2.22, 0);
+    b.box(0.3, 0.14, 0.3, '#3a3a44', 0, 2.33, 0);
+    b.box(0.08, 0.2, 0.08, '#3a3a44', 0, 2.48, 0);
+    b.pop();
+    return { flameY: y + 1.92 };
+  },
+  // a brass ring set into a stone, for the Tether to bite into
+  brassRing(b, x, y, z, rot = 0) {
+    b.push(x, y, z, rot);
+    b.box(0.6, 0.35, 0.6, '#7f7b88', 0, 0.17, 0, { top: '#8f8b98' });
+    b.box(0.16, 0.5, 0.16, '#5d5a66', 0, 0.55, 0);
+    b.push(0, 0.95, 0);
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; b.box(0.1, 0.16, 0.08, k % 2 ? '#e0b85a' : '#c9a24a', Math.cos(a) * 0.22, Math.sin(a) * 0.22, 0, { rotZ: a, jitter: 0 }); }
+    b.pop();
+    b.pop();
+  },
+  // the Knot: a great round stone bound in carved, woven bands. Nothing opens it.
+  knot(b, g, x, y, z) {
+    b.push(x, y, z, 0, 0, 0, 1.35);
+    b.box(3.4, 0.4, 3.4, '#7f7b88', 0, 0.2, 0, { top: '#8f8b98' });
+    b.box(2.6, 2.2, 2.4, '#8a8694', 0, 1.5, 0, { top: '#9a96a4' });
+    b.box(2.2, 2.6, 2.0, '#8a8694', 0, 1.6, 0);
+    b.box(1.8, 0.5, 1.8, '#9a96a4', 0, 2.95, 0);
+    // woven bands: over and under, like a knot pulled tight
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI;
+      b.box(0.28, 2.9, 2.75, k % 2 ? '#b8a27a' : '#a8926a', 0, 1.55, 0, { rotY: a, rotZ: 0.18 * (k % 2 ? 1 : -1), jitter: 0.03 });
+    }
+    b.box(2.8, 0.26, 2.8, '#b8a27a', 0, 1.6, 0, { rotY: 0.4 });
+    b.pop();
+    g.push(x, y, z, 0, 0, 0, 1.35);
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; g.box(0.08, 0.5, 0.08, '#9ff3ff', Math.cos(a) * 1.42, 1.3 + (k % 3) * 0.4, Math.sin(a) * 1.42, { glow: 1.6, jitter: 0 }); }
+    g.pop();
+  },
+  standingStone(b, x, y, z, r, s = 1) {
+    b.push(x, y, z, r() * TAU, (r() - 0.5) * 0.12, (r() - 0.5) * 0.12, s);
+    b.box(0.7, 2.4, 0.5, '#8a8694', 0, 1.2, 0, { top: '#9a96a4' });
+    b.box(0.5, 0.4, 0.4, '#7f7b88', 0, 2.5, 0);
+    b.box(0.74, 0.3, 0.54, '#6f9a4a', 0, 0.25, 0, { jitter: 0.1 });
+    b.pop();
+  },
+  // the old boathouse on the north headland: a timber shed on stone, a slipway down to the sea
+  boathouse(b, x, y, z, rot = 0) {
+    b.push(x, y, z, rot);
+    b.box(5.2, 0.5, 4.4, '#7f7b88', 0, 0.25, 0, { top: '#8f8b98' });
+    b.box(4.8, 2.4, 4.0, '#8a6444', 0, 1.7, 0);
+    for (const px of [-2.35, 2.35]) for (const pz of [-1.95, 1.95]) b.box(0.24, 2.6, 0.24, '#5d3d26', px, 1.8, pz);
+    for (let i = 0; i < 5; i++) b.box(5.4, 0.3, Math.max(0.5, 4.8 - i * 0.95), shade('#5d6a78', 1 - i * 0.04), 0, 3.0 + i * 0.28, 0, { top: '#6b7a8a' });
+    // a wide door on the sea side, half open
+    b.box(2.2, 2.0, 0.1, '#3a2a20', 0, 1.5, 2.02);
+    b.box(1.1, 2.0, 0.12, '#9a6b45', -0.55, 1.5, 2.1, { rotY: 0.6 });
+    // the slipway: planks running down toward the water
+    for (let k = 0; k < 8; k++) b.box(2.4, 0.12, 0.6, k % 2 ? '#a6764d' : '#956a45', 0, 0.45 - k * 0.42, 2.6 + k * 0.6, { rotX: 0.6 });
+    // a sign: an anchor
+    b.box(0.9, 0.6, 0.08, '#c8a77a', 1.4, 2.6, 2.1);
+    b.box(0.08, 0.36, 0.1, '#3a3a44', 1.4, 2.62, 2.15); b.box(0.3, 0.06, 0.1, '#3a3a44', 1.4, 2.48, 2.15);
+    b.pop();
+  },
+  // a windmill on the downs: a round stone tower with a wooden cap (the sails turn on their own)
+  windmill(b, x, y, z) {
+    b.push(x, y, z);
+    b.box(3.0, 0.5, 3.0, '#8e8c99', 0, 0.25, 0);
+    for (let k = 0; k < 6; k++) {
+      const w = 2.6 - k * 0.18;
+      b.box(w, 1.0, w * 0.7, '#e9e2d2', 0, 1.0 + k, 0, { top: '#f2ecdf' });
+      b.box(w * 0.7, 1.0, w, '#e9e2d2', 0, 1.0 + k, 0);
+    }
+    b.box(1.0, 1.4, 0.1, '#5d3d26', 0, 1.2, 1.32);
+    b.box(0.5, 0.5, 0.1, '#2e3a5a', 0, 3.6, 1.0);
+    for (let i = 0; i < 4; i++) b.box(2.0 - i * 0.4, 0.3, 1.8 - i * 0.35, shade('#8a4a3a', 1 - i * 0.05), 0, 6.6 + i * 0.28, 0);
+    b.pop();
+  },
+  bramble(b, x, y, z, r) {
+    b.push(x, y, z, r() * TAU);
+    for (let k = 0; k < 6; k++) {
+      const c = pick(['#4a3a4e', '#3e4a36', '#56404e', '#455236'], r);
+      const ox = (r() - 0.5) * 1.0, oz = (r() - 0.5) * 1.0, h = 0.6 + r() * 0.9;
+      b.box(0.5 + r() * 0.4, h, 0.5 + r() * 0.4, c, ox, h / 2, oz, { rotY: r() * TAU });
+      for (let t = 0; t < 3; t++) b.box(0.05, 0.05, 0.22, '#d8c8b0', ox + (r() - 0.5) * 0.5, 0.2 + r() * h, oz + (r() - 0.5) * 0.5, { rotY: r() * TAU, rotX: (r() - 0.5), jitter: 0 });
+    }
+    b.box(0.12, 0.12, 0.12, '#b0304a', (r() - 0.5) * 0.8, 0.9, (r() - 0.5) * 0.8, { jitter: 0 });
+    b.pop();
+  },
+  saltPan(b, x, y, z, w, d) {
+    b.box(w, 0.06, d, '#f2eee6', x, y + 0.03, z, { jitter: 0.03, ao: 1 });
+    for (const [dx, dz, ww, dd] of [[0, -d / 2, w + 0.3, 0.3], [0, d / 2, w + 0.3, 0.3], [-w / 2, 0, 0.3, d], [w / 2, 0, 0.3, d]]) b.box(ww, 0.3, dd, '#9a958c', x + dx, y + 0.15, z + dz, { top: '#aaa59b' });
+    for (let k = 0; k < 4; k++) b.box(0.3, 0.12, 0.3, '#ffffff', x + (k - 1.5) * w * 0.22, y + 0.1, z + ((k % 2) - 0.5) * d * 0.4, { jitter: 0.1 });
+  },
+  // the keepers' wall: a low dry-stone wall
+  stoneWall(b, x0, z0, x1, z1, y0, y1, r) {
+    const n = Math.max(1, Math.round(Math.hypot(x1 - x0, z1 - z0) / 0.9));
+    const a = Math.atan2(x1 - x0, z1 - z0);
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const c = pick(PALETTE.stone, r);
+      b.box(0.8, 0.95 + r() * 0.2, 0.95, c, lerp(x0, x1, t), lerp(y0, y1, t) + 0.5, lerp(z0, z1, t), { rotY: a, top: shade(c, 1.1) });
+      if (r() < 0.4) b.box(0.7, 0.12, 0.6, '#6f9a4a', lerp(x0, x1, t), lerp(y0, y1, t) + 1.05, lerp(z0, z1, t), { rotY: a, jitter: 0.1 });
+    }
+  },
+  // the mouth of Gullcliff Caves: a rock arch with barnacles glowing faintly, and an old keepers' sign
+  caveArch(b, g, x, y, z, r) {
+    for (const s of [-1, 1]) {
+      for (let k = 0; k < 4; k++) b.box(1.0, 1.0, 1.2, pick(['#6f6c78', '#7d7a86', '#5f5c68'], r), x + s * 1.9, y + 0.5 + k, z + 0.2, { top: '#8f8c98' });
+    }
+    for (let k = 0; k < 5; k++) b.box(1.0, 1.0, 1.2, pick(['#6f6c78', '#7d7a86', '#5f5c68'], r), x - 2 + k, y + 3.6, z + 0.2);
+    b.box(3.0, 3.0, 0.4, '#141220', x, y + 1.5, z - 0.5, { jitter: 0 });
+    // the sign
+    b.box(0.1, 1.3, 0.1, '#5d3d26', x + 3.1, y + 0.65, z + 1.4);
+    b.box(1.0, 0.5, 0.08, '#c8a77a', x + 3.1, y + 1.25, z + 1.45);
+    b.box(0.6, 0.06, 0.1, '#5d3d26', x + 3.1, y + 1.3, z + 1.5);
+    for (let k = 0; k < 9; k++) g.box(0.14, 0.14, 0.14, k % 2 ? '#9ff3ff' : '#c6f8ff', x + (r() - 0.5) * 4.4, y + 0.4 + r() * 3.2, z + 0.85, { glow: 1.4, jitter: 0 });
+  },
+});
+
+// keepsakes: odd little things only the apprentice seems to notice
+export function buildKeepsake(kind) {
+  const b = new Batch(321);
+  if (kind === 'cup') {
+    b.box(0.26, 0.24, 0.26, '#f4ead2', 0, 0.12, 0); b.box(0.2, 0.02, 0.2, '#6b4a33', 0, 0.23, 0);
+    b.box(0.06, 0.14, 0.04, '#f4ead2', 0.17, 0.13, 0); b.box(0.05, 0.05, 0.27, '#5fa8d6', 0, 0.18, 0);
+    b.box(0.06, 0.06, 0.03, '#d8c8b0', -0.1, 0.24, 0.12, { rotZ: 0.4 });   // the chip
+  } else if (kind === 'spoon') {
+    b.box(0.05, 0.03, 0.34, '#c9a24a', 0, 0.03, 0); b.box(0.14, 0.05, 0.14, '#e0b85a', 0, 0.04, 0.2);
+  } else {
+    b.box(0.34, 0.12, 0.16, '#c88a43', 0, 0.06, 0, { top: '#e8b871' }); b.box(0.2, 0.08, 0.12, '#d9a35b', 0.05, 0.14, 0);
+  }
+  const m = b.mesh(); m.matrixAutoUpdate = true; m.castShadow = true;
+  return m;
+}
+// the little kitchen that unfolds behind Maren's cottage when the memory of breakfast comes back
+export function buildKitchen(x, y, z) {
+  const b = new Batch(322), g = new Batch(323);
+  b.push(x, y, z);
+  b.box(3.2, 0.2, 2.4, '#8e8c99', 0, 0.1, 0);
+  for (const px of [-1.5, 1.5]) b.box(0.16, 2.2, 0.16, '#6b4a33', px, 1.2, -1.0);
+  b.box(3.4, 0.14, 2.0, '#a8473d', 0, 2.35, -0.3, { rotX: 0.25 });
+  b.box(0.9, 0.9, 0.7, '#3a3a44', -0.9, 0.65, -0.7);   // a little iron stove
+  b.box(0.16, 0.9, 0.16, '#2c2c36', -1.1, 1.5, -0.8);
+  b.box(1.2, 0.08, 0.8, '#a77a4f', 0.6, 0.85, 0.1); for (const [px, pz] of [[0.1, -0.2], [1.1, -0.2], [0.1, 0.4], [1.1, 0.4]]) b.box(0.08, 0.8, 0.08, '#7d5636', px, 0.45, pz);
+  b.box(0.2, 0.18, 0.2, '#f4ead2', 0.4, 0.98, 0.1); b.box(0.24, 0.06, 0.18, '#c88a43', 0.8, 0.92, 0.2);
+  b.box(0.4, 0.4, 0.4, '#8b5e3c', 1.2, 0.3, 0.9);
+  b.pop();
+  g.box(0.3, 0.16, 0.08, '#ff9a3c', x - 0.9, y + 0.6, z - 0.33, { glow: 3, jitter: 0 });
+  const grp = new THREE.Group();
+  grp.add(b.mesh());
+  const gm = g.mesh(MAT.glow); gm.castShadow = false; grp.add(gm);
+  return grp;
+}
+// windmill sails: a cross of four sails that turns
+export function buildSails() {
+  const b = new Batch(324);
+  b.box(0.3, 0.3, 0.6, '#5d3d26', 0, 0, 0);
+  for (let k = 0; k < 4; k++) {
+    b.push(0, 0, 0.3, 0, 0, k * Math.PI / 2);
+    b.box(0.14, 3.6, 0.1, '#6b4a33', 0, 1.9, 0);
+    b.box(0.8, 2.8, 0.05, '#f2ecdf', 0.45, 2.1, 0.02);
+    for (let i = 0; i < 5; i++) b.box(0.84, 0.05, 0.07, '#8a6444', 0.45, 0.9 + i * 0.6, 0.03);
+    b.pop();
+  }
+  const m = b.mesh(); m.matrixAutoUpdate = true; m.castShadow = true;
+  return m;
+}
+// a gate in the keepers' wall: iron bars on stone posts
+export function buildGate(w = 2.2) {
+  const b = new Batch(325);
+  for (const s of [-1, 1]) b.box(0.4, 1.6, 0.4, '#8e8c99', s * (w / 2 + 0.1), 0.8, 0, { top: '#a3a1ad' });
+  b.box(w, 0.1, 0.1, '#2c2c36', 0, 1.25, 0); b.box(w, 0.1, 0.1, '#2c2c36', 0, 0.35, 0);
+  for (let k = 0; k < 7; k++) b.box(0.07, 1.25, 0.07, '#3a3a44', -w / 2 + 0.15 + k * (w - 0.3) / 6, 0.75, 0);
+  b.box(0.22, 0.22, 0.12, '#c9a24a', 0, 0.8, 0.06);
+  const m = b.mesh(); m.matrixAutoUpdate = true; m.castShadow = true;
   return m;
 }

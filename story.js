@@ -20,7 +20,7 @@ export function createStory(ctx) {
   // The villagers: they breathe, look at you when you're close, and Pip runs about the well
   // ---------------------------------------------------------------------------
   const npcs = [];
-  for (const id of ['maren', 'tobin', 'wenna', 'pip']) {
+  for (const id of ['maren', 'tobin', 'wenna', 'pip', 'ennis']) {
     const spot = world.spots[id];
     const m = buildNpc(id);
     m.armL.rotation.order = 'YXZ'; m.armR.rotation.order = 'YXZ';
@@ -42,7 +42,8 @@ export function createStory(ctx) {
     scene.add(m);
     return m;
   })();
-  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning'].includes(S.step);
+  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil'].includes(S.step);
+  const O = STORY.order, past = (step) => O.indexOf(S.step) >= O.indexOf(step);
   // put someone somewhere at once (between scenes), or send them walking there
   function place(n, spot, walk) {
     if (walk) { n.goal = { x: spot.x, z: spot.z, face: spot.face || 0 }; return; }
@@ -133,7 +134,7 @@ export function createStory(ctx) {
     if (n.id === 'maren') lines = (STORY.maren[S.step] || STORY.maren.rest).map((t) => line('maren', t));
     else {
       const V = STORY.villagers[n.id];
-      const set = ['morning', 'ending', 'free'].includes(S.step) ? V.morning : V[S.night > 0.5 ? 'after' : 'before'];
+      const set = past('morning') ? V.morning : V[S.night > 0.5 ? 'after' : 'before'];
       lines = [line(n.id, set[n.line % set.length])];
       n.line++;
     }
@@ -149,6 +150,28 @@ export function createStory(ctx) {
     else if (S.step === 'reportSeep') setStep('enterRift');
     else if (S.step === 'reportRift') { setStep('rest'); place(byId('maren'), world.spots.marenRest, true); }
     else if (S.step === 'morning') ending();
+    else if (S.step === 'free') openGate();
+    else if (S.step === 'reportOil') setStep('boathouse');
+  }
+  // Act 1 begins: Maren hands over the key, the keepers' gate opens, and the clock starts to run
+  async function openGate() {
+    S.busy = true;
+    const g = world.gate;
+    await ctx.curtain(1, 0.6);
+    const back = { x: P.x, z: P.z };
+    ctx.cine({ pos: new THREE.Vector3(g.x - 6, 6.5, g.z + 6), look: new THREE.Vector3(g.x + 1, 4, g.z), k: 0.0000001 });
+    await ctx.curtain(0, 0.6);
+    await wait(0.4);
+    world.openGate();
+    sound.sfx('unlock'); sound.sfx('doorOpen'); ctx.shake(0.2);
+    await wait(1.6);
+    await say(STORY.gateOpen);
+    await ctx.curtain(1, 0.5);
+    ctx.cine(null); P.x = back.x; P.z = back.z; ctx.snapCamera();
+    await ctx.curtain(0, 0.6);
+    S.busy = false;
+    setStep('gullcliff');
+    ctx.startClock();
   }
 
   // ---------------------------------------------------------------------------
@@ -356,6 +379,39 @@ export function createStory(ctx) {
     setStep('morning');
   }
 
+  // the boathouse at last: the edge of what's built so far
+  async function reachBoathouse() {
+    S.busy = true;
+    await say(STORY.boathouseArrive);
+    S.busy = false;
+    setStep('act1End');
+    ui.toast(STORY.roundEnd);
+  }
+  // all three keepsakes laid down in the lamp-room: the memory of breakfast comes back, and a kitchen unfolds
+  async function remember() {
+    S.busy = true;
+    ui.setContext(null);
+    await ctx.curtain(1, 0.8);
+    await say(STORY.remember.slice(0, 1));
+    const kx = 5.6, kz = -20.8, ky = world.groundAt(kx, kz);
+    ctx.cine({ pos: new THREE.Vector3(kx + 5, ky + 4.5, kz + 7.5), look: new THREE.Vector3(kx, ky + 1, kz), k: 0.0000001 });
+    await ctx.curtain(0, 0.8);
+    await wait(0.6);
+    world.showKitchen();
+    const kit2 = world.kitchen;
+    kit2.scale.set(1, 0.01, 1);
+    tween(kit2.scale, 'y', 1, 1.6);
+    sound.sfx('treasure');
+    for (let i = 0; i < 40; i++) { const a = Math.random() * TAU; sparks.spawn({ x: kx + Math.cos(a) * 1.6, y: ky + Math.random() * 2, z: kz + Math.sin(a) * 1.2, vy: 1.2, life: 1.4, size: 0.14, color: i % 2 ? '#ffe9a8' : '#9ff3ff', glow: 2.6 }); }
+    await wait(2.0);
+    await say(STORY.remember.slice(1));
+    P.maxHp += 2; P.hp = P.maxHp;
+    await ui.itemGet(STORY.remembered.name, STORY.remembered.line, null);
+    ctx.cine(null); ctx.snapCamera();
+    ctx.remembered();
+    S.busy = false;
+  }
+
   // ---------------------------------------------------------------------------
   // Resting by the campfire: a short sit, and your hearts are full again
   // ---------------------------------------------------------------------------
@@ -501,7 +557,8 @@ export function createStory(ctx) {
     const mn = byId('maren');
     if (at(step) >= at('rest')) place(mn, world.spots.marenRest);
     if (at(step) >= at('morning')) { S.night = S.nightTo = 2; ctx.setTime(2); place(mn, world.spots.marenMorning); }
-    if (step === 'free') world.setLamp(1, true);
+    if (at(step) >= at('free')) world.setLamp(1, true);
+    if (at(step) >= at('gullcliff')) world.openGate();
     setStep(step, true);
     return step;
   }
@@ -539,17 +596,31 @@ export function createStory(ctx) {
     // at the end of the long night, the cottage door offers sleep
     const door = world.spots.cottageDoor;
     S.nearDoor = S.step === 'rest' && !S.busy && P.state === 'move' && Math.hypot(P.x - door.x, P.z - door.z) < 1.7;
+    // Act 1: the waystones, the cave mouth, keepsakes lying about, and the memory they make
+    S.nearStone = null; S.nearMouth = false; S.nearRemember = false;
+    if (!S.busy && P.state === 'move' && past('free')) {
+      for (const w of world.waystones) if (!w.lit && Math.hypot(P.x - w.x, P.z - w.z) < 1.8) S.nearStone = w;
+      S.nearMouth = past('gullcliff') && Math.hypot(P.x - world.mouth.x, P.z - world.mouth.z) < 2.2;
+      const d = world.spots.lighthouseDoor;
+      S.nearRemember = ctx.keepsakesReady() && Math.hypot(P.x - d.x, P.z - d.z) < 1.7;
+      for (const k of world.keepsakes) if (!k.taken && Math.hypot(P.x - k.x, P.z - k.z) < 0.85) { world.takeKeepsake(k.id); ctx.foundKeepsake(k); }
+      // the boathouse, across the ravine
+      if (S.step === 'boathouse' && Math.hypot(P.x - world.spots.boathouse.x, P.z - world.spots.boathouse.z) < 4.5) reachBoathouse();
+    }
     // the campfire offers a rest when you're hurt
     const fire = world.spots.campfire;
     S.nearFire = !S.busy && P.state === 'move' && P.hp < P.maxHp && !ctx.foes.seep.sealed && Math.hypot(P.x - fire.x, P.z - fire.z) < 2.4;
     // the sword button offers "Talk" when someone is close and nothing is fighting you
     const n = !S.busy && P.state === 'move' && !ctx.foes.seep.sealed ? nearestTalker() : null;
-    ui.setContext(S.nearShard ? 'enter' : S.nearDoor ? 'sleep' : n ? 'talk' : S.nearFire ? 'rest' : null);
+    ui.setContext(S.nearShard || S.nearMouth ? 'enter' : S.nearDoor ? 'sleep' : S.nearRemember ? 'remember' : n ? 'talk' : S.nearStone ? 'light' : S.nearFire ? 'rest' : null);
     S.near = n;
   }
   function tryTalk() {
     if (S.nearShard && !S.busy) { S.nearShard = false; ctx.travel('rift'); return true; }
     if (S.nearDoor && !S.busy) { sleep(); return true; }
+    if (S.nearMouth && !S.near && !S.busy) { if (S.step === 'gullcliff') setStep('caves'); ctx.travel('caves'); return true; }
+    if (S.nearRemember && !S.busy) { remember(); return true; }
+    if (S.nearStone && !S.near && !S.busy) { ctx.lightStone(S.nearStone); return true; }
     if (S.nearFire && !S.near && !S.busy) { restAtFire(); return true; }
     if (S.near && !S.busy) { talk(S.near); return true; }
     return false;
@@ -558,7 +629,7 @@ export function createStory(ctx) {
 
   // where people are, and whether Maren has something to say (for the map)
   const people = () => npcs.map((n) => ({ id: n.id, x: n.x, z: n.z }));
-  return { people, hasNews, update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, applyState, say, busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
+  return { people, hasNews, past, update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, applyState, say, busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
     // for testing: skip ahead
     if (step === 'beacon') { setStep('beacon'); }
     else if (step === 'riftfall') { beaconLit(); S.riftIn = 0.1; }

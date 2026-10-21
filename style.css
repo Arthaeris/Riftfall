@@ -379,3 +379,43 @@ body.rot .mapCv { width: min(62vw, 56vh); height: min(62vw, 56vh); }
 @media (max-height: 460px) { .mapSheet { padding: 12px; gap: 14px; } .mapCv { width: min(70vh, 52vw); height: min(70vh, 52vw); } .mapSide h2 { font-size: 26px; margin-bottom: 8px; } .mapKey { margin: 10px 0; } }
 .miniMap { pointer-events: auto !important; cursor: pointer; transform-origin: top right; transition: transform 0.25s ease; }
 .miniMap.big { transform: scale(1.9); background: rgba(10, 8, 28, 0.72); }
+
+/* ---------- the tool wheel ---------- */
+.wheel { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.wTool { position: absolute; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; display: grid; place-items: center; color: #e6fcff;
+  background: radial-gradient(110% 110% at 32% 22%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04) 60%), rgba(20, 14, 44, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.28); box-shadow: 0 10px 24px -10px rgba(8, 4, 24, 0.8); transition: transform 0.15s, background 0.15s; animation: wIn 0.18s ease; }
+@keyframes wIn { from { transform: scale(0.4); opacity: 0; } }
+.wTool i { width: 46%; height: 46%; display: block; }
+.wTool i svg { width: 100%; height: 100%; display: block; }
+.wTool b { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em; color: var(--ink); text-shadow: 0 1px 4px rgba(10, 6, 30, 0.9); opacity: 0; transition: opacity 0.15s; }
+.wTool.cur { border-color: rgba(255, 210, 154, 0.7); }
+.wTool.on { transform: scale(1.18); background: radial-gradient(110% 110% at 32% 22%, rgba(255, 255, 255, 0.6), rgba(159, 243, 255, 0.3) 60%), rgba(20, 14, 44, 0.75); border-color: #bff6ff; }
+.wTool.on b { opacity: 1; }
+.act.ranged.tool { color: #ffd29a; }
+/* a small notch on the tool button says "hold me for more" */
+.act.ranged.multi::after { content: ''; position: absolute; left: 6px; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: #ffd29a; box-shadow: 0 0 6px rgba(255, 210, 154, 0.9); }
+body.lefty .act.ranged.multi::after { left: auto; right: 6px; }
+
+/* ---------- keys ---------- */
+.keys { position: absolute; left: var(--pad-l); top: calc(var(--pad-t) + 64px); display: flex; gap: 6px; }
+.shards:not(.hidden) ~ .keys { top: calc(var(--pad-t) + 66px); }
+.keys span { display: flex; align-items: center; gap: 4px; padding: 3px 9px 3px 6px; border-radius: 999px; background: rgba(20, 14, 44, 0.38); border: 1px solid rgba(255, 210, 154, 0.3); color: #ffe6c0; font-weight: 800; font-size: 14px; }
+.keys span.none { opacity: 0.5; }
+.keys i { width: 15px; height: 15px; display: block; } .keys i svg { width: 100%; height: 100%; display: block; }
+.keys .kBig { border-color: rgba(255, 138, 150, 0.6); color: #ff9fae; padding: 3px 7px; }
+.keys .kBig i { width: 19px; height: 19px; }
+.keys:not(.hidden) ~ .quest { top: calc(var(--pad-t) + 100px); }
+
+/* ---------- "You found ..." ---------- */
+.itemGet { position: absolute; inset: 0; display: grid; place-items: center; z-index: 6; pointer-events: auto !important; background: radial-gradient(60% 60% at 50% 45%, rgba(255, 233, 168, 0.18), rgba(10, 6, 30, 0.35)); }
+.itemGet .igCard { width: min(380px, calc(100% - 40px)); padding: 22px 24px 16px; border-radius: 24px; text-align: center; background: rgba(28, 22, 58, 0.72); }
+.itemGet.in .igCard { animation: rise 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+.itemGet.out { opacity: 0; transition: opacity 0.35s; }
+.igIcon { width: 64px; height: 64px; margin: -54px auto 6px; padding: 14px; border-radius: 50%; color: #ffe9a8; background: radial-gradient(circle, rgba(255, 233, 168, 0.35), rgba(28, 22, 58, 0.95) 70%); border: 1px solid rgba(255, 233, 168, 0.6); box-shadow: 0 0 30px rgba(255, 233, 168, 0.45); }
+.igIcon svg { width: 100%; height: 100%; display: block; }
+.itemGet h3 { font-family: var(--serif); font-weight: 400; font-size: 28px; margin: 4px 0 6px; }
+.itemGet p { margin: 0 0 12px; font-size: 14.5px; line-height: 1.45; color: var(--ink-2); }
+.igTap { font-size: 11px; font-weight: 800; letter-spacing: 0.24em; text-transform: uppercase; color: var(--accent); animation: tapPulse 2.2s ease-in-out infinite; }
+.mk.way { width: 10px; height: 10px; background: #bff6ff; transform: rotate(45deg) scaleX(0.7); box-shadow: 0 0 6px rgba(159, 243, 255, 0.9); }
+body.hasKeys .quest { top: calc(var(--pad-t) + 100px); }

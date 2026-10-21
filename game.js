@@ -1,10 +1,10 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, STORY } from '@rf/data';
+import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, STORY, TOOLS, CAVES } from '@rf/data';
 import { buildPlayer, buildSkyblade, buildTidesling, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
 import { createStory } from '@rf/story';
-import { buildCove, buildRift } from '@rf/world';
+import { buildCove, buildRift, buildCaves } from '@rf/world';
 import { createFoes } from '@rf/foes';
 import { createUI, loadPrefs, loadingDone, loadingFailed, view, updateView } from '@rf/ui';
 
@@ -281,6 +281,13 @@ const sound = (() => {
       case 'wake': [0, 7, 12].forEach((st, i) => tone('sine', 392 * Math.pow(2, st / 12), 0, 0.9, 0.06, sfxBus, i * 0.2)); break;
       case 'blip': tone('sine', 880, 0, 0.05, 0.03); break;
       case 'voice': tone('triangle', 300 + Math.random() * 160, 0, 0.045, 0.025); break;
+      case 'tetherOut': hiss('bandpass', 1800, 4200, 2, 0.25, 0.18); tone('triangle', 500, 1100, 0.18, 0.05); break;
+      case 'tetherBite': tone('square', 1500, 700, 0.07, 0.08); tone('triangle', 2600, 1800, 0.12, 0.05); break;
+      case 'land': tone('sine', 140, 60, 0.18, 0.35); hiss('lowpass', 900, 200, 0.6, 0.15, 0.2); break;
+      case 'unlock': tone('triangle', 900, 900, 0.06, 0.08); tone('triangle', 1350, 1350, 0.1, 0.08, sfxBus, 0.08); tone('sine', 300, 200, 0.3, 0.12, sfxBus, 0.12); break;
+      case 'pot': hiss('bandpass', 1600, 700, 1.4, 0.16, 0.3); tone('triangle', 420 * r, 200, 0.1, 0.12); break;
+      case 'spit': tone('square', 300 * r, 900, 0.06, 0.05); hiss('highpass', 2000, 0, 1, 0.05, 0.12); break;
+      case 'skitter': for (let i = 0; i < 3; i++) tone('square', 2400 * r + i * 300, 0, 0.02, 0.025, sfxBus, i * 0.03); break;
       case 'heal': [0, 4, 7, 12].forEach((st, i) => tone('sine', 523.25 * Math.pow(2, st / 12), 0, 0.9, 0.05, sfxBus, i * 0.11)); hiss('bandpass', 3000, 6000, 2, 0.8, 0.03); break;
       case 'quest': [0, 5, 9].forEach((st, i) => tone('sine', 659.25 * Math.pow(2, st / 12), 0, 0.5, 0.06, sfxBus, i * 0.09)); break;
       case 'beacon': [0, 4, 7, 11, 14].forEach((st, i) => tone('sine', 587.33 * Math.pow(2, st / 12), 0, 0.9, 0.05, sfxBus, i * 0.07)); tone('sine', 146.8, 0, 1.4, 0.15); break;
@@ -349,9 +356,11 @@ const sound = (() => {
 let world, sparks, bits, ui, foes, story, paused = false, started = false;
 // the two places: the cove (Lanternhold) and the Rift. `world` and `foes` always point at the one you're in.
 let cove, coveRoot, foesCove, rift = null, riftRoot = null, foesRift = null, floodPlane = null, travelling = null;
+let caves = null, cavesRoot = null, foesCaves = null, cavesSaved = null;
 const camDir = new V3(...CONFIG.camera.dir).normalize();
 const camFwd = new V3(-camDir.x, 0, -camDir.z).normalize();
 const camRight = new V3().crossVectors(camFwd, new V3(0, 1, 0)).normalize();
+const MAP_ROT = -Math.PI / 2 - Math.atan2(camFwd.z, camFwd.x);   // maps turn with the view
 
 const P = {
   x: 0, y: 0, z: 0, vx: 0, vz: 0, face: 0, state: 'move', t: 0,
@@ -574,18 +583,31 @@ const mixCol = (target, a, b, k) => target.copy(tc.set(a)).lerp(tc2.set(b), k);
 const SUN_EVE = new V3(-0.75, 0.16, -0.64).normalize(), SUN_NIGHT = new V3(-0.75, -0.3, -0.64).normalize();
 const MOON = new V3(0.42, 0.8, -0.42).normalize();
 let timeK = 0;
-const SUN_DAWN = new V3(0.86, 0.1, -0.3).normalize(), DAWN_LIGHT = new V3(0.72, 0.6, -0.34).normalize();
-// k: 0 = evening, 1 = night, 2 = dawn
-function setTime(k) {
-  const dawn = k > 1, A = dawn ? TIMES.night : TIMES.evening, B = dawn ? TIMES.dawn : TIMES.night, U = SKY_UNIFORMS;
-  const u = dawn ? Math.min(1, k - 1) : k;
+// ----- the clock: dawn, day, evening and night, by the hour -----
+// Palettes at given hours; between them everything blends. Story beats set the hour themselves.
+const CLOCK_KEYS = [[0, 'night'], [4.6, 'night'], [6.4, 'dawn'], [8.6, 'day'], [16.4, 'day'], [19, 'evening'], [21, 'night'], [24, 'night']];
+const NIGHTNESS = { night: 1, dawn: 0.25, day: 0, evening: 0.12 };
+const EXPOSURE = { night: 1.15, dawn: 1.04, day: 1.0, evening: 1.0 };
+const sunV = new V3(), litV = new V3();
+let clockH = 19;
+function setClock(h) {
+  h = ((h % 24) + 24) % 24;
+  clockH = h;
+  let k = 0;
+  while (k < CLOCK_KEYS.length - 2 && h >= CLOCK_KEYS[k + 1][0]) k++;
+  const [ha, na] = CLOCK_KEYS[k], [hb, nb] = CLOCK_KEYS[k + 1];
+  const u = smooth(clamp((h - ha) / Math.max(0.001, hb - ha), 0, 1));
+  const A = TIMES[na], B = TIMES[nb], U = SKY_UNIFORMS;
   mixCol(U.uZenith.value, A.zenith, B.zenith, u);
   mixCol(U.uMid.value, A.mid, B.mid, u);
   mixCol(U.uHorizon.value, A.horizon, B.horizon, u);
   mixCol(U.uGlow.value, A.glow, B.glow, u);
-  if (dawn) U.uSunDir.value.copy(SUN_NIGHT).lerp(SUN_DAWN, u).normalize();
-  else U.uSunDir.value.copy(SUN_EVE).lerp(SUN_NIGHT, u).normalize();
-  U.uNight.value = dawn ? 1 - u : u;
+  // the sun goes round from the east at dawn to the west in the evening
+  const th = (h - 6.5) / 12.5 * Math.PI;
+  sunV.set(Math.cos(th) * 0.8, Math.max(Math.sin(th), -0.3) * 0.85 + 0.12, -0.55).normalize();
+  U.uSunDir.value.copy(sunV);
+  const night = lerp(NIGHTNESS[na], NIGHTNESS[nb], u);
+  U.uNight.value = night;
   mixCol(scene.fog.color, A.fog, B.fog, u);
   scene.background.copy(scene.fog.color);
   mixCol(sun.color, A.sun, B.sun, u);
@@ -593,14 +615,22 @@ function setTime(k) {
   mixCol(hemi.color, A.hemiSky, B.hemiSky, u);
   mixCol(hemi.groundColor, A.hemiGround, B.hemiGround, u);
   hemi.intensity = lerp(A.hemiI, B.hemiI, u);
-  // the sun's low evening light gives way to moonlight from high up, and the moon to the first light from the east
-  if (dawn) lightDir.copy(MOON).lerp(DAWN_LIGHT, smooth(u)).normalize();
-  else lightDir.copy(cove.sunDir).lerp(MOON, smooth(u)).normalize();
+  // shadows come from the sun (never too flat), or from the moon at night
+  litV.set(sunV.x, Math.max(sunV.y, 0.42), sunV.z).normalize();
+  lightDir.copy(litV).lerp(MOON, smooth(night)).normalize();
   post.final.uniforms.grade.value.set(lerp(A.grade[0], B.grade[0], u), lerp(A.grade[1], B.grade[1], u), lerp(A.grade[2], B.grade[2], u));
-  renderer.toneMappingExposure = dawn ? 1.15 - u * 0.15 : 1.0 + u * 0.15;
-  cove.setNight(dawn ? 1 - u : u);
-  timeK = k;
+  renderer.toneMappingExposure = lerp(EXPOSURE[na], EXPOSURE[nb], u);
+  cove.setNight(night);
+  timeK = night;
 }
+// the story's own scale: 0 = evening, 1 = night, 2 = dawn
+function setTime(k) {
+  setClock(k <= 1 ? 19 + k * 2 : 21 + (k - 1) * 9.4);
+}
+// the clock runs on its own once Act 1 begins: an hour a minute
+const clock = { running: false };
+// the tide: low at midnight and noon, high at six. It only moves while the clock runs.
+function tideAt(h) { return -0.1 + 0.52 * Math.sin(h / 12 * TAU - Math.PI / 2); }
 
 // ----- creatures for a place (the cove's Seep, the Rift's rooms) -----
 const proj = new V3();
@@ -617,7 +647,7 @@ function makeFoes(w, root) {
     onSeepClear: () => story.onSeepClear(),
     pullPlayer: (dx, dz) => { if (P.state !== 'dead' && !P.iframes) tryMove(dx, dz); },
     bossBar: (name, frac) => ui.bossBar(name, frac),
-    onGuardianDown: (f) => riftEvent('guardianDown', f),
+    onGuardianDown: (f) => (f.kind === 'barnaclemother' ? caveBossDown(f) : riftEvent('guardianDown', f)),
     onKill: () => { stats.calmed++; },
     // the Seep only wakes while the story needs it; afterwards the stone circle stays quiet
     seepAwake: () => ['toShard', 'seep'].includes(story.state.step),
@@ -627,7 +657,7 @@ function makeFoes(w, root) {
 
 // ----- going between places: a fade to black, the swap, and a fade back -----
 function travel(to) {
-  if (travelling || (to === 'rift' && world === rift) || (to === 'cove' && world === cove)) return;
+  if (travelling || (to === 'rift' && world === rift) || (to === 'cove' && world === cove) || (to === 'caves' && world === caves)) return;
   story.state.nearShard = story.state.nearDoor = false; story.state.near = null;
   travelling = { t: 0, to, swapped: false };
   P.path = null; P.vx = P.vz = 0;
@@ -638,10 +668,10 @@ function updateTravel(dt) {
   const T = travelling;
   T.t += dt;
   if (!T.swapped) fade = Math.min(1, T.t / 0.7);
-  if (!T.swapped && T.t >= 0.75) { T.swapped = true; T.t = 0; swapTo(T.to); }
+  if (!T.swapped && T.t >= 0.75) { T.swapped = true; T.t = 0; T.from = world === caves ? 'caves' : world === rift ? 'rift' : 'cove'; swapTo(T.to); }
   if (T.swapped) {
     fade = Math.max(0, 1 - T.t / 0.9);
-    if (T.t >= 0.9) { travelling = null; fade = 0; ui.show(true); arrived(T.to); }
+    if (T.t >= 0.9) { travelling = null; fade = 0; ui.show(true); arrived(T.to, T.from); }
   }
 }
 function applyLight(L) {
@@ -658,8 +688,19 @@ function swapTo(to) {
   projectiles.length = 0;
   foes.reset();
   ui.bossBar(null);
-  if (to === 'rift') {
+  if (to === 'caves') {
+    cavesBuilt();
+    coveRoot.visible = false; if (riftRoot) riftRoot.visible = false; cavesRoot.visible = true;
+    world = caves; foes = foesCaves;
+    applyLight(caves.light);
+    P.x = caves.spawn.x; P.z = caves.spawn.z - 0.5; P.y = caves.spawn.y; P.face = Math.PI;
+    populateCaves();
+    ui.buildMap(caves.mapInfo, MAP_ROT, 'caves');
+    syncKeys();
+  } else if (to === 'rift') {
     guardianSeen = false;
+    if (riftRoot) riftRoot.visible = true;
+    if (cavesRoot) cavesRoot.visible = false;
     if (!rift) {
       riftRoot = new THREE.Group();
       scene.add(riftRoot);
@@ -679,15 +720,22 @@ function swapTo(to) {
     P.x = rift.spawn.x; P.z = rift.spawn.z; P.y = 0; P.face = Math.PI;
     ui.setMap(rift.mapState());
   } else {
+    const from = world;
     if (riftRoot) riftRoot.visible = false;
+    if (cavesRoot) cavesRoot.visible = false;
     coveRoot.visible = true;
     world = cove; foes = foesCove;
     scene.fog.near = 36; scene.fog.far = 95;
-    setTime(1);
-    // you step out beside the Seep, which has gone quiet for now
+    setClock(clockH);
     foes.rest();
-    placeBySeep();
+    if (from === caves) {
+      // out of the cave mouth, onto the shore under the cliffs
+      cavesSaved = caves.snapshot();
+      P.x = cove.mouth.x; P.z = cove.mouth.z + 1.7; P.y = cove.groundAt(P.x, P.z); P.face = 0;
+    } else placeBySeep();   // you step out beside the Seep, which has gone quiet for now
     ui.setMap(null);
+    ui.buildMap(cove.mapInfo, MAP_ROT, 'cove');
+    syncKeys();
   }
   ui.setContext(null);
   camLook.set(P.x, P.y + 0.6, P.z);
@@ -702,14 +750,19 @@ function placeBySeep() {
   }
   P.x = spot.x; P.z = spot.z; P.y = cove.groundAt(P.x, P.z); P.face = Math.atan2(S.x - P.x, S.z - P.z);
 }
-async function arrived(to) {
-  if (to === 'rift') {
+async function arrived(to, from) {
+  if (to === 'caves') {
+    ui.titleCard(CAVES.name, CAVES.region, CAVES.line);
+    if (!caves.state.visited) { caves.state.visited = true; await story.say(STORY.cavesEnter); }
+  } else if (to === 'rift') {
     ui.titleCard(RIFT.name, 'The first Rift', RIFT.line);
     story.setStep('rift');
     await story.say(STORY.riftLines.enter);
-  } else {
+  } else if (from === 'rift' && !story.past('reportRift')) {
     story.setStep('reportRift');
     ui.titleCard('The Keeper\u2019s Cove', 'Lanternhold', 'Home, with a heart of glass.');
+  } else if (from === 'caves') {
+    ui.titleCard('Gullcliff', 'Lanternhold', 'Salt wind, and the sea far below.');
   }
 }
 // ----- little clocks on game time (pausing the game pauses them) -----
@@ -719,7 +772,7 @@ function updateGTimers(dt) { for (let i = gTimers.length - 1; i >= 0; i--) { gTi
 
 // ----- a guardian's entrance: a short scene before the fight. Nothing can hurt you while it plays,
 // and the guardian only hangs there and looks at you until it's over. Seen once per visit. -----
-let bossIntro = null, guardianSeen = false;
+let bossIntro = null, guardianSeen = false, wheelSlow = false;
 async function guardianIntro(rm) {
   story.setStep('guardian');
   if (guardianSeen) return;
@@ -778,6 +831,17 @@ function playtestJump(where) {
     if (world !== cove) { ui.toast('You are already in the Rift'); return; }
     story.jump('enterRift');
     travel('rift');
+  } else if (where === 'act1') {
+    if (world !== cove) { ui.toast('Leave this place first'); return; }
+    curtainTo(1, 0.5).then(() => {
+      story.applyState('free');
+      const m = story.people().find((n) => n.id === 'maren');
+      P.x = m.x + 0.4; P.z = m.z + 1.8; P.y = cove.groundAt(P.x, P.z); P.face = Math.PI;
+      snapCamera();
+      curtainTo(0, 1);
+    });
+  } else if (where === 'tether') {
+    giveTool('tether'); ui.toast('Tether (for testing)');
   } else if (where === 'morning') {
     if (world !== cove) { ui.toast('Leave the Rift first'); return; }
     curtainTo(1, 0.5).then(() => {
@@ -796,24 +860,34 @@ let isleFrame = 0;
 function objectiveSpot() {
   const st = story.state.step, sp = cove.spots;
   const maren = story.people().find((n) => n.id === 'maren');
-  if (['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning'].includes(st)) return maren;
+  if (['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil'].includes(st)) return maren;
   if (st === 'practice') return sp.trainingGround;
   if (st === 'beacon') return sp.beaconView;
   if (['toShard', 'seep', 'enterRift'].includes(st)) return cove.seep;
   if (st === 'rest') return sp.cottageDoor;
+  if (['gullcliff', 'caves', 'cavesBoss'].includes(st)) return cove.mouth;
+  if (st === 'boathouse') return sp.boathouse;
   return null;
 }
 function updateIslandMap() {
-  const show = started && !intro && world === cove && !story.state.cine && !story.state.ending;
+  const inCaves = world === caves;
+  const show = started && !intro && (world === cove || inCaves) && !story.state.cine && !story.state.ending && !bossIntro;
   if (!show) { if (isleFrame !== -1) { ui.islandMap(null); isleFrame = -1; } return; }
   isleFrame = 1;
-  const news = story.hasNews();
   const o = STORY.objectives[story.state.step];
+  const objective = typeof o === 'function' ? o(story.state.hits, STORY.practiceHits) : o;
+  if (inCaves) {
+    ui.islandMap({ x: P.x, z: P.z, face: P.face, people: [], goal: null, objective, title: CAVES.name, waystones: [] });
+    return;
+  }
+  const news = story.hasNews();
   ui.islandMap({
     x: P.x, z: P.z, face: P.face,
     people: story.people().map((n) => ({ ...n, news: n.id === 'maren' && news })),
     goal: objectiveSpot(),
-    objective: typeof o === 'function' ? o(story.state.hits, STORY.practiceHits) : o,
+    objective,
+    title: 'Lanternhold',
+    waystones: story.past('free') ? cove.waystones : [],
   });
 }
 
@@ -847,7 +921,10 @@ function writeSave() {
   if (!started || intro) return;
   const st = story.state;
   const steady = world === cove && !travelling && P.state !== 'dead' && !st.ending && !st.cine;
-  const data = { v: 1, version: VERSION, step: st.step, hits: st.hits, maxHp: P.maxHp, shards: P.shards, pos: steady ? { x: +P.x.toFixed(2), z: +P.z.toFixed(2) } : null, stats: { ...stats }, ended, savedAt: Date.now() };
+  const data = { v: 1, version: VERSION, step: st.step, hits: st.hits, maxHp: P.maxHp, shards: P.shards, pos: steady ? { x: +P.x.toFixed(2), z: +P.z.toFixed(2) } : null, stats: { ...stats }, ended, savedAt: Date.now(),
+    // Act 1 and on
+    tools: tools.owned, tool: tools.cur, lit: cove.waystones.filter((w) => w.lit).map((w) => w.id), kept: [...kept], memories, clock: clockH, clockOn: clock.running,
+    caves: caves ? caves.snapshot() : cavesSaved, inCaves: world === caves };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); savedAt = Date.now(); ui.savedMark(); } catch (_) { /* private mode: progress lives only as long as the page */ }
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (_) { /* fine */ } }
@@ -910,7 +987,17 @@ async function beginJourney(save) {
   P.maxHp = save.maxHp || P.maxHp; P.hp = P.maxHp; P.shards = save.shards || 0;
   ui.setShards(P.shards);
   const step = story.applyState(save.step, save.hits || 0);
+  // tools, waystones, keepsakes, memories, the clock, the caves
+  tools.owned = save.tools || ['sling']; tools.cur = tools.owned.includes(save.tool) ? save.tool : 'sling'; syncTools();
+  for (const id of save.lit || []) cove.lightWaystone(id);
+  for (const id of save.kept || []) { kept.add(id); cove.takeKeepsake(id); }
+  Object.assign(memories, save.memories || {});
+  if (memories.breakfast) { cove.showKitchen(); }
+  cavesSaved = save.caves || null;
+  if (save.clockOn) { clock.running = true; clockH = save.clock || 9; setClock(clockH); }
+  else if (story.past('gullcliff')) { clock.running = true; setClock(clockH = 9); }
   if (save.step !== step && step === 'enterRift') { foes.rest(); placeBySeep(); }
+  else if (save.inCaves) { P.x = cove.mouth.x; P.z = cove.mouth.z + 1.7; P.y = cove.groundAt(P.x, P.z); }
   else if (save.pos && cove.walkable(save.pos.x, save.pos.z, cove.groundAt(save.pos.x, save.pos.z), 0.4)) { P.x = save.pos.x; P.z = save.pos.z; P.y = cove.groundAt(P.x, P.z); }
   else if (['morning', 'free'].includes(step)) { const d = cove.spots.lighthouseDoor; P.x = d.x + 0.4; P.z = d.z + 2.2; P.y = cove.groundAt(P.x, P.z); }
   else { P.x = cove.spawn.x; P.z = cove.spawn.z; P.y = cove.spawn.y; }
@@ -931,6 +1018,329 @@ async function onEnding() {
   const choice = await ui.endCard({ time: stats.time, slivers: P.shards, calmed: stats.calmed, falls: stats.falls });
   if (choice === 'title') { saveAndQuit(); return 'title'; }
   return 'keep';
+}
+
+// ===========================================================================
+// Keepsakes and waystones
+// ===========================================================================
+const KEEPSAKE_SET = ['cup', 'spoon', 'crust'];
+const kept = new Set();
+const memories = {};
+const keepsakesAll = () => KEEPSAKE_SET.every((k) => kept.has(k));
+async function foundKeepsake(k) {
+  kept.add(k.id);
+  const K = STORY.keepsakes[k.id];
+  sound.sfx('shimmer');
+  holdUp(true);
+  story.state.busy = true;
+  await ui.itemGet(K.name, K.line, null);
+  story.state.busy = false;
+  holdUp(false);
+  if (keepsakesAll()) ui.toast(STORY.keepsakeHint);
+  saveSoon = 0.3;
+}
+function lightStone(w) {
+  cove.lightWaystone(w.id);
+  sound.sfx('beacon'); shake(0.12);
+  for (let i = 0; i < 24; i++) { const a = Math.random() * TAU; sparks.spawn({ x: w.x, y: w.y + 1.9, z: w.z, vx: Math.cos(a) * 1.6, vy: Math.random() * 2.5, vz: Math.sin(a) * 1.6, drag: 2, life: 0.9, size: 0.14, color: i % 2 ? '#bff6ff' : '#ffffff', glow: 3 }); }
+  ui.toast(cove.waystones.filter((v) => v.lit).length === 1 ? STORY.waystoneHint : STORY.waystoneLit);
+  saveSoon = 0.3;
+}
+// travel to a lit waystone from the map
+async function warpTo(id) {
+  const w = cove.waystones.find((v) => v.id === id);
+  if (!w || !w.lit || world !== cove || travelling || story.busy()) return;
+  P.path = null; P.vx = P.vz = 0;
+  sound.sfx('portal');
+  await curtainTo(1, 0.45);
+  // the open ground on the near side of the stone
+  for (const [dx, dz] of [[0, 1.6], [1.4, 1], [-1.4, 1], [0, -1.6], [1.6, 0], [-1.6, 0]]) {
+    const x = w.x + dx, z = w.z + dz;
+    if (cove.walkable(x, z, cove.groundAt(x, z), 0.4)) { P.x = x; P.z = z; break; }
+  }
+  P.y = cove.groundAt(P.x, P.z); P.face = 0;
+  snapCamera();
+  await curtainTo(0, 0.6);
+}
+
+// ===========================================================================
+// Tools: the sling button holds them. The Tether bites brass rings, plates and creatures.
+// ===========================================================================
+const tools = { owned: ['sling'], cur: 'sling' };
+function syncTools() { ui.setTools(tools.owned.map((id) => ({ id, name: TOOLS[id].name })), tools.cur); }
+function setTool(id) {
+  if (!tools.owned.includes(id) || id === tools.cur) return;
+  tools.cur = id;
+  syncTools();
+  sound.sfx('tick');
+  ui.toast(TOOLS[id].name);
+}
+function giveTool(id) { if (!tools.owned.includes(id)) tools.owned.push(id); tools.cur = id; syncTools(); }
+// the line: a brass hook on a thread of sky-glass
+const tether = (() => {
+  const g = new THREE.Group();
+  const line = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#bff6ff').multiplyScalar(1.6) }));
+  const hb = new Batch(777);
+  hb.box(0.16, 0.16, 0.3, '#e0b85a', 0, 0, 0); for (const sx of [-1, 1]) hb.box(0.06, 0.06, 0.24, '#c9a24a', sx * 0.12, 0, 0.14, { rotY: sx * 0.6 });
+  const head = hb.mesh(); head.matrixAutoUpdate = true; head.castShadow = false;
+  g.add(line, head); g.visible = false;
+  return { g, line, head };
+})();
+let hook = null, tetherCd = 0;
+// what the Tether would bite if used now in this direction
+function tetherTarget(dir) {
+  const T = TOOLS.tether, rings = world.rings || [];
+  let best = null, bs = Infinity;
+  const y0 = P.y + 1;
+  for (const rg of rings) {
+    const dx = rg.x - P.x, dz = rg.z - P.z, d = Math.hypot(dx, dz);
+    if (d < 1.6 || d > T.range) continue;
+    // a ring whose landing is where you already stand is the one you just came from
+    const land = rg.lever ? null : (world.ringLanding ? world.ringLanding(rg, P.x, P.z) : rg.land);
+    if (!rg.lever && (!land || Math.hypot(land.x - P.x, land.z - P.z) < 2.4)) continue;
+    const cos = (dx * dir.x + dz * dir.z) / d;
+    if (cos < 0.8 || rg.used) continue;
+    const sc = d * (2 - cos) * (rg.lever ? 0.9 : 1);
+    if (sc < bs) { bs = sc; best = { kind: rg.lever ? 'lever' : 'ring', o: rg, x: rg.x, y: rg.y, z: rg.z }; }
+  }
+  for (const f of foes.targets()) {
+    const dx = f.x - P.x, dz = f.z - P.z, d = Math.hypot(dx, dz);
+    if (d > T.range) continue;
+    const cos = (dx * dir.x + dz * dir.z) / (d || 1);
+    if (cos < 0.86) continue;
+    const sc = d * (2 - cos) * 0.8;
+    if (sc < bs) { bs = sc; best = { kind: 'foe', o: f, x: f.x, y: f.y + (f.kind === 'barnaclemother' ? 2.2 : f.kind === 'bellfish' ? 1.5 : 0.6), z: f.z }; }
+  }
+  return best;
+}
+// where to aim the Tether: a drag on the button wins, then the nearest ring or creature in front, then ahead
+function tetherDir(aim) {
+  if (aim) return screenToWorld(aim.x, aim.y);
+  const fx = Math.sin(P.face), fz = Math.cos(P.face);
+  const mv = ui.input.move.active ? screenToWorld(ui.input.move.x, ui.input.move.y) : { x: fx, z: fz };
+  // a ring or a creature roughly ahead: turn to face it
+  let best = null, bs = Infinity;
+  for (const o of [...(world.rings || []).filter((rg) => !rg.used), ...foes.targets()]) {
+    const dx = o.x - P.x, dz = o.z - P.z, d = Math.hypot(dx, dz);
+    if (d < 1.2 || d > TOOLS.tether.range) continue;
+    if (!o.D && !o.lever) { const land = world.ringLanding ? world.ringLanding(o, P.x, P.z) : o.land; if (!land || Math.hypot(land.x - P.x, land.z - P.z) < 2.4) continue; }
+    const cos = (dx * mv.x + dz * mv.z) / d;
+    if (cos < 0.45) continue;
+    const sc = d * (2 - cos) * (o.D ? 1.15 : 1);
+    if (sc < bs) { bs = sc; best = { x: dx / d, z: dz / d }; }
+  }
+  return best || mv;
+}
+function useTool(aim) {
+  if (tools.cur === 'tether') {
+    if (hook || tetherCd > 0 || P.state !== 'move') return;
+    const dir = tetherDir(aim);
+    P.face = Math.atan2(dir.x, dir.z);
+    const tg = tetherTarget(dir);
+    const len = tg ? Math.hypot(tg.x - P.x, tg.z - P.z) : TOOLS.tether.range;
+    hook = { dir, tg, len, d: 0, back: false, hy: P.y + 1.0 };
+    tether.g.visible = true;
+    sound.sfx('tetherOut');
+    P.model.armR.rotation.x = -1.6;
+  }
+}
+function updateHook(dt) {
+  tetherCd = Math.max(0, tetherCd - dt);
+  if (!hook) { if (P.state !== 'tether') tether.g.visible = false; return; }
+  const T = TOOLS.tether, h = hook;
+  const hx = P.x + Math.sin(P.face) * 0.35, hz = P.z + Math.cos(P.face) * 0.35, hy = P.y + 1.0;
+  if (!h.back) {
+    h.d += T.speed * dt;
+    // it stops at a wall
+    const px = P.x + h.dir.x * Math.min(h.d, h.len), pz = P.z + h.dir.z * Math.min(h.d, h.len);
+    if (!h.tg && world.shotBlocked(px, hy, pz, 0.05)) { h.back = true; h.len = h.d; sound.sfx('clank'); }
+    else if (h.d >= h.len) {
+      h.d = h.len;
+      if (!h.tg) h.back = true;
+      else if (h.tg.kind === 'ring') {
+        // it bites: you're pulled across
+        const land = world.ringLanding ? world.ringLanding(h.tg.o, P.x, P.z) : h.tg.o.land;
+        if (land) {
+          sound.sfx('tetherBite');
+          P.state = 'tether'; P.t = 0;
+          const ly = world.groundAt(land.x, land.z);
+          P.fly = { x0: P.x, z0: P.z, y0: P.y, x1: land.x, z1: land.z, y1: ly, dur: Math.max(0.35, Math.hypot(land.x - P.x, land.z - P.z) / T.pull), ring: h.tg };
+          P.safe = Math.max(P.safe || 0, P.fly.dur + 0.3);
+          P.path = null; P.vx = P.vz = 0;
+        }
+        hook = null; tetherCd = T.cooldown;
+        return;
+      } else if (h.tg.kind === 'lever') {
+        sound.sfx('tetherBite'); sound.sfx('creak');
+        h.tg.o.used = true;   // pulled: it won't be pulled again
+        if (h.tg.o.gate && world.openGateChain) world.openGateChain(h.tg.o);
+        h.back = true;
+      } else if (h.tg.kind === 'foe') {
+        const f = h.tg.o;
+        sound.sfx('tetherBite');
+        if (f.alive) foes.tethered(f);
+        h.back = true;
+      }
+    }
+  } else {
+    h.len -= T.speed * 1.3 * dt;
+    if (h.len <= 0) { hook = null; tetherCd = T.cooldown; tether.g.visible = false; return; }
+  }
+  const dd = h.back ? h.len : Math.min(h.d, h.len);
+  const ex = P.x + h.dir.x * dd, ez = P.z + h.dir.z * dd;
+  const ey = h.tg && !h.back ? lerp(hy, h.tg.y, Math.min(1, dd / Math.max(0.01, h.len))) : hy;
+  drawLine(hx, hy, hz, ex, ey, ez);
+}
+function drawLine(ax, ay, az, bx, by, bz) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, l = Math.hypot(dx, dy, dz) || 0.001;
+  tether.line.scale.set(0.035, 0.035, l);
+  tether.line.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+  tether.line.lookAt(bx, by, bz);
+  tether.head.position.set(bx, by, bz);
+  tether.head.lookAt(bx + dx, by + dy, bz + dz);
+  tether.g.visible = true;
+}
+// flying along the line to a ring: an arc, the line shortening ahead of you
+function tetherFly(dt) {
+  const F = P.fly;
+  P.t += dt;
+  const k = Math.min(1, P.t / F.dur), e = smooth(k);
+  P.x = lerp(F.x0, F.x1, e); P.z = lerp(F.z0, F.z1, e);
+  P.y = lerp(F.y0, F.y1, e) + Math.sin(k * Math.PI) * 1.1;
+  P.face = Math.atan2(F.x1 - F.x0, F.z1 - F.z0);
+  const m = P.model;
+  m.root.position.set(P.x, P.y, P.z); m.root.rotation.y = P.face; m.root.visible = true;
+  m.armR.rotation.set(-2.6, 0, 0); m.armL.rotation.set(-0.4, 0, 0.3);
+  m.legL.rotation.x = 0.5; m.legR.rotation.x = -0.3;
+  if (k < 0.92) drawLine(P.x, P.y + 1.4, P.z, F.ring.x, F.ring.y, F.ring.z); else tether.g.visible = false;
+  if (Math.random() < 0.6) sparks.spawn({ x: P.x, y: P.y + 0.8, z: P.z, life: 0.3, size: 0.1, color: '#bff6ff', glow: 2, drag: 4 });
+  if (k >= 1) {
+    P.state = 'move'; P.t = 0; P.y = F.y1; P.fly = null; tether.g.visible = false;
+    sound.sfx('land'); dust(P.x, P.y, P.z, 6, 0.6);
+    resetPose();
+  }
+}
+
+// ===========================================================================
+// Gullcliff Caves: arriving, the guardian, chests, pots
+// ===========================================================================
+function cavesBuilt() {
+  if (caves) return;
+  cavesRoot = new THREE.Group();
+  scene.add(cavesRoot);
+  caves = buildCaves(cavesRoot, CAVES);
+  caves.restore(cavesSaved);
+  foesCaves = makeFoes(caves, cavesRoot);
+  caves.attach({ P, foes: foesCaves, sound, shake, onEvent: caveEvent, onMap: () => {} });
+  // the gate on the chain: pulled by the Tether
+  caves.openGateChain = (rg) => { const dr = rg.gate; if (dr && !dr.open) { dr.open = true; for (const sd of dr.solids) { const i = caves.solids.indexOf(sd); if (i >= 0) caves.solids.splice(i, 1); } sound.sfx('doorOpen'); shake(0.25); caveEvent('gateUp'); } };
+  cavesRoot.visible = false;
+}
+let bossSpawned = false;
+function populateCaves() {
+  foes.reset();
+  for (const c of caves.populate()) { const f = foes.spawn(c.kind, c.x, c.z, { placed: true, wake: c.kind === 'barnacle' ? 10 : c.kind === 'shardmite' ? 5.5 : 7 }); f.amb = c.amb; }
+  bossSpawned = false;
+}
+// the guardian wakes when you step into her chamber
+function checkCaveBoss() {
+  if (bossSpawned || caves.state.bossDone) return;
+  const b = caves.boss;
+  if (Math.hypot(P.x - b.x, P.z - b.z) > 9.5) return;
+  bossSpawned = true;
+  const f = foes.spawn('barnaclemother', b.x, b.z);
+  if (f.crack) { cavesRoot.remove(f.crack); f.crack = null; }
+  f.room = { x0: b.x - 9, x1: b.x + 9, z0: b.z - 9, z1: b.z + 9 };
+  story.setStep('cavesBoss');
+  bossEntrance({
+    find: () => foes.list.find((o) => o.kind === 'barnaclemother' && o.alive),
+    wide: { pos: new V3(b.x - 4, 1.4, b.z + 9), look: new V3(b.x, 2.5, b.z) },
+    close: (o) => ({ pos: new V3(o.x + 3.5, 3.6, o.z + 7.5), look: new V3(o.x, 2.8, o.z) }),
+    card: STORY.guardianCard, lines: STORY.guardianLines,
+  });
+}
+async function caveEvent(name, arg) {
+  if (name === 'sealed') { ui.toast('The bars come down'); }
+  else if (name === 'cleared') { sound.sfx('roomClear'); ui.toast('The way is open'); }
+  else if (name === 'unlock') { sound.sfx('unlock'); ui.toast('Unlocked'); syncKeys(); }
+  else if (name === 'unlockBoss') { sound.sfx('unlock'); sound.sfx('roar'); ui.toast('The great lock gives way'); syncKeys(); }
+  else if (name === 'locked') ui.toast(arg.kind === 'boss' ? STORY.bossDoor : STORY.lockedDoor);
+  else if (name === 'stuck') ui.toast(STORY.gateStuck);
+  else if (name === 'chainHint') ui.toast(STORY.leverHint);
+  else if (name === 'gateUp') ui.toast('The gate rattles up');
+  else if (name === 'shortcut') { sound.sfx('doorOpen'); ui.toast('A shortcut opens'); }
+  else if (name === 'keepsake') await foundKeepsake(arg);
+  else if (name === 'exit') { if (!travelling) travel('cove'); }
+}
+function syncKeys() { ui.setKeys(world === caves ? { small: caves.state.keys, big: caves.state.bigKey } : null); }
+async function openChest(c) {
+  caves.openChest(c);
+  sound.sfx('treasure');
+  for (let i = 0; i < 24; i++) { const a = Math.random() * TAU; sparks.spawn({ x: c.x, y: c.y + 0.8, z: c.z, vx: Math.cos(a) * 2, vy: 2 + Math.random() * 3, vz: Math.sin(a) * 2, grav: 4, life: 1, size: 0.16, color: i % 2 ? '#ffe9a8' : '#bff6ff', glow: 2.6 }); }
+  holdUp(true);
+  if (c.item === 'tether') {
+    giveTool('tether');
+    await ui.itemGet(STORY.tether.name, STORY.tether.line, null);
+    ui.showHint('tool', 'Hold the tool button to choose a tool', 6000);
+  } else if (c.item === 'smallKey') await ui.itemGet(STORY.smallKey.name, STORY.smallKey.line, null);
+  else if (c.item === 'bigKey') await ui.itemGet(STORY.bigKey.name, STORY.bigKey.line, null);
+  holdUp(false);
+  syncKeys();
+  saveSoon = 0.4;
+}
+// the apprentice holds a found thing up over their head
+function holdUp(on) {
+  const m = P.model;
+  if (on) { m.armL.rotation.set(-3.0, 0, 0.2); m.armR.rotation.set(-3.0, 0, -0.2); }
+  else resetPose();
+}
+// a broken pot: now and then a heart, often a sliver
+function potsHit(x, z, rad) {
+  if (!world.breakPot) return;
+  for (const p of world.breakPot(x, z, rad)) {
+    sound.sfx('pot');
+    for (let i = 0; i < 12; i++) { const a = Math.random() * TAU, sp = 1.5 + Math.random() * 2.5; bits.spawn({ x: p.x, y: p.y + 0.4, z: p.z, vx: Math.cos(a) * sp, vy: 2 + Math.random() * 3, vz: Math.sin(a) * sp, life: 1.2, size: 0.08 + Math.random() * 0.08, color: i % 2 ? '#9a6b55' : '#7d5646', floor: p.y }); }
+    if (Math.random() < (P.hp < P.maxHp ? 0.5 : 0.2)) foes.dropHeart(p.x, p.y + 0.5, p.z);
+    else if (Math.random() < 0.7) foes.dropSliver(p.x, p.y + 0.5, p.z);
+  }
+}
+
+// the Barnacle Mother falls: a heart, the oil, and a column of light to climb out by
+async function caveBossDown(f) {
+  caves.guardianDown();
+  await gwait(1.2);
+  await story.say(STORY.guardianDown);
+  P.maxHp += 2; P.hp = P.maxHp;
+  holdUp(true);
+  await ui.itemGet(STORY.heartUp.name, STORY.heartUp.line, null);
+  await ui.itemGet(STORY.oil.name, STORY.oil.line, null);
+  holdUp(false);
+  story.setStep('reportOil');
+  ui.toast('A shaft of light leads up and out');
+  saveSoon = 0.3;
+}
+// a guardian's entrance, for any guardian: a low wide shot, then up close, its name, its lines
+async function bossEntrance(o) {
+  bossIntro = { };
+  P.safe = 99; P.path = null; P.vx = P.vz = 0;
+  ui.show(false);
+  document.body.classList.add('cine');
+  cineView = { pos: o.wide.pos, look: o.wide.look, k: 0.02 };
+  let w = 0;
+  while ((!o.find() || o.find().state === 'emerge') && w < 8) { await gwait(0.1); w += 0.1; }
+  const f = o.find();
+  if (f) {
+    const c = o.close(f);
+    cineView = { pos: c.pos, look: c.look, k: 0.025 };
+    ui.titleCard(o.card.name, o.card.region, o.card.line);
+    await gwait(3.4);
+    await story.say(o.lines);
+  }
+  cineView = null; camBlend = 1.4;
+  document.body.classList.remove('cine');
+  ui.show(true);
+  bossIntro = null;
+  P.safe = 1.2;
 }
 
 // ----- getting hurt, falling, waking by the fire -----
@@ -993,6 +1403,7 @@ function deadUpdate(dt) {
 function updatePlayer(dt) {
   if (dt <= 0) return;
   if (P.state === 'dead') { deadUpdate(dt); return; }
+  if (P.state === 'tether') { tetherFly(dt); return; }
   // knockback from a hit slides you back a little, whatever you're doing
   if (Math.abs(P.kx) + Math.abs(P.kz) > 0.02) { tryMove(P.kx * dt, P.kz * dt); const kk = Math.exp(-11 * dt); P.kx *= kk; P.kz *= kk; }
   P.invuln = Math.max(0, P.invuln - dt);
@@ -1053,7 +1464,8 @@ function updatePlayer(dt) {
   }
 
   if (P.state === 'move') {
-    const firing = I.ranged.down;
+    const firing = I.ranged.down && tools.cur === 'sling';
+    if (I.use) { useTool(I.use.aim); I.use = null; }
     if (firing) {
       P.path = null;
       const dir = aimFor(I.ranged, WEAPONS.tidesling.range);
@@ -1194,6 +1606,7 @@ function meleeHits(s) {
     if (da > half + 0.25) continue;
     if (foes.hit(f, dx / (dist || 1), dz / (dist || 1), st.dmg, st.heavy, WEAPONS.skyblade.knock)) any = true;
   }
+  potsHit(P.x + s.dir.x * 1.0, P.z + s.dir.z * 1.0, st.range * 0.7);
   if (any) { stop = st.heavy ? CONFIG.feel.hitStop * 2 : CONFIG.feel.hitStop; shake(st.heavy ? 0.5 : 0.28); }
 }
 
@@ -1266,6 +1679,7 @@ function updateProjectiles(dt) {
       done = true;
     } else if (p.y <= Math.max(gy, 0) + 0.05 || world.shotBlocked(p.x, p.y, p.z, S.size * 0.6)) done = true;   // houses, trees, rocks, cliffs
     if (done) {
+      potsHit(p.x, p.z, 0.25);
       splash(p.x, Math.max(gy, -0.05) + 0.05, p.z, !!hitD);
       scene.remove(p.m);
       projectiles.splice(i, 1);
@@ -1430,8 +1844,15 @@ function tick(dt) {
   let simDt = dt;
   if (stop > 0) { stop -= dt; simDt = dt * 0.04; }
   P.safe = Math.max(0, (P.safe || 0) - dt);
+  if (wheelSlow) simDt *= 0.2;   // choosing a tool: the world slows almost to a stop
   if (started && !intro && world === cove) story.update(dt);
-  if (world !== cove) ui.setContext(null);
+  if (world === caves && started) {
+    // in the caves the sword button opens chests
+    const c = !story.busy() && P.state === 'move' ? caves.chestNear(P) : null;
+    ui.setContext(c ? 'open' : null);
+    if (c && ui.input.attack.pressed && !travelling) { ui.input.attack.pressed = false; ui.input.attack.down = false; openChest(c); }
+    checkCaveBoss();
+  } else if (world !== cove) ui.setContext(null);
   if (travelling) updateTravel(dt);
   if (floodPlane) floodPlane.position.y = -0.3 + foesRift.flood.k * 0.42;
   ui.talkFrame(dt);
@@ -1442,6 +1863,7 @@ function tick(dt) {
     if (world === cove && ui.input.attack.pressed && story.tryTalk()) { ui.input.attack.pressed = false; ui.input.attack.down = false; }
     if (ui.input.tap) { if (P.state === 'move' && !ui.input.ranged.down) walkTo(ui.input.tap.x, ui.input.tap.y); ui.input.tap = null; }
     updatePlayer(simDt);
+    updateHook(simDt);
     updateProjectiles(simDt);
     foes.update(simDt, camera);
   } else {
@@ -1479,7 +1901,7 @@ function tick(dt) {
   bits.update(dt);
   updateCamera(dt, time);
   // the sea travels with the camera, so it reaches the horizon whichever way you look
-  if (world === cove) cove.sea.position.set(camera.position.x, -0.08, camera.position.z);
+  if (world === cove) cove.sea.position.set(camera.position.x, cove.seaLevel, camera.position.z);
   // the screen: a red pulse when you're hurt, colour draining and a fade to black when you fall, and back
   hurtFlash = Math.max(0, hurtFlash - dt * 3.5);
   if (P.waking) { P.waking = Math.max(0, P.waking - dt * 1.1); fade = P.waking; }
@@ -1489,6 +1911,13 @@ function tick(dt) {
   if (started && !intro && !P.runHinted && P.state === 'move' && (P.walkK || 0) > 0.8 && !ui.input.run) { P.walkT = (P.walkT || 0) + dt; if (P.walkT > 12) { P.runHinted = true; ui.showHint('run', TEXT.hintRun, 6000); } }
   updateIslandMap();
   const dark = Math.max(fade, curtain.k);
+  // the clock and the tide
+  if (started && clock.running && world === cove && !story.state.cine && !story.state.ending) {
+    clockH = (clockH + dt / 60) % 24;
+    clock.acc = (clock.acc || 0) + dt;
+    if (clock.acc > 0.25) { clock.acc = 0; setClock(clockH); }
+  }
+  cove.seaLevel = clock.running ? tideAt(clockH) : -0.08;
   // the journey's clock, and saving now and then
   if (started && !intro) {
     stats.time += dt;
@@ -1531,6 +1960,9 @@ try {
     onLocked: () => { sound.sfx('deny'); ui.toast('Abilities awaken later in the Prologue'); },
     onJump: (where) => playtestJump(where),
     onTitle: () => saveAndQuit(),
+    onTool: (id) => setTool(id),
+    onWheel: (open) => { wheelSlow = open; },
+    onWarp: (id) => warpTo(id),
     journey,
     sfx: (n) => sound.sfx(n),
   });
@@ -1547,11 +1979,17 @@ try {
     snapCamera: () => snapCamera(),
     onStep: () => { saveSoon = 0.6; },
     onEnding: () => onEnding(),
+    startClock: () => { clock.running = true; },
+    lightStone: (w) => lightStone(w),
+    foundKeepsake: (k) => foundKeepsake(k),
+    keepsakesReady: () => keepsakesAll() && !memories.breakfast,
+    remembered: () => { memories.breakfast = 1; saveSoon = 0.3; },
   });
   setTime(0);
   applyQuality();
+  syncTools();
   // the island map turns with the view, so "up" on the map is "up" on the screen
-  ui.buildMap(cove.mapInfo, -Math.PI / 2 - Math.atan2(camFwd.z, camFwd.x));
+  ui.buildMap(cove.mapInfo, MAP_ROT);
   // the title screen's view of the island, drawn behind the loading veil
   intro = null;
   updateCamera(0, 0);
@@ -1563,7 +2001,7 @@ try {
   setTimeout(showTitle, 450);
   addEventListener('pagehide', () => writeSave());
   document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

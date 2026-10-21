@@ -423,17 +423,93 @@ export function buildCove(scene) {
     return cellH(x, z);
   }
   function onDock(x, z) { return x > dock.x0 && x < dock.x1 && z > dock.z0 && z < dock.z1; }
-  // can something standing at height y move to (x, z)? r = its radius
-  function walkable(x, z, y, rad = 0.3, stepUp = 0.55) {
-    for (const [ox, oz] of [[rad, 0], [-rad, 0], [0, rad], [0, -rad], [rad * 0.7, rad * 0.7], [-rad * 0.7, rad * 0.7], [rad * 0.7, -rad * 0.7], [-rad * 0.7, -rad * 0.7]]) {
+  // can something standing at height y move to (x, z)? r = its radius.
+  // Steps work both ways: you never drop down a ledge you couldn't climb back up, so you can't get trapped.
+  function terrainOk(x, z, y, rad, stepUp) {
+    for (const [ox, oz] of [[0, 0], [rad, 0], [-rad, 0], [0, rad], [0, -rad], [rad * 0.7, rad * 0.7], [-rad * 0.7, rad * 0.7], [rad * 0.7, -rad * 0.7], [-rad * 0.7, -rad * 0.7]]) {
       const gx = x + ox, gz = z + oz;
       const h = groundAt(gx, gz);
       if (h <= 0.01 && !onDock(gx, gz)) return false;   // the sea
-      if (h - y > stepUp) return false;                   // a wall or a ledge too high
-      if (y - h > 1.1) return false;                      // a drop: don't walk off cliffs
+      if (Math.abs(h - y) > stepUp) return false;         // a wall, or a drop too deep to climb back
     }
-    for (const s of solids) { const d = Math.hypot(x - s.x, z - s.z); if (d < s.r + rad) return false; }
-    for (const bx of boxes) if (x > bx.x0 - rad && x < bx.x1 + rad && z > bx.z0 - rad && z < bx.z1 + rad) return false;
+    return true;
+  }
+  function solidAt(x, z, rad) {
+    for (const s of solids) { const d = Math.hypot(x - s.x, z - s.z); if (d < s.r + rad) return s; }
+    for (const bx of boxes) if (x > bx.x0 - rad && x < bx.x1 + rad && z > bx.z0 - rad && z < bx.z1 + rad) return bx;
+    return null;
+  }
+  function walkable(x, z, y, rad = 0.3, stepUp = 0.55) {
+    return terrainOk(x, z, y, rad, stepUp) && !solidAt(x, z, rad);
+  }
+
+  // ----- finding a way: A* over the cells, for tap-to-walk -----
+  const blocked = new Uint8Array(N * N);
+  const cellY = (i, j) => { const x = H0 + i + 0.5, z = H0 + j + 0.5; return groundAt(x, z); };
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = H0 + i + 0.5, z = H0 + j + 0.5;
+    const y = cellY(i, j);
+    if ((y <= 0.01 && !onDock(x, z)) || solidAt(x, z, 0.22)) blocked[j * N + i] = 1;
+  }
+  function findPath(fx0, fz0, tx, tz) {
+    const si = Math.floor(fx0) - H0, sj = Math.floor(fz0) - H0;
+    let ti = Math.floor(tx) - H0, tj = Math.floor(tz) - H0;
+    const inside = (i, j) => i >= 0 && j >= 0 && i < N && j < N;
+    if (!inside(si, sj) || !inside(ti, tj)) return null;
+    // tapped somewhere you can't stand (a tree, the sea): aim for the nearest open cell next to it
+    if (blocked[tj * N + ti]) {
+      let best = null, bd = 1e9;
+      for (let r = 1; r <= 3 && !best; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+        const i = ti + di, j = tj + dj;
+        if (!inside(i, j) || blocked[j * N + i]) continue;
+        const d = Math.hypot(di, dj) + Math.hypot(i - si, j - sj) * 0.01;
+        if (d < bd) { bd = d; best = [i, j]; }
+      }
+      if (!best) return null;
+      [ti, tj] = best;
+    }
+    const start = sj * N + si, goal = tj * N + ti;
+    const g = new Float32Array(N * N).fill(1e9), from = new Int32Array(N * N).fill(-1), closed = new Uint8Array(N * N);
+    g[start] = 0;
+    const open = [[Math.hypot(ti - si, tj - sj), start]];
+    let steps = 0;
+    while (open.length && steps++ < 4000) {
+      let bi = 0;
+      for (let k = 1; k < open.length; k++) if (open[k][0] < open[bi][0]) bi = k;
+      const [, cur] = open.splice(bi, 1)[0];
+      if (cur === goal) break;
+      if (closed[cur]) continue;
+      closed[cur] = 1;
+      const ci = cur % N, cj = (cur / N) | 0, cy = cellY(ci, cj);
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const ni = ci + di, nj = cj + dj;
+        if (!inside(ni, nj)) continue;
+        const n = nj * N + ni;
+        if (blocked[n] || closed[n]) continue;
+        if (Math.abs(cellY(ni, nj) - cy) > 0.55) continue;
+        if (di && dj && (blocked[cj * N + ni] || blocked[nj * N + ci] || Math.abs(cellY(ni, cj) - cy) > 0.55 || Math.abs(cellY(ci, nj) - cy) > 0.55)) continue;
+        const ng = g[cur] + (di && dj ? 1.414 : 1);
+        if (ng < g[n]) { g[n] = ng; from[n] = cur; open.push([ng + Math.hypot(ti - ni, tj - nj), n]); }
+      }
+    }
+    if (from[goal] < 0 && goal !== start) return null;
+    const cells = [];
+    for (let c = goal; c !== -1 && c !== start; c = from[c]) cells.push(c);
+    cells.reverse();
+    const pts = cells.map((c) => ({ x: H0 + (c % N) + 0.5, z: H0 + ((c / N) | 0) + 0.5 }));
+    // the exact tapped point as the last stop, if it's open ground
+    if (!blocked[(Math.floor(tz) - H0) * N + (Math.floor(tx) - H0)] && walkable(tx, tz, groundAt(tx, tz), 0.3)) pts.push({ x: tx, z: tz });
+    return pts;
+  }
+  // a straight walk from a to b is clear (for smoothing paths into fewer, straighter legs)
+  function clearLine(ax, az, bx, bz) {
+    const d = Math.hypot(bx - ax, bz - az), n = Math.ceil(d / 0.25);
+    let y = groundAt(ax, az);
+    for (let k = 1; k <= n; k++) {
+      const x = ax + (bx - ax) * k / n, z = az + (bz - az) * k / n;
+      if (!walkable(x, z, y, 0.32)) return false;
+      y = groundAt(x, z);
+    }
     return true;
   }
 
@@ -504,7 +580,7 @@ export function buildCove(scene) {
   const spawn = { x: 8.0, z: 1.2 };
   spawn.y = groundAt(spawn.x, spawn.z);
   return {
-    name: 'cove', groundAt, walkable, update, fx, dummies, solids, spawn, shard,
+    name: 'cove', groundAt, walkable, terrainOk, solidAt, findPath, clearLine, update, fx, dummies, solids, spawn, shard,
     debugMap: () => { const rows = []; for (let j = 0; j < N; j += 1) { let s = ''; for (let i = 0; i < N; i += 1) { const h = H[j * N + i], k = K[j * N + i]; s += h <= 0 ? '~' : k === 'sand' ? (h > 0.5 ? 's' : '.') : k === 'stone' ? '#' : k === 'path' ? '=' : String(Math.min(9, Math.floor(h))); } rows.push((H0 + j + '').padStart(4) + ' ' + s); } return rows.join('\n'); },
     sunDir: new V3(-0.7, 0.56, -0.3).normalize(),
     bounds: { x0: H0, z0: H0, x1: H0 + N, z1: H0 + N },

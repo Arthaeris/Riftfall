@@ -1,9 +1,10 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { CONFIG, WEAPONS, PLACES, PALETTE, TEXT } from '@rf/data';
+import { CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP } from '@rf/data';
 import { buildPlayer, buildSkyblade, buildTidesling, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT } from '@rf/art';
 import { buildCove } from '@rf/world';
+import { createFoes } from '@rf/foes';
 import { createUI, loadPrefs, loadingDone, loadingFailed, view, updateView } from '@rf/ui';
 
 const V3 = THREE.Vector3;
@@ -255,6 +256,28 @@ const sound = (() => {
       case 'open': tone('sine', 660, 990, 0.12, 0.07); break;
       case 'deny': tone('triangle', 300, 220, 0.12, 0.12); break;
       case 'shimmer': for (let i = 0; i < 4; i++) tone('sine', 1320 * Math.pow(1.25, i), 0, 0.5, 0.035, sfxBus, i * 0.07); break;
+      case 'emerge': hiss('bandpass', 400, 2400, 1.5, 0.6, 0.18); tone('sine', 300, 900, 0.5, 0.05); break;
+      case 'hop': tone('sine', 320 * r, 520 * r, 0.07, 0.08 * k); break;
+      case 'puddleTell': tone('triangle', 520, 380, 0.4, 0.07); hiss('bandpass', 1800, 900, 3, 0.4, 0.08); break;
+      case 'leap': tone('sine', 240, 700, 0.25, 0.12); break;
+      case 'splat': hiss('lowpass', 1600, 300, 0.8, 0.25, 0.35); tone('sine', 180, 90, 0.15, 0.2); break;
+      case 'squelch': hiss('bandpass', 900 * r, 2400, 2, 0.12, 0.3 * k); tone('sine', 260 * r, 140, 0.1, 0.15 * k); break;
+      case 'bellTell': for (let i = 0; i < 3; i++) tone('sine', 880 * Math.pow(1.5, i % 2), 0, 0.5, 0.04, sfxBus, i * 0.18); break;
+      case 'bellRing': tone('sine', 1320, 0, 1.2, 0.08); tone('sine', 1980, 0, 0.9, 0.05); tone('triangle', 660, 0, 0.7, 0.05); break;
+      case 'bellHit': tone('sine', 1100 * r, 0, 0.35, 0.12 * k); tone('triangle', 700 * r, 500, 0.12, 0.1 * k); break;
+      case 'orbPop': tone('sine', 1600 * r, 900, 0.06, 0.05); break;
+      case 'rootRumble': tone('sine', 70, 50, 0.6, 0.25); hiss('lowpass', 300, 120, 0.8, 0.5, 0.2); break;
+      case 'glyph': for (let i = 0; i < 4; i++) tone('triangle', 440 * Math.pow(1.122, i), 0, 0.25, 0.05, sfxBus, i * 0.15); break;
+      case 'burst': tone('sine', 110, 40, 0.4, 0.5); hiss('lowpass', 1200, 200, 0.6, 0.35, 0.45); break;
+      case 'pop': tone('sine', 600 * r, 1400 * r, 0.12, 0.14); hiss('highpass', 3000, 0, 0.6, 0.15, 0.18); for (let i = 0; i < 3; i++) tone('sine', 1500 * Math.pow(1.26, i), 0, 0.2, 0.03, sfxBus, 0.05 + i * 0.05); break;
+      case 'sliver': tone('sine', 1400 * k, 0, 0.12, 0.05); tone('sine', 2100 * k, 0, 0.1, 0.025); break;
+      case 'heart': for (let i = 0; i < 3; i++) tone('triangle', 660 * Math.pow(1.26, i), 0, 0.25, 0.08, sfxBus, i * 0.08); break;
+      case 'hurt': tone('square', 220, 110, 0.18, 0.08); tone('sine', 140, 70, 0.25, 0.35); hiss('lowpass', 900, 200, 0.7, 0.2, 0.25); break;
+      case 'barrierUp': tone('sine', 80, 160, 1.0, 0.3); for (let i = 0; i < 5; i++) tone('sine', 900 + i * 220, 0, 0.6, 0.03, sfxBus, i * 0.12); break;
+      case 'barrierDown': tone('sine', 160, 70, 1.0, 0.25); hiss('lowpass', 800, 200, 0.6, 0.8, 0.15); break;
+      case 'clear': [0, 4, 7, 12, 16].forEach((st, i) => tone('triangle', 523.25 * Math.pow(2, st / 12), 0, 0.6, 0.09, sfxBus, i * 0.11)); break;
+      case 'fall': tone('sine', 300, 60, 1.4, 0.25); hiss('lowpass', 600, 100, 0.6, 1.2, 0.2); break;
+      case 'wake': [0, 7, 12].forEach((st, i) => tone('sine', 392 * Math.pow(2, st / 12), 0, 0.9, 0.06, sfxBus, i * 0.2)); break;
       case 'riftfall': tone('sine', 98, 49, 3.5, 0.3); hiss('lowpass', 300, 80, 0.7, 3, 0.25); break;
     }
   }
@@ -298,14 +321,14 @@ const sound = (() => {
 // ===========================================================================
 // The world, effects and the apprentice
 // ===========================================================================
-let world, sparks, bits, ui, paused = false, started = false;
+let world, sparks, bits, ui, foes, paused = false, started = false;
 const camDir = new V3(...CONFIG.camera.dir).normalize();
 const camFwd = new V3(-camDir.x, 0, -camDir.z).normalize();
 const camRight = new V3().crossVectors(camFwd, new V3(0, 1, 0)).normalize();
 
 const P = {
   x: 0, y: 0, z: 0, vx: 0, vz: 0, face: 0, state: 'move', t: 0,
-  hp: CONFIG.player.hearts * 2, maxHp: CONFIG.player.hearts * 2,
+  hp: CONFIG.player.hearts * 2, maxHp: CONFIG.player.hearts * 2, invuln: 0, kx: 0, kz: 0, shards: 0,
   combo: 0, comboT: 0, swing: null, rollDir: new THREE.Vector2(), rollCd: 0, rollBuf: 0, atkBuf: 0, fireCd: 0,
   stepT: 0, stepSide: 0, firing: 0, hitList: null, model: null, blade: null, sling: null, spin: null,
 };
@@ -367,13 +390,13 @@ function aimFor(st, range) {
   let best = null, bestS = Infinity;
   const fx = Math.sin(P.face), fz = Math.cos(P.face);
   const mv = ui.input.move.active ? screenToWorld(ui.input.move.x, ui.input.move.y) : null;
-  for (const d of world.dummies) {
+  for (const d of [...foes.targets(), ...world.dummies]) {
     const dx = d.x - P.x, dz = d.z - P.z, dist = Math.hypot(dx, dz);
     if (dist > range) continue;
     const dir = mv || { x: fx, z: fz };
     const cos = (dx * dir.x + dz * dir.z) / (dist || 1);
-    if (cos < 0.25) continue;
-    const s = dist * (1.6 - cos);
+    if (cos < (d.D ? 0.0 : 0.25)) continue;
+    const s = dist * (1.6 - cos) * (d.D ? 0.6 : 1);   // creatures before practice dummies
     if (s < bestS) { bestS = s; best = { x: dx / dist, z: dz / dist }; }
   }
   if (best) return best;
@@ -511,8 +534,65 @@ function locomote(dt, speedMul, canTurn) {
   return moved;
 }
 
+// ----- getting hurt, falling, waking by the fire -----
+let hurtFlash = 0, fade = 0, deadSat = 1;
+function hurtPlayer(dmg, fx, fz) {
+  if (!started || intro || P.state === 'dead' || P.iframes || P.invuln > 0) return false;
+  P.hp = Math.max(0, P.hp - dmg);
+  P.invuln = HURT.invuln;
+  const dx = P.x - fx, dz = P.z - fz, l = Math.hypot(dx, dz) || 1;
+  P.kx = (dx / l) * HURT.knock; P.kz = (dz / l) * HURT.knock;
+  if (P.state === 'attack') { P.state = 'move'; P.t = 0; }
+  P.path = null;
+  stop = Math.max(stop, 0.08);
+  shake(0.5);
+  hurtFlash = 1;
+  sound.sfx('hurt');
+  ui.hurt();
+  for (let i = 0; i < 10; i++) { const a = Math.random() * TAU; sparks.spawn({ x: P.x, y: P.y + 0.9, z: P.z, vx: Math.cos(a) * 2.5, vy: Math.random() * 2.5, vz: Math.sin(a) * 2.5, life: 0.4, size: 0.14, color: '#ff6b7a', glow: 1.8 }); }
+  if (P.hp <= 0) fallDown();
+  return true;
+}
+function fallDown() {
+  P.state = 'dead'; P.t = 0; P.path = null; P.kx *= 0.4; P.kz *= 0.4;
+  sound.sfx('fall');
+  for (const st of [ui.input.attack, ui.input.ranged]) st.down = false;
+}
+function deadUpdate(dt) {
+  P.t += dt;
+  const m = P.model, k = smooth(Math.min(1, P.t / 0.7));
+  // falls back onto the ground, arms out
+  P.spin.rotation.set(-k * Math.PI * 0.5, 0, 0);
+  P.spin.position.y = 0.5 - k * 0.32;
+  m.armL.rotation.set(-k * 2.6, 0, k * 0.5); m.armR.rotation.set(-k * 2.6, 0, -k * 0.5);
+  m.legL.rotation.x = k * 0.2; m.legR.rotation.x = -k * 0.1;
+  m.root.visible = true;
+  deadSat = 1 - Math.min(1, P.t / 1.1) * 0.85;
+  fade = clamp((P.t - 1.4) / 0.7, 0, 1);
+  if (Math.abs(P.kx) + Math.abs(P.kz) > 0.01) { tryMove(P.kx * dt, P.kz * dt); P.kx *= Math.exp(-6 * dt); P.kz *= Math.exp(-6 * dt); }
+  if (P.t >= HURT.respawnDelay) {
+    // wake by the campfire: full health, the Seep calm again, nothing lost (it's the Prologue)
+    foes.reset();
+    P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.groundAt(P.x, P.z);
+    P.vx = P.vz = P.kx = P.kz = 0;
+    P.hp = P.maxHp; P.invuln = 1.5;
+    P.state = 'move'; P.t = 0; P.face = Math.PI * 0.85;
+    resetPose();
+    deadSat = 1;
+    P.waking = 1;
+    camLook.set(P.x, P.y + 0.6, P.z);
+    ui.titleCard(TEXT.fallen, 'The Keeper\u2019s Cove', 'Nothing is lost in the Prologue.');
+    sound.sfx('wake');
+  }
+  m.root.position.set(P.x, P.y, P.z);
+}
+
 function updatePlayer(dt) {
   if (dt <= 0) return;
+  if (P.state === 'dead') { deadUpdate(dt); return; }
+  // knockback from a hit slides you back a little, whatever you're doing
+  if (Math.abs(P.kx) + Math.abs(P.kz) > 0.02) { tryMove(P.kx * dt, P.kz * dt); const kk = Math.exp(-11 * dt); P.kx *= kk; P.kz *= kk; }
+  P.invuln = Math.max(0, P.invuln - dt);
   const I = ui.input, C = CONFIG.player, W = WEAPONS.skyblade, R = CONFIG.roll;
   if (I.roll.pressed) { P.rollBuf = R.buffer; I.roll.pressed = false; }
   if (I.attack.pressed) { P.atkBuf = 0.3; I.attack.pressed = false; }
@@ -590,6 +670,7 @@ function updatePlayer(dt) {
   P.y += (gy - P.y) * Math.min(1, dt * (gy > P.y ? 18 : 11));
   m.root.position.set(P.x, P.y, P.z);
   m.root.rotation.y = P.face;
+  m.root.visible = P.invuln > 0 ? Math.floor(P.invuln * 14) % 2 === 0 : true;
   // body language: lean into speed, bank into turns
   const speed = Math.hypot(P.vx, P.vz);
   const turn = Math.atan2(Math.sin(P.face - prevFace), Math.cos(P.face - prevFace)) / dt;
@@ -697,6 +778,13 @@ function meleeHits(s) {
     any = true;
     hitDummy(d, dx / (dist || 1), dz / (dist || 1), st.dmg, st.heavy, WEAPONS.skyblade.knock);
   }
+  for (const f of foes.targets()) {
+    const dx = f.x - P.x, dz = f.z - P.z, dist = Math.hypot(dx, dz);
+    if (dist > st.range + f.D.r) continue;
+    const da = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - faceA), Math.cos(Math.atan2(dx, dz) - faceA)));
+    if (da > half + 0.25) continue;
+    if (foes.hit(f, dx / (dist || 1), dz / (dist || 1), st.dmg, st.heavy, WEAPONS.skyblade.knock)) any = true;
+  }
   if (any) { stop = st.heavy ? CONFIG.feel.hitStop * 2 : CONFIG.feel.hitStop; shake(st.heavy ? 0.5 : 0.28); }
 }
 
@@ -749,7 +837,14 @@ function updateProjectiles(dt) {
     let done = false, hitD = null;
     for (const d of world.dummies) if (Math.hypot(d.x - p.x, d.z - p.z) < d.r + S.size && p.y < d.root.position.y + 1.6) { hitD = d; break; }
     const gy = world.groundAt(p.x, p.z);
-    if (hitD) {
+    let hitF = null;
+    if (!hitD) for (const f of foes.targets()) if (Math.hypot(f.x - p.x, f.z - p.z) < f.D.r + S.size + 0.1 && p.y < f.y + (f.kind === 'bellfish' ? 2.4 : 1.4)) { hitF = f; break; }
+    if (hitF) {
+      const l = Math.hypot(p.vx, p.vz) || 1;
+      foes.hit(hitF, p.vx / l, p.vz / l, S.dmg, false, S.knock);
+      stop = Math.max(stop, 0.02);
+      done = true; hitD = hitF;
+    } else if (hitD) {
       const l = Math.hypot(p.vx, p.vz) || 1;
       hitDummy(hitD, p.vx / l, p.vz / l, S.dmg, false, S.knock);
       stop = Math.max(stop, 0.02);
@@ -891,9 +986,13 @@ function updateCamera(dt, t) {
 let last = performance.now(), time = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  let dt = Math.min(0.05, (now - last) / 1000);
+  const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (paused) { post.render(); return; }
+  if (!paused) tick(dt);
+  post.render();
+}
+// one step of the game (without drawing)
+function tick(dt) {
   time += dt;
   ui.keyFrame();
   watchFrames(dt);
@@ -904,6 +1003,7 @@ function frame(now) {
     if (ui.input.tap) { if (P.state === 'move' && !ui.input.ranged.down) walkTo(ui.input.tap.x, ui.input.tap.y); ui.input.tap = null; }
     updatePlayer(simDt);
     updateProjectiles(simDt);
+    foes.update(simDt, camera);
   } else {
     walkPose(dt, 0);
     P.model.root.position.set(P.x, P.y, P.z);
@@ -925,16 +1025,25 @@ function frame(now) {
     aimMark.position.set(P.x, P.y + 0.06, P.z);
     aimMark.rotation.y = Math.atan2(d.x, d.z);
   }
+  // the Seep announces itself the first time you come near
+  if (started && !intro && !P.seenSeep && Math.hypot(P.x - world.seep.x, P.z - world.seep.z) < world.seep.r + 3.5) { P.seenSeep = true; ui.titleCard(SEEP.name, 'Lanternhold', SEEP.line); }
   // hint when you first reach the training ground
   if (started && !intro && Math.hypot(P.x - world.dummies[1].x, P.z - world.dummies[1].z) < 6) ui.showHint('attack', TEXT.hintAttack, 7000);
   world.update(dt, time, P);
   sparks.update(dt);
   bits.update(dt);
   updateCamera(dt, time);
-  post.final.uniforms.flash.value = flashT = Math.max(0, flashT - dt * 3);
+  // the screen: a red pulse when you're hurt, colour draining and a fade to black when you fall, and back
+  hurtFlash = Math.max(0, hurtFlash - dt * 3.5);
+  if (P.waking) { P.waking = Math.max(0, P.waking - dt * 1.1); fade = P.waking; }
+  const FU = post.final.uniforms;
+  if (fade > 0) { FU.flashCol.value.setRGB(0.02, 0.01, 0.05); FU.flash.value = fade; }
+  else { FU.flashCol.value.setRGB(0.85, 0.08, 0.16); FU.flash.value = hurtFlash * 0.22; }
+  FU.sat.value = 1.08 * deadSat;
+  FU.vig.value = 0.42 + (1 - deadSat) * 0.4 + hurtFlash * 0.25;
   ui.setHearts(P.hp, P.maxHp);
+  ui.setShards(P.shards);
   sound.update();
-  post.render();
 }
 
 // ===========================================================================
@@ -946,6 +1055,16 @@ try {
   sparks = createSparks(scene, 700);
   bits = createBits(scene, 320);
   world.fx.sparks = sparks;
+  const proj = new V3();
+  foes = createFoes({
+    scene, world, P, sparks, bits, sound,
+    hurtPlayer, shake, hitStop: (t) => { stop = Math.max(stop, t); },
+    number: (text, x, y, z, heavy) => { proj.set(x, y, z).project(camera); ui.number(text, (proj.x + 1) / 2 * view.w, (1 - proj.y) / 2 * view.h, heavy); },
+    addSkyglass: (n) => { P.shards += n; ui.setShards(P.shards, true); },
+    heal: (n) => { P.hp = Math.min(P.maxHp, P.hp + n); },
+    toast: (t) => ui.toast(t),
+    playerDead: () => P.state === 'dead',
+  });
   scene.add(aimMark, tapRing);
   ui = createUI({
     canvas, prefs,
@@ -977,7 +1096,7 @@ try {
     intro = { t: 0, skippable: false };
     ui.input.any = false;
   });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, world, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, foes, world, hurtPlayer, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

@@ -58,6 +58,14 @@ body.playing .hud, body.playing .pad { opacity: 1; }
 .heart { width: 30px; height: 26px; display: block; image-rendering: pixelated; }
 .heart svg { width: 100%; height: 100%; display: block; }
 .hearts { gap: 3px; }
+.hearts.hurt { animation: heartShake 0.4s ease; }
+@keyframes heartShake { 15% { transform: translateX(-5px); } 35% { transform: translateX(4px); } 55% { transform: translateX(-3px); } 75% { transform: translateX(2px); } }
+.shards { position: absolute; left: var(--pad-l); top: calc(var(--pad-t) + 34px); display: flex; align-items: center; gap: 6px; padding: 3px 10px 3px 6px; border-radius: 999px;
+  background: rgba(20, 14, 44, 0.38); border: 1px solid rgba(159, 243, 255, 0.25); font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; color: #dffbff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+.shards .sIc { width: 10px; height: 15px; display: block; filter: drop-shadow(0 0 4px rgba(159, 243, 255, 0.7)); }
+.shards .sIc svg { width: 100%; height: 100%; display: block; }
+.shards.gain { animation: shardGain 0.35s ease; }
+@keyframes shardGain { 40% { transform: scale(1.18); border-color: rgba(159, 243, 255, 0.8); } }
 .pauseBtn { position: absolute; right: var(--pad-r); top: var(--pad-t); width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; pointer-events: auto; transition: transform 0.15s; }
 .pauseBtn svg { width: 20px; height: 20px; }
 .pauseBtn:active { transform: scale(0.92); }

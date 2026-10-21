@@ -27,6 +27,7 @@ const ICON = {
   roll: '<svg viewBox="0 0 48 48"><path d="M24 9a15 15 0 1 1-14.2 10.2" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" fill="none"/><path d="M6 12l4.5 8.5 8.5-4.5" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="24" cy="24" r="4.5" fill="currentColor"/></svg>',
   spark: '<svg viewBox="0 0 48 48"><path d="M24 5l4 14 14 5-14 5-4 14-4-14-14-5 14-5z" fill="currentColor"/></svg>',
   lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5" fill="currentColor"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2.4" fill="none"/></svg>',
+  talk: '<svg viewBox="0 0 48 48"><path d="M9 12h30a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4H22l-8 7v-7H9a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4z" fill="currentColor"/><circle cx="16" cy="23" r="2.6" fill="#1d1b4a"/><circle cx="24" cy="23" r="2.6" fill="#1d1b4a"/><circle cx="32" cy="23" r="2.6" fill="#1d1b4a"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/></svg>',
 };
 
@@ -136,6 +137,7 @@ export function createUI(opts) {
   function startButton(e, btn) {
     e.preventDefault();
     input.any = true;
+    if (talk.lines || performance.now() - talk.ended < 400) return;
     if (btn === bRoll) { input.roll.pressed = true; pulse(bRoll); return; }
     if (btn === bAbility) { pulse(bAbility); return; }
     const st = btnFor(btn);
@@ -181,7 +183,7 @@ export function createUI(opts) {
   }
   canvas.addEventListener('pointerdown', (e) => {
     input.any = true;
-    if (opts.isPaused()) return;
+    if (opts.isPaused() || talk.lines || performance.now() - talk.ended < 400) return;
     const p = stagePt(e);
     if (e.pointerType === 'mouse') {
       // desktop: left = swing, right = sling, toward the cursor
@@ -260,6 +262,7 @@ export function createUI(opts) {
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     input.any = true;
+    if (talk.lines || performance.now() - talk.ended < 400) return;   // keys go to the conversation, not the apprentice
     if (k === 'escape' || k === 'p') { opts.isPaused() ? resume() : pause(); return; }
     if (keys[k]) return;
     keys[k] = true;
@@ -308,6 +311,81 @@ export function createUI(opts) {
     if (gained) { shards.classList.remove('gain'); void shards.offsetWidth; shards.classList.add('gain'); }
   }
   function hurt() { hearts.classList.remove('hurt'); void hearts.offsetWidth; hearts.classList.add('hurt'); }
+
+  // ----- the current goal: one quiet line under the hearts -----
+  const quest = el('div', 'quest', '<i class="qDot"></i><span></span>');
+  hud.appendChild(quest);
+  let questT = null;
+  function setObjective(text) {
+    if (!text) { quest.classList.remove('on'); return; }
+    quest.querySelector('span').textContent = text;
+    quest.classList.remove('on', 'fresh'); void quest.offsetWidth; quest.classList.add('on', 'fresh');
+    clearTimeout(questT);
+    questT = setTimeout(() => quest.classList.remove('fresh'), 4500);
+  }
+
+  // ----- dialogue: a glass panel at the bottom; tap (or Space) to show the rest or go on -----
+  const dlg = el('div', 'dlg hidden', '<div class="dlgBox"><div class="dlgName"></div><div class="dlgText"></div><div class="dlgMore"></div></div>');
+  root.appendChild(dlg);
+  const talk = { lines: null, i: 0, shown: 0, full: '', done: null, last: 0, ended: -1e9 };
+  function showLine() {
+    const L = talk.lines[talk.i];
+    const name = dlg.querySelector('.dlgName');
+    name.textContent = L.who || '';
+    name.style.color = L.color || '';
+    name.classList.toggle('none', !L.who);
+    talk.full = L.text; talk.shown = 0;
+    dlg.querySelector('.dlgText').textContent = '';
+    dlg.classList.remove('more');
+    opts.sfx && opts.sfx('blip');
+  }
+  function say(lines) {
+    return new Promise((resolve) => {
+      talk.lines = lines; talk.i = 0; talk.done = resolve;
+      document.body.classList.add('talking');
+      dlg.classList.remove('hidden');
+      // let go of anything held
+      for (const st of [input.attack, input.ranged]) { st.down = false; st.aim.active = false; st.pressed = false; }
+      input.move.x = input.move.y = 0; input.move.active = false; input.roll.pressed = false; input.tap = null;
+      touches.clear(); joy.style.display = 'none'; aimRing.style.display = 'none';
+      pad.querySelectorAll('.held').forEach((b) => b.classList.remove('held'));
+      showLine();
+    });
+  }
+  function advance() {
+    if (!talk.lines || performance.now() - talk.last < 140) return;
+    talk.last = performance.now();
+    if (talk.shown < talk.full.length) { talk.shown = talk.full.length; return; }
+    talk.i++;
+    if (talk.i < talk.lines.length) { showLine(); return; }
+    dlg.classList.add('hidden');
+    document.body.classList.remove('talking');
+    input.roll.pressed = false; input.attack.pressed = false; input.attack.down = false;
+    const done = talk.done; talk.lines = null; talk.done = null; talk.ended = performance.now();
+    done && done();
+  }
+  dlg.addEventListener('pointerdown', (e) => { e.preventDefault(); advance(); });
+  window.addEventListener('keydown', (e) => { if (talk.lines && [' ', 'enter', 'j'].includes(e.key.toLowerCase())) { e.preventDefault(); advance(); } });
+  function talkFrame(dt) {
+    if (!talk.lines || talk.shown >= talk.full.length) return;
+    const before = Math.floor(talk.shown);
+    talk.shown = Math.min(talk.full.length, talk.shown + dt * 48);
+    if (Math.floor(talk.shown) !== before) {
+      dlg.querySelector('.dlgText').textContent = talk.full.slice(0, Math.floor(talk.shown));
+      if (Math.floor(talk.shown) % 3 === 0) opts.sfx && opts.sfx('voice');
+    }
+    if (talk.shown >= talk.full.length) dlg.classList.add('more');
+  }
+
+  // ----- context: near someone you can talk to, the sword button becomes "Talk" -----
+  let ctxKind = null;
+  function setContext(kind) {
+    if (kind === ctxKind) return;
+    ctxKind = kind;
+    bAttack.querySelector('.ic').innerHTML = kind === 'talk' ? ICON.talk : ICON.sword;
+    bAttack.classList.toggle('ctx', !!kind);
+    bAttack.setAttribute('aria-label', kind === 'talk' ? 'Talk' : 'Attack');
+  }
 
   // ----- hints: small, once, then gone -----
   let hintKey = null, hintT = null;
@@ -382,7 +460,7 @@ export function createUI(opts) {
         <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
         <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
       </details>
-      <div class="foot">Riftfall v${VERSION} · Prologue, round 2</div>
+      <div class="foot">Riftfall v${VERSION} · Prologue, round 3</div>
     </div>`;
   root.appendChild(sheet);
   function syncSheet() {
@@ -435,7 +513,7 @@ export function createUI(opts) {
   }
 
   return {
-    input, setHearts, setShards, hurt, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
+    input, setHearts, setShards, hurt, setObjective, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

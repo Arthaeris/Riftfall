@@ -1,5 +1,5 @@
 /* Riftfall — data.js
-   Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. (Pushed by Claude.) */
+   Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
 export const VERSION = '0.3.0';
 

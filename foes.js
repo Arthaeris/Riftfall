@@ -190,7 +190,7 @@ export function createFoes(ctx) {
       if (Math.random() < 0.35) sparks.spawn({ x: o.x, y: o.y, z: o.z, life: 0.3, size: 0.13, color: '#ff8fd0', glow: 1.4, drag: 5 });
       let pop = o.life <= 0;
       if (!pop && Math.hypot(P.x - o.x, P.z - o.z) < o.r + 0.32 && Math.abs(P.y + 0.8 - o.y) < 0.9) { if (ctx.hurtPlayer(o.dmg, o.x, o.z)) pop = true; }
-      if (!pop && (world.solidAt(o.x, o.z, 0.05) || gy > o.y)) pop = true;
+      if (!pop && world.shotBlocked(o.x, o.y, o.z, 0.1)) pop = true;   // houses, trees, the crystal wall: orbs stop at anything solid
       if (pop) {
         for (let k = 0; k < 6; k++) { const a = Math.random() * TAU; sparks.spawn({ x: o.x, y: o.y, z: o.z, vx: Math.cos(a) * 1.5, vy: Math.random() * 1.5, vz: Math.sin(a) * 1.5, life: 0.3, size: 0.12, color: '#ffc6ea', glow: 2 }); }
         if (o.life > 0) sound.sfx('orbPop');
@@ -425,7 +425,7 @@ export function createFoes(ctx) {
     const inside = Math.hypot(P.x - S.x, P.z - S.z);
     if (seep.state === 'idle') {
       world.setSeepPower(1 + Math.sin(performance.now() / 600) * 0.15);
-      if (inside < S.r - 1.0 && !ctx.playerDead()) seal();
+      if (inside < S.r - 1.0 && !ctx.playerDead() && world.shardOn()) seal();
     } else if (seep.state === 'rising') {
       seep.rise = Math.min(1, seep.t / 0.9);
       world.setSeepPower(1 + seep.rise);
@@ -455,6 +455,7 @@ export function createFoes(ctx) {
             unseal(false);
             sound.sfx('clear');
             ctx.toast(TEXT.seepClear);
+            if (ctx.onSeepClear) ctx.onSeepClear();
             for (let i = 0; i < 8; i++) dropSliver(S.x, S.h + 1.4, S.z);
           }
         }

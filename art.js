@@ -1204,6 +1204,94 @@ export function buildFoe(kind) {
     // little mouths all over her lower shell
     for (let k = 0; k < 14; k++) { const a = Math.random() * TAU, h = 0.3 + Math.random() * 0.8; K.box(core, 0.22, 0.2, 0.22, shell[k % 5], Math.cos(a) * 1.5, h, Math.sin(a) * 1.5); }
     root.add(blob(4.2, 4.2));
+  } else if (kind === 'bubblebishop') {
+    // a drowned priest: a pale robe that fades into tatters, a tall mitre of shell, a lantern of trapped air,
+    // and a bubble around it all that turns a blade
+    const fl = pivot(body, 0, 0, 0);
+    out.float = fl;
+    K.box(fl, 0.6, 0.7, 0.5, '#d8d4e8', 0, 0.55, 0); K.box(fl, 0.5, 0.3, 0.42, '#c8c4d8', 0, 0.12, 0);
+    for (let k = 0; k < 5; k++) K.box(fl, 0.12, 0.3, 0.12, '#b8b4c8', -0.24 + k * 0.12, -0.12 - (k % 2) * 0.1, 0.1);
+    K.box(fl, 0.62, 0.08, 0.52, '#8a6ab0', 0, 0.85, 0);   // a stole
+    K.box(fl, 0.1, 0.5, 0.04, '#e0b85a', 0, 0.6, 0.26);
+    K.box(fl, 0.34, 0.32, 0.32, '#c8d4c8', 0, 1.06, 0.02);   // a drowned face, green-grey
+    for (const x of [-0.08, 0.08]) K.box(fl, 0.06, 0.06, 0.02, '#9ff3ff', x, 1.08, 0.18, 2.6);
+    K.box(fl, 0.3, 0.36, 0.28, '#f2ecdf', 0, 1.38, 0); K.box(fl, 0.2, 0.2, 0.2, '#f2ecdf', 0, 1.62, 0); K.box(fl, 0.08, 0.14, 0.08, '#e0b85a', 0, 1.78, 0);
+    out.lantern = K.box(fl, 0.16, 0.2, 0.16, '#c6f8ff', 0.36, 0.5, 0.2, 2.2);
+    const bm = new THREE.MeshBasicMaterial({ color: new THREE.Color('#bff6ff').multiplyScalar(1.3), transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending });
+    out.bubble = new THREE.Mesh(new THREE.IcosahedronGeometry(1.05, 1), bm);
+    out.bubble.position.y = 0.85; out.bubble.castShadow = false;
+    fl.add(out.bubble);
+    root.add(blob(0.7, 0.7));
+  } else if (kind === 'rustgill') {
+    // a fish-headed knight in a rusted helm, with a trident and a shield made from a ship's wheel
+    const rust = ['#8a5a3a', '#7a4a32', '#9a6a42'];
+    K.box(body, 0.5, 0.5, 0.36, '#4a6a6a', 0, 0.95, 0); K.box(body, 0.54, 0.24, 0.4, rust[0], 0, 1.15, 0);
+    for (const x of [-0.12, 0.12]) { K.box(body, 0.16, 0.6, 0.18, '#3a5a5a', x, 0.35, 0); K.box(body, 0.18, 0.14, 0.24, rust[1], x, 0.07, 0.03); }
+    out.head = pivot(body, 0, 1.3, 0);
+    K.box(out.head, 0.44, 0.38, 0.5, '#5a8a8a', 0, 0.18, 0.02); K.box(out.head, 0.48, 0.2, 0.54, rust[2], 0, 0.3, 0.02);
+    K.box(out.head, 0.3, 0.14, 0.2, '#3a5a5a', 0, 0.04, 0.26); for (const x of [-0.24, 0.24]) K.box(out.head, 0.06, 0.1, 0.1, '#ffd36b', x, 0.2, 0.1, 2.4);
+    K.box(out.head, 0.06, 0.3, 0.3, '#e0573f', 0, 0.5, -0.05);   // a crest
+    out.shieldArm = pivot(body, -0.36, 1.0, 0.1);
+    const sh = pivot(out.shieldArm, 0, -0.1, 0.32);
+    out.shield = sh;
+    K.box(sh, 0.9, 0.9, 0.08, '#8b5e3c', 0, 0, 0); for (let k = 0; k < 4; k++) K.box(sh, 0.08, 1.24, 0.08, '#6b4a33', 0, 0, 0.02).rotation.z = k * Math.PI / 4;
+    K.box(sh, 0.22, 0.22, 0.12, '#c9a24a', 0, 0, 0.06);
+    out.spearArm = pivot(body, 0.36, 1.0, 0);
+    const sp = pivot(out.spearArm, 0, -0.3, 0.1);
+    sp.rotation.x = Math.PI / 2;
+    K.box(sp, 0.06, 0.06, 1.8, '#6b4a33', 0, 0, 0.3); for (const x of [-0.1, 0, 0.1]) K.box(sp, 0.04, 0.04, 0.3, '#c8d4dc', x, 0, 1.3);
+    K.box(sp, 0.26, 0.04, 0.04, '#c8d4dc', 0, 0, 1.15);
+    out.spear = sp;
+    root.add(blob(0.9, 0.9));
+  } else if (kind === 'mudmimic') {
+    // harbour mud in a heap, with a mouth that opens all the way round, and little eyes that peek
+    const mud = ['#5a4a3a', '#6a5a46', '#4e4032'];
+    out.heap = pivot(body, 0, 0, 0);
+    K.box(out.heap, 1.0, 0.24, 0.9, mud[0], 0, 0.12, 0); K.box(out.heap, 0.7, 0.24, 0.66, mud[1], 0.05, 0.32, 0); K.box(out.heap, 0.4, 0.16, 0.36, mud[2], -0.05, 0.48, 0.02);
+    out.jaw = pivot(body, 0, 0.3, 0.3);
+    for (let k = 0; k < 5; k++) K.box(out.jaw, 0.08, 0.14, 0.08, '#e8e0d0', -0.24 + k * 0.12, -0.04, 0.02);
+    K.box(out.jaw, 0.7, 0.1, 0.12, mud[2], 0, -0.12, 0);
+    out.eyes = [-0.14, 0.14].map((x) => K.box(out.heap, 0.08, 0.08, 0.06, '#ffd36b', x, 0.5, 0.2, 2.2));
+    root.add(blob(1.0, 0.9));
+  } else if (kind === 'bellringer') {
+    // the great bell hanging on its chains, and under it the Bellringer: a long pale body that never let go
+    // of the rope, arms longer than it is tall, a face like a drowned moon, lamps for eyes
+    const bronze = ['#b07a3a', '#a06a32', '#c88a43'];
+    out.bell = pivot(body, 0, 0, 0);
+    const bl = out.bell;
+    K.box(bl, 4.2, 0.5, 4.2, bronze[1], 0, 0.25, 0);
+    K.box(bl, 3.8, 1.2, 3.8, bronze[0], 0, 1.05, 0);
+    K.box(bl, 3.3, 1.2, 3.3, bronze[2], 0, 2.2, 0);
+    K.box(bl, 2.6, 0.9, 2.6, bronze[0], 0, 3.2, 0);
+    K.box(bl, 1.6, 0.6, 1.6, bronze[1], 0, 3.9, 0);
+    for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + Math.PI / 4; K.box(bl, 0.3, 0.9, 0.3, bronze[1], Math.cos(a) * 0.5, 4.5, Math.sin(a) * 0.5); }
+    // verdigris and barnacles
+    for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; K.box(bl, 0.4, 0.3, 0.2, k % 3 ? '#5aa08a' : '#d8d0c4', Math.cos(a) * 1.92, 0.7 + (k % 4) * 0.5, Math.sin(a) * 1.92).rotation.y = -a; }
+    // the glow it takes on as it heats: a mesh over the bell, faded in by the fight
+    const hb = new THREE.Mesh(new THREE.BoxGeometry(4.0, 3.9, 4.0), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff7a2a').multiplyScalar(1.6), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    hb.position.y = 2.0; hb.castShadow = false; bl.add(hb);
+    out.heat = hb;
+    // chains up into the dark
+    for (const [x, z] of [[-0.6, 0], [0.6, 0], [0, -0.6], [0, 0.6]]) for (let k = 0; k < 8; k++) K.box(bl, 0.14, 0.4, 0.14, '#4a4a52', x, 5.1 + k * 0.45, z, 0).rotation.y = k * 0.8;
+    // the Bellringer herself, mostly hidden while the bell is down
+    const her = pivot(body, 0, 0, 0);
+    out.her = her;
+    K.box(her, 1.0, 1.6, 0.8, '#c8d0d4', 0, 1.1, 0); K.box(her, 0.8, 0.4, 0.7, '#b8c0c4', 0, 2.1, 0);
+    out.face = pivot(her, 0, 2.6, 0.1);
+    K.box(out.face, 0.9, 0.9, 0.8, '#d8e0e4', 0, 0, 0);
+    for (const x of [-0.22, 0.22]) K.box(out.face, 0.2, 0.2, 0.06, '#ffe9a8', x, 0.05, 0.42, 3.0);
+    K.box(out.face, 0.3, 0.06, 0.06, '#5a6a74', 0, -0.25, 0.42);
+    for (let k = 0; k < 6; k++) K.box(out.face, 0.12, 0.6 + (k % 3) * 0.2, 0.12, '#7a8a94', -0.35 + k * 0.14, -0.6, -0.3);   // hair like weed
+    out.heart = K.box(her, 0.4, 0.4, 0.3, '#9ff3ff', 0, 1.4, 0.42, 2.4);
+    out.arms = [-1, 1].map((sd) => {
+      const sh2 = pivot(her, sd * 0.6, 1.8, 0);
+      K.box(sh2, 0.24, 1.4, 0.24, '#c8d0d4', 0, -0.7, 0);
+      const el = pivot(sh2, 0, -1.4, 0);
+      K.box(el, 0.2, 1.4, 0.2, '#b8c0c4', 0, -0.7, 0);
+      for (const fz of [-0.08, 0, 0.08]) K.box(el, 0.06, 0.5, 0.06, '#a8b0b4', 0, -1.6, fz);
+      return { sh: sh2, el };
+    });
+    root.add(blob(4.6, 4.6));
   } else if (kind === 'lullabypod') {
     // a woven cocoon; light shows through its seams more and more until it hatches
     const silk = ['#d8cfe6', '#c9bedc', '#e6def0'];
@@ -1469,6 +1557,9 @@ const NPC_LOOKS = {
   tobin: { body: 'a', hair: 0, skin: '#d4a07c', hairColor: '#8a6a4a', tunic: '#e0b23a', trim: '#c79a28', scarf: '#3f6f8f', pants: '#3a3a48', boots: '#2f3a44' },
   wenna: { body: 'b', hair: 1, skin: '#f1c8a0', hairColor: '#a0522d', tunic: '#c46a4a', trim: '#f4ead2', scarf: '#f4ead2', pants: '#5a4a6a', boots: '#4a3020' },
   pip: { body: 'a', hair: 2, skin: '#f5d2b0', hairColor: '#e0a040', tunic: '#5fa8d6', trim: '#ffffff', scarf: '#e0573f', pants: '#4a5a8a', boots: '#5d3d26' },
+  hale: { body: 'a', hair: 0, skin: '#b8866a', hairColor: '#4a4a52', tunic: '#2f4a5a', trim: '#c9a24a', scarf: '#d8d0c4', pants: '#2a2a34', boots: '#1e1a18' },
+  jun: { body: 'b', hair: 1, skin: '#e8c0a0', hairColor: '#1a1a24', tunic: '#3f8a8a', trim: '#ffb38a', scarf: '#ffb38a', pants: '#2a4a5a', boots: '#3a3a44' },
+  peg: { body: 'b', hair: 3, skin: '#f0c8a8', hairColor: '#c86a4a', tunic: '#8a4a5a', trim: '#f4ead2', scarf: '#f4ead2', pants: '#4a3a4a', boots: '#3a2a20' },
   ennis: { body: 'a', hair: 0, skin: '#c99a78', hairColor: '#e8e4dc', tunic: '#4a5a3a', trim: '#c9a24a', scarf: '#8a4a2a', pants: '#3a3226', boots: '#2a1e18' },
 };
 export function buildNpc(kind) {
@@ -1498,6 +1589,25 @@ export function buildNpc(kind) {
     box(m.body, 0.4, 0.3, 0.29, '#f4ead2', 0, 0.36, 0.01);
     for (const [x, y] of [[-0.06, 0.05], [0.08, -0.12], [-0.1, -0.2]]) box(m.torso, 0.04, 0.04, 0.025, '#ffffff', x, y, 0.15);
     box(m.head, 0.42, 0.1, 0.42, '#e0573f', 0, 0.42, -0.01);
+  } else if (kind === 'hale') {
+    // the harbour-master: a peaked cap with a brass badge, a thick grey beard, a coiled rope over the shoulder
+    box(m.head, 0.44, 0.08, 0.5, '#1e2a34', 0, 0.42, 0.04);
+    box(m.head, 0.38, 0.14, 0.38, '#2f4a5a', 0, 0.5, -0.02);
+    box(m.head, 0.1, 0.07, 0.03, '#e0b85a', 0, 0.5, 0.18, 1.2);
+    box(m.head, 0.34, 0.18, 0.06, '#7a7a82', 0, 0.02, 0.18);
+    box(m.torso, 0.08, 0.5, 0.36, '#c8b28a', 0.12, 0.0, 0.0);
+  } else if (kind === 'jun') {
+    // the diver: goggles pushed up on her forehead, a knife at her belt, a coil of line
+    for (const x of [-0.09, 0.09]) box(m.head, 0.12, 0.1, 0.06, '#ffb38a', x, 0.3, 0.19, 1.2);
+    box(m.head, 0.42, 0.05, 0.42, '#3a3a44', 0, 0.3, 0);
+    box(m.body, 0.06, 0.2, 0.06, '#c8d4dc', 0.2, 0.26, 0.1);
+  } else if (kind === 'peg') {
+    // the innkeeper: an apron, sleeves rolled up, and a ladle that goes everywhere with her
+    box(m.torso, 0.32, 0.44, 0.02, '#f4ead2', 0, -0.1, 0.135);
+    box(m.body, 0.42, 0.32, 0.29, '#f4ead2', 0, 0.36, 0.01);
+    const ld = pivot(m.handR, 0, 0, 0.02);
+    ld.rotation.x = Math.PI * 0.5 - 0.2;
+    box(ld, 0.04, 0.04, 0.4, '#8a8a92', 0, 0, 0.18); box(ld, 0.12, 0.06, 0.12, '#8a8a92', 0, -0.02, 0.4);
   } else if (kind === 'ennis') {
     // the lamplighter: a flat cap, a white moustache, and a long pole with a little flame at its tip
     box(m.head, 0.44, 0.07, 0.48, '#3a4a2e', 0, 0.42, 0.03);
@@ -1803,6 +1913,17 @@ export function buildKeepsake(kind) {
     b.box(0.06, 0.06, 0.03, '#d8c8b0', -0.1, 0.24, 0.12, { rotZ: 0.4 });   // the chip
   } else if (kind === 'spoon') {
     b.box(0.05, 0.03, 0.34, '#c9a24a', 0, 0.03, 0); b.box(0.14, 0.05, 0.14, '#e0b85a', 0, 0.04, 0.2);
+  } else if (kind === 'boat') {
+    // a paper boat: a folded hull and a little peaked sail, bone dry
+    b.box(0.4, 0.08, 0.16, '#f4f0e6', 0, 0.06, 0); b.box(0.3, 0.06, 0.12, '#e8e2d4', 0, 0.12, 0);
+    b.box(0.03, 0.2, 0.14, '#f8f4ec', 0, 0.24, 0, { rotX: 0.0 }); b.box(0.02, 0.1, 0.08, '#e0dace', 0, 0.36, 0);
+  } else if (kind === 'button') {
+    b.box(0.22, 0.05, 0.22, '#f2c43a', 0, 0.06, 0, { top: '#ffd85a' });
+    for (const [x, z] of [[-0.04, -0.04], [0.04, -0.04], [-0.04, 0.04], [0.04, 0.04]]) b.box(0.03, 0.02, 0.03, '#8a6a1a', x, 0.09, z);
+  } else if (kind === 'puddle') {
+    // a little jar with a puddle in it, rippling with rain that isn't there
+    b.box(0.2, 0.26, 0.2, '#cfe6ea', 0, 0.13, 0); b.box(0.16, 0.04, 0.16, '#8a6a4a', 0, 0.28, 0);
+    b.box(0.16, 0.1, 0.16, '#5fb2d4', 0, 0.07, 0, { glow: 0.9 });
   } else {
     b.box(0.34, 0.12, 0.16, '#c88a43', 0, 0.06, 0, { top: '#e8b871' }); b.box(0.2, 0.08, 0.12, '#d9a35b', 0.05, 0.14, 0);
   }
@@ -1849,6 +1970,87 @@ export function buildGate(w = 2.2) {
   b.box(w, 0.1, 0.1, '#2c2c36', 0, 1.25, 0); b.box(w, 0.1, 0.1, '#2c2c36', 0, 0.35, 0);
   for (let k = 0; k < 7; k++) b.box(0.07, 1.25, 0.07, '#3a3a44', -w / 2 + 0.15 + k * (w - 0.3) / 6, 0.75, 0);
   b.box(0.22, 0.22, 0.12, '#c9a24a', 0, 0.8, 0.06);
+  const m = b.mesh(); m.matrixAutoUpdate = true; m.castShadow = true;
+  return m;
+}
+
+
+// ---------------------------------------------------------------------------
+// The Glass Sea: the Lantern (Tobin's boat), and what's on Brinemoor and in the Sunken Belfry
+// ---------------------------------------------------------------------------
+// the Lantern: a small sailing boat with a blue hull, a cream sail with the lamp on it, and a lit lamp at the bow
+export function buildSailboat() {
+  const b = new Batch(501), g = new Batch(502);
+  const hull = '#2f5a7a', rim = '#e8e0d0', wood = '#a6764d';
+  // the hull: narrowing to the bow (+z), a keel, a rim of pale wood
+  for (let k = 0; k < 7; k++) {
+    const z = -1.5 + k * 0.5, w = 1.5 - Math.max(0, k - 3) * 0.3 - (k === 0 ? 0.2 : 0);
+    b.box(w, 0.6, 0.52, hull, 0, 0.1, z, { top: '#3a6a8a' });
+    b.box(w + 0.08, 0.1, 0.54, rim, 0, 0.44, z);
+  }
+  b.box(0.2, 0.5, 3.6, '#24465e', 0, -0.25, 0);
+  b.box(1.2, 0.08, 2.6, wood, 0, 0.36, -0.2);
+  for (let k = 0; k < 5; k++) b.box(1.18, 0.02, 0.06, '#8b5e3c', 0, 0.41, -1.3 + k * 0.5);
+  b.box(0.4, 0.3, 0.12, '#5d3d26', 0, 0.3, -1.85);                     // the rudder
+  b.box(0.12, 0.12, 0.6, '#5d3d26', 0, 0.6, -1.6, { rotX: -0.3 });      // the tiller
+  // the mast, the boom and the sail
+  b.box(0.14, 3.2, 0.14, '#6b4a33', 0, 2.0, 0.3);
+  b.box(0.1, 0.1, 1.9, '#6b4a33', 0, 0.95, -0.55);
+  const sail = new Batch(503);
+  sail.box(0.04, 2.3, 1.7, '#f2ecdf', 0, 0, 0, { jitter: 0.02 });
+  for (let k = 0; k < 4; k++) sail.box(0.05, 0.04, 1.7, '#d8d0bc', 0, -0.9 + k * 0.6, 0);
+  // the lamp emblem on the sail
+  sail.box(0.06, 0.5, 0.3, '#2f5a7a', 0, 0.2, 0.05); sail.box(0.06, 0.12, 0.42, '#2f5a7a', 0, 0.5, 0.05); sail.box(0.07, 0.2, 0.16, '#ffd29a', 0, 0.18, 0.05);
+  const sm = sail.mesh(); sm.matrixAutoUpdate = true; sm.position.set(0, 2.1, -0.55);
+  // the bow lamp on its post
+  b.box(0.08, 0.8, 0.08, '#3a3a44', 0, 0.8, 1.55); b.box(0.24, 0.06, 0.24, '#3a3a44', 0, 1.22, 1.55); b.box(0.2, 0.05, 0.2, '#3a3a44', 0, 0.92, 1.55);
+  g.box(0.16, 0.24, 0.16, '#ffd29a', 0, 1.07, 1.55, { glow: 3.4, jitter: 0 });
+  // a pennant at the masthead
+  const pn = new Batch(504); pn.box(0.03, 0.22, 0.6, '#e0573f', 0, 0, -0.3);
+  const pm = pn.mesh(); pm.matrixAutoUpdate = true; pm.position.set(0, 3.55, 0.3);
+  const root = new THREE.Group();
+  root.add(b.mesh(), sm, pm);
+  const gm = g.mesh(MAT.glow); gm.castShadow = false; root.add(gm);
+  root.userData = { sail: sm, pennant: pm };
+  return root;
+}
+// a little island seen from the sea: a grid of heights and kinds, drawn a block per cell at a given cell size
+export function buildMiniIsland(cells, n, cell, base) {
+  const b = new Batch(600 + n);
+  const kindCol = { grass: ['#5f9c46', '#67a54b', '#58923f'], sand: ['#ead6a6', '#e5cf9b'], stone: ['#a19b8f', '#958f83'], path: ['#c9b48d'], wood: ['#a6764d'], roof: ['#a8473d', '#3f7a6a', '#7a4a8a'], dark: ['#3a3644'], white: ['#f2ece0'], glass: ['#bff6ff'], ash: ['#4a4450', '#5a5460'], salt: ['#f2eee6', '#e8e4dc'] };
+  const r = rng(77 + n);
+  for (const c of cells) {
+    if (c.h <= 0) continue;
+    const cols = kindCol[c.kind] || kindCol.grass;
+    const col = cols[Math.floor(r() * cols.length)];
+    b.box(cell, c.h + base, cell, col, c.x, (c.h - base) / 2, c.z, { top: col, ao: 0.6 });
+  }
+  return b.mesh();
+}
+// the Belfry's tower rising out of the drowned square, its great bell hanging in the open top
+export function buildBelfryTower(b, g, x, y, z) {
+  b.push(x, y, z);
+  const st = ['#b4aeb8', '#a8a2ae', '#c0bac4'];
+  for (let k = 0; k < 7; k++) b.box(5 - k * 0.12, 1.0, 5 - k * 0.12, st[k % 3], 0, 0.5 + k, 0, { top: st[(k + 1) % 3] });
+  // weed and barnacles on the lower courses, where the tide reaches
+  for (let k = 0; k < 14; k++) b.box(0.3, 0.2, 0.2, k % 2 ? '#5a7a4a' : '#d8d0c4', (Math.random() - 0.5) * 4.8, 0.3 + Math.random() * 1.4, 2.5);
+  // the open bell chamber: four corner piers and a roof
+  for (const [px, pz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) b.box(0.7, 3.0, 0.7, st[0], px, 8.5, pz);
+  b.box(5.2, 0.4, 5.2, '#6a6676', 0, 10.2, 0);
+  for (let k = 0; k < 4; k++) b.box(4.4 - k * 1.1, 0.5, 4.4 - k * 1.1, '#3f5a6a', 0, 10.6 + k * 0.5, 0);
+  // the bell
+  b.box(1.6, 1.4, 1.6, '#b07a3a', 0, 8.3, 0, { top: '#c88a43' }); b.box(2.0, 0.3, 2.0, '#9a6a32', 0, 7.6, 0); b.box(0.6, 0.4, 0.6, '#9a6a32', 0, 9.1, 0);
+  // the door, at the foot, facing south, with an arch
+  b.box(1.6, 2.2, 0.2, '#2a2234', 0, 1.1, 2.52); b.box(2.0, 0.3, 0.3, st[1], 0, 2.3, 2.55);
+  b.box(0.1, 0.1, 0.1, '#e0b85a', 0.4, 1.1, 2.64);
+  b.pop();
+  g.box(0.5, 0.5, 0.06, '#9ff3ff', x, y + 4.4, z + 2.52, { glow: 1.4, jitter: 0 });   // a round window, lit from inside
+}
+// the jar you carry: blue-glazed, a cork, a cord; the water in it shows when it's full
+export function buildJar() {
+  const b = new Batch(510);
+  b.box(0.3, 0.32, 0.3, '#3f7f9a', 0, 0.16, 0, { top: '#4f8faa' }); b.box(0.2, 0.08, 0.2, '#3f7f9a', 0, 0.36, 0);
+  b.box(0.14, 0.08, 0.14, '#b08a5a', 0, 0.43, 0); b.box(0.32, 0.04, 0.32, '#e0b85a', 0, 0.26, 0);
   const m = b.mesh(); m.matrixAutoUpdate = true; m.castShadow = true;
   return m;
 }

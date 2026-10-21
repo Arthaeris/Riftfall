@@ -34,6 +34,10 @@ const ICON = {
   tether: '<svg viewBox="0 0 48 48"><path d="M9 39C17 31 21 27 27 21" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 5" fill="none"/><path d="M27 21l3-9 4 6 6 1-7 3-3 7z" fill="currentColor"/><path d="M33 8c4 0 7 3 7 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/><circle cx="9" cy="39" r="4" fill="currentColor"/></svg>',
   open: '<svg viewBox="0 0 48 48"><path d="M8 22h32v18H8z" fill="currentColor"/><path d="M8 22c0-8 6-12 16-12s16 4 16 12z" fill="currentColor" opacity=".7"/><rect x="21" y="24" width="6" height="8" rx="1.5" fill="#1d1b4a"/></svg>',
   light: '<svg viewBox="0 0 48 48"><path d="M24 6c4 6 9 10 9 17a9 9 0 0 1-18 0c0-7 5-11 9-17z" fill="currentColor"/><path d="M14 40h20M18 34h12" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg>',
+  jar: '<svg viewBox="0 0 48 48"><path d="M18 8h12v4l3 4c2 3 3 6 3 10v10c0 3-2 5-5 5H17c-3 0-5-2-5-5V26c0-4 1-7 3-10l3-4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path class="jarFill" d="M14.6 27h18.8v9c0 2-1 3-3 3H17.6c-2 0-3-1-3-3z" fill="currentColor"/></svg>',
+  sail: '<svg viewBox="0 0 48 48"><path d="M24 6v28" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M27 8c7 6 10 14 9 22H27z" fill="currentColor"/><path d="M21 12c-5 5-7 11-7 18h7z" fill="currentColor" opacity=".7"/><path d="M8 35h32l-5 7H13z" fill="currentColor"/></svg>',
+  dock: '<svg viewBox="0 0 48 48"><path d="M6 30h36M10 30v12M22 30v12M34 30v12" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/><path d="M24 6v16M17 15l7 7 7-7" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+  wait: '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="currentColor" stroke-width="3.5"/><path d="M24 14v10l7 5" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none"/><path d="M8 40c4-3 8-3 12 0s8 3 12 0 8-3 8-3" stroke="currentColor" stroke-width="3" fill="none"/></svg>',
   remember: '<svg viewBox="0 0 48 48"><path d="M24 8l4 10 11 1-8 7 3 11-10-6-10 6 3-11-8-7 11-1z" fill="currentColor"/></svg>',
   key: '<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M11 11l8 8m-3-3l2-2m-4 0l2-2" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
   rest: '<svg viewBox="0 0 48 48"><path d="M24 6c3 7 11 11 11 21a11 11 0 0 1-22 0c0-5 3-8 5-11 1 4 3 5 5 5-2-6 0-11 1-15z" fill="currentColor"/><path d="M24 27c2 3 5 5 5 9a5 5 0 0 1-10 0c0-3 3-5 5-9z" fill="#1d1b4a" opacity=".55"/><path d="M10 42h28" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg>',
@@ -245,7 +249,11 @@ export function createUI(opts) {
     bRanged.setAttribute('aria-label', tl.name);
     bRanged.classList.toggle('tool', cur !== 'sling');
     bRanged.classList.toggle('multi', list.length > 1);
+    bRanged.classList.toggle('jarFull', !!jarFull);
   }
+  let jarFull = false;
+  // the Tide Jar's water shows in its icon
+  function setJar(full) { jarFull = full; bRanged.classList.toggle('jarFull', !!full); }
   function releaseStick(t) {
     if (!t.stick) return;
     t.stick = false;
@@ -467,7 +475,7 @@ export function createUI(opts) {
     ctxKind = kind;
     bAttack.querySelector('.ic').innerHTML = ICON[kind] || ICON.sword;
     bAttack.classList.toggle('ctx', !!kind);
-    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep', rest: 'Rest', open: 'Open', light: 'Light', remember: 'Remember' }[kind] || 'Attack');
+    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep', rest: 'Rest', open: 'Open', light: 'Light', remember: 'Remember', sail: 'Sail', dock: 'Dock', wait: 'Wait for the tide' }[kind] || 'Attack');
   }
 
   // ----- the guardian's health, across the top of the screen -----
@@ -513,7 +521,10 @@ export function createUI(opts) {
   // ----- "You found ...": an item held up, its name, what it does. Tap to carry on. -----
   const getEl = el('div', 'itemGet hidden', '<div class="igCard glass"><div class="igIcon"></div><div class="kicker">You found</div><h3></h3><p></p><div class="igTap">Tap to continue</div></div>');
   root.appendChild(getEl);
+  let getHide = 0;
   function itemGet(name, line, icon) {
+    // a card shown right after another must not be hidden by the first one's fade-out
+    clearTimeout(getHide);
     $('.igIcon', getEl).innerHTML = icon || ICON.spark;
     $('h3', getEl).textContent = name;
     $('p', getEl).textContent = line;
@@ -527,7 +538,7 @@ export function createUI(opts) {
         if (e && e.type === 'keydown' && ![' ', 'enter', 'j'].includes(e.key.toLowerCase())) return;
         getEl.removeEventListener('pointerdown', done); window.removeEventListener('keydown', done, true);
         getEl.classList.add('out'); getEl.classList.remove('in');
-        setTimeout(() => getEl.classList.add('hidden'), 400);
+        getHide = setTimeout(() => getEl.classList.add('hidden'), 400);
         talk.lines = null; talk.ended = performance.now(); document.body.classList.remove('talking');
         resolve();
       };
@@ -553,6 +564,7 @@ export function createUI(opts) {
     </div>`;
   root.appendChild(bigMap);
   const bigCv = $('canvas', bigMap);
+  let lastBig = null;
   let mapBase = null, mapInfo = null, mapRot = 0, mapState = null, mapOpen = false, mapTick = 0, mapFog = null;
   const bases = {};   // one drawn map per place
   const S_PX = 6;   // pixels per world unit in the drawn base map
@@ -576,6 +588,8 @@ export function createUI(opts) {
       if (info.cave) c = k === 'rock' ? '#1c1826' : k === 'chasm' ? '#08060e' : k === 'water' ? '#3f7f96' : k === 'ledge' ? '#8a8496' : '#6f6a7c';
       else if (h <= 0.01) c = h < -1.2 ? '#2a6f8f' : h < -0.5 ? '#36869f' : '#47a3bb';
       else if (k === 'sand') c = '#ead6a6';
+      else if (k === 'wood') c = '#a6764d';
+      else if (k === 'street') c = '#7d8a84';
       else if (k === 'path') c = '#d2bd94';
       else if (k === 'stone') c = shadeHex('#a39d91', 0.9 + h * 0.03);
       else c = shadeHex('#5f9c46', 0.82 + Math.min(h, 6) * 0.06);
@@ -606,7 +620,7 @@ export function createUI(opts) {
     mapBase = cv;
     // a dungeon's map starts dark and fills in as you explore
     mapFog = null;
-    if (info.cave) { mapFog = document.createElement('canvas'); mapFog.width = mapFog.height = N * S_PX; const fg = mapFog.getContext('2d'); fg.fillStyle = '#0b0912'; fg.fillRect(0, 0, mapFog.width, mapFog.height); info.fogDone = new Uint8Array(info.seen.length); }
+    if (info.cave || info.fog) { mapFog = document.createElement('canvas'); mapFog.width = mapFog.height = N * S_PX; const fg = mapFog.getContext('2d'); fg.fillStyle = info.fog ? '#1c4658' : '#0b0912'; fg.fillRect(0, 0, mapFog.width, mapFog.height); info.fogDone = new Uint8Array(info.seen.length); }
     bases[key] = { mapBase, mapInfo, mapFog };
   }
   // clear the fog over cells you've seen
@@ -630,6 +644,7 @@ export function createUI(opts) {
     g.clearRect(0, 0, W, Hh);
     g.fillStyle = mapInfo.cave ? '#0b0912' : '#2a6f8f'; g.fillRect(0, 0, W, Hh);
     const ox = W / 2, oy = Hh / 2;
+    if (big) lastBig = { cx, cz, sc, ox, oy };
     g.save();
     g.translate(ox, oy); g.rotate(mapRot); g.scale(sc / S_PX, sc / S_PX);
     g.translate(-(cx - mapInfo.H0) * S_PX, -(cz - mapInfo.H0) * S_PX);
@@ -707,7 +722,8 @@ export function createUI(opts) {
     opts.onPause && opts.onPause();
     opts.sfx && opts.sfx('open');
     $('.mapSide h2', bigMap).textContent = mapState.title || 'Lanternhold';
-    $('.mapWarp', bigMap).classList.toggle('hidden', !(mapState.waystones || []).some((w) => w.lit));
+    $('.mapWarp', bigMap).classList.toggle('hidden', !(mapState.waystones || []).some((w) => w.lit) && !mapState.chart);
+    $('.mapWarp', bigMap).textContent = mapState.chart ? 'Tap the chart to set a course.' : 'Tap a lit waystone to travel there.';
     requestAnimationFrame(() => { const [a, b2, c] = bigCentre(); drawMap(bigCv, a, b2, c, true); });
   }
   function closeMap() {
@@ -720,14 +736,20 @@ export function createUI(opts) {
   bigMap.addEventListener('click', (e) => { if (e.target === bigMap || e.target.closest('[data-act="closeMap"]')) closeMap(); });
   // tap a lit waystone on the big map to travel there
   bigCv.addEventListener('pointerdown', (e) => {
-    if (!mapState || !mapState.waystones) return;
+    if (!mapState || (!mapState.waystones && !mapState.chart)) return;
     // where the tap is on the canvas, in the stage's own (unrotated) space
     const p = toStage(e.clientX, e.clientY);
     let ox = 0, oy = 0;
     for (let n = bigCv; n && n.id !== 'stage'; n = n.offsetParent) { ox += n.offsetLeft; oy += n.offsetTop; }
     const sx = p.x - ox, sy = p.y - oy;
-    const hitW = mapState.waystones.find((w) => w.lit && w.screen && Math.hypot(w.screen.x - sx, w.screen.y - sy) < 18);
-    if (hitW) { closeMap(); opts.onWarp && opts.onWarp(hitW.id); }
+    const hitW = (mapState.waystones || []).find((w) => w.lit && w.screen && Math.hypot(w.screen.x - sx, w.screen.y - sy) < 18);
+    if (hitW) { closeMap(); opts.onWarp && opts.onWarp(hitW.id); return; }
+    // on the sea chart, a tap sets the course
+    if (mapState.chart && lastBig) {
+      const L = lastBig, dx = sx - L.ox, dy = sy - L.oy, c = Math.cos(-mapRot), s2 = Math.sin(-mapRot);
+      const x = L.cx + (dx * c - dy * s2) / L.sc, z = L.cz + (dx * s2 + dy * c) / L.sc;
+      closeMap(); opts.onChart && opts.onChart(x, z);
+    }
   });
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
@@ -829,7 +851,7 @@ export function createUI(opts) {
         </div>
         <details class="group playtest">
           <summary class="gTitle">Playtest shortcuts</summary>
-          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button></div>
+          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button></div>
           <p class="sub">For testing only: these skip story steps.</p>
         </details>
       </section>
@@ -1024,7 +1046,7 @@ export function createUI(opts) {
   return {
     input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
     titleMenu, closeTitle, endCard, savedMark, fmtTime, buildMap, islandMap, closeMap, mapIsOpen: () => mapOpen,
-    setTools, setKeys, itemGet, wheelOpen: () => !wheel.classList.contains('hidden'),
+    setTools, setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

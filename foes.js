@@ -41,7 +41,7 @@ export function createFoes(ctx) {
     };
     if (opts.placed) {
       scene.remove(crack); f.crack = null;
-      f.state = { mirrorpuddle: 'chase', bellfish: 'drift', shardmite: 'chase', barnacle: 'idle', doorcrab: 'up', lullabypod: 'up', rootscript: 'up' }[kind] || 'up';
+      f.state = { mirrorpuddle: 'chase', bellfish: 'drift', shardmite: 'chase', barnacle: 'idle', doorcrab: 'up', lullabypod: 'up', rootscript: 'up', bubblebishop: 'drift', rustgill: 'chase', mudmimic: 'hidden' }[kind] || 'up';
       f.hittable = true; f.asleep = opts.wake || 8.5;
       m.root.visible = true;
       Object.assign(f, opts.extra || {});
@@ -402,12 +402,284 @@ export function createFoes(ctx) {
       return { pull: false };
     }
     if (f.kind === 'doorcrab') { f.state = 'door'; f.t = 0; return { reel: false }; }
+    if (f.kind === 'rustgill') {
+      if (f.noShield > 0) { f.state = 'stagger'; f.t = 0; return { reel: true }; }
+      f.noShield = 6; f.m.shield.visible = false; f.state = 'stagger'; f.t = 0;
+      sound.sfx('snap'); sound.sfx('clank'); ctx.shake(0.25);
+      ctx.number('Shield torn away!', f.x, f.y + 2.2, f.z, true);
+      for (let i = 0; i < 12; i++) bits.spawn({ x: f.x, y: f.y + 1, z: f.z, vx: (Math.random() - 0.5) * 3, vy: 2 + Math.random() * 2, vz: (Math.random() - 0.5) * 3, life: 1, size: 0.1, color: '#8a5a3a', floor: f.y });
+      return { reel: false };
+    }
+    if (f.kind === 'bubblebishop') { popBubble(f); return { reel: true }; }
+    if (f.kind === 'mudmimic' || f.kind === 'bellringer') { sound.sfx('clank'); return { reel: false }; }
     // small creatures are reeled in and dazed
     if (['shardmite', 'mirrorpuddle', 'bellfish', 'lullabypod'].includes(f.kind)) {
       if (f.kind !== 'lullabypod') { f.state = f.kind === 'shardmite' ? 'stun' : 'stagger'; f.t = 0; }
       return { reel: true };
     }
     return { reel: false };
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // Bubble Bishop: floats at a distance inside a bubble that turns blades. It raises its lantern (the warning)
+  // and preaches a slow spread of bubbles. Pop its own bubble with a sling shot, the Jar or the Tether,
+  // and for a few seconds it's bare.
+  // ---------------------------------------------------------------------------
+  function bishop(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    if (f.shield === undefined) { f.shield = true; f.next = rnd(...D.every) * 0.6; }
+    if (!f.shield) { f.bareT -= dt; if (f.bareT <= 0) { f.shield = true; sound.sfx('bubble'); } }
+    m.bubble.visible = f.shield;
+    m.bubble.scale.setScalar(f.shield ? 1 + Math.sin(now * 3) * 0.03 : 0.01);
+    m.float.position.y = D.hover + Math.sin(now * 1.8 + f.x) * 0.12;
+    let glowK = 0;
+    if (f.state === 'up' || f.state === 'drift') {
+      f.state = 'drift';
+      const want = (D.keep[0] + D.keep[1]) / 2;
+      const k = tp.d < D.keep[0] ? -1 : tp.d > D.keep[1] ? 1 : 0;
+      const side = Math.sin(now * 0.6 + f.x) * 0.6;
+      moveFoe(f, (tp.x * k + -tp.z * side) * D.speed * dt, (tp.z * k + tp.x * side) * D.speed * dt);
+      turnTo(f, Math.atan2(tp.x, tp.z), 3, dt);
+      f.next -= dt;
+      if (f.next <= 0 && tp.d < want + 4) { f.state = 'tell'; f.t = 0; sound.sfx('puddleTell'); }
+    } else if (f.state === 'tell') {
+      glowK = Math.min(1, f.t / D.tell);
+      m.lantern.scale.setScalar(1 + glowK * 0.8);
+      turnTo(f, Math.atan2(tp.x, tp.z), 6, dt);
+      if (f.t >= D.tell) {
+        const a0 = Math.atan2(tp.x, tp.z);
+        for (let i = 0; i < D.bubbles; i++) { const a = a0 + (i - (D.bubbles - 1) / 2) * 0.32; bubbleShot(f.x + Math.sin(a) * 0.5, f.y + D.hover + 0.6, f.z + Math.cos(a) * 0.5, Math.sin(a), Math.cos(a), D.bubbleSpeed, D.bubbleLife, D.dmg); }
+        sound.sfx('bubble');
+        m.lantern.scale.setScalar(1);
+        f.state = 'drift'; f.t = 0; f.next = rnd(...D.every);
+      }
+    } else if (f.state === 'stagger') { if (f.t > 0.4) { f.state = 'drift'; f.t = 0; } }
+    f.tellGlow = glowK * 0.6;
+    f.barY = D.hover + 1.9;
+  }
+  function popBubble(f, how) {
+    if (!f.shield) return false;
+    f.shield = false; f.bareT = f.D.bare;
+    sound.sfx('orbPop'); sound.sfx('splat');
+    ctx.number('Popped!', f.x, f.y + f.D.hover + 1.6, f.z, true);
+    for (let i = 0; i < 16; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x + Math.cos(a) * 0.9, y: f.y + f.D.hover + 0.8, z: f.z + Math.sin(a) * 0.9, vx: Math.cos(a) * 2, vy: Math.random() * 2, vz: Math.sin(a) * 2, life: 0.4, size: 0.14, color: '#d8f8ff', glow: 2.2 }); }
+    return true;
+  }
+  // a slow, wobbling bubble: it hurts, and anything solid pops it
+  function bubbleShot(x, y, z, dx, dz, speed, life, dmg) {
+    const o = buildOrb(0.26);
+    o.position.set(x, y, z);
+    o.traverse((c) => { if (c.material) { c.material = c.material.clone(); c.material.color && c.material.color.set('#bff0ff'); } });
+    scene.add(o);
+    orbs.push({ m: o, x, y, z, vx: dx * speed, vz: dz * speed, life, r: 0.28, dmg, t: 0, bubble: true });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rustgill Knight: plods at you behind a ship's-wheel shield that turns anything from the front. It turns
+  // slowly, so get round it; or tear the shield away with the Tether. It draws its spear back (the warning)
+  // and thrusts.
+  // ---------------------------------------------------------------------------
+  function rustgill(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    if (f.noShield > 0) { f.noShield -= dt; if (f.noShield <= 0) { m.shield.visible = true; sound.sfx('clank'); ctx.number('Shield up', f.x, f.y + 2, f.z, false); } }
+    let walk = 0;
+    if (f.state === 'up' || f.state === 'chase') {
+      f.state = 'chase';
+      turnTo(f, Math.atan2(tp.x, tp.z), D.turn, dt);
+      const facing = Math.cos(angTo(f.face, Math.atan2(tp.x, tp.z)));
+      if (tp.d > D.reach * 0.8 && facing > 0.3) { moveFoe(f, Math.sin(f.face) * D.speed * dt, Math.cos(f.face) * D.speed * dt); walk = 1; }
+      if (tp.d < D.reach + 0.3 && facing > 0.85 && f.t > 0.4) { f.state = 'tell'; f.t = 0; sound.sfx('crabTell'); }
+    } else if (f.state === 'tell') {
+      const k = Math.min(1, f.t / D.tell);
+      m.spearArm.rotation.x = -k * 0.9; m.spear.position.z = -k * 0.35;
+      turnTo(f, Math.atan2(tp.x, tp.z), D.turn * 0.5, dt);
+      f.tellGlow = k * 0.7;
+      if (f.t >= D.tell) { f.state = 'thrust'; f.t = 0; f.hitDone = false; f.tellGlow = 0; sound.sfx('swish'); }
+    } else if (f.state === 'thrust') {
+      const k = Math.min(1, f.t / D.thrust);
+      m.spearArm.rotation.x = -0.9 + k * 1.6; m.spear.position.z = -0.35 + k * 0.9;
+      if (k < 0.7) moveFoe(f, Math.sin(f.face) * 4 * dt, Math.cos(f.face) * 4 * dt);
+      if (!f.hitDone) {
+        const tipX = f.x + Math.sin(f.face) * D.reach, tipZ = f.z + Math.cos(f.face) * D.reach;
+        if (Math.hypot(P.x - tipX, P.z - tipZ) < 0.8 || (tp.d < D.reach && Math.cos(angTo(f.face, Math.atan2(tp.x, tp.z))) > 0.8)) { if (ctx.hurtPlayer(D.dmg, f.x, f.z)) f.hitDone = true; }
+      }
+      if (f.t >= D.thrust) { f.state = 'rest'; f.t = 0; }
+    } else if (f.state === 'rest') {
+      m.spearArm.rotation.x = lerp(m.spearArm.rotation.x, 0, Math.min(1, dt * 4)); m.spear.position.z = lerp(m.spear.position.z, 0, Math.min(1, dt * 4));
+      if (f.t >= D.rest) { f.state = 'chase'; f.t = 0; }
+    } else if (f.state === 'stagger') { if (f.t > 0.45) { f.state = 'chase'; f.t = 0; } }
+    m.shieldArm.rotation.x = f.state === 'tell' ? -0.2 : Math.sin(now * 2) * 0.05;
+    const ph = now * 8;
+    if (m.legs) { m.legs[0].rotation.x = Math.sin(ph) * 0.5 * walk; m.legs[1].rotation.x = -Math.sin(ph) * 0.5 * walk; }
+    m.body.position.y = Math.abs(Math.sin(ph)) * 0.05 * walk;
+    f.barY = 2.1;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mud Mimic: a patch of harbour mud. Come close and it snaps at you; swords sink into it. Wash it out
+  // with the Jar and it's a soft, slow thing for a while.
+  // ---------------------------------------------------------------------------
+  function mimic(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    if (f.state === 'up') { f.state = 'hidden'; f.t = 0; }
+    let open = 0, up = 0.25;
+    if (f.state === 'hidden') {
+      if (tp.d < D.bite && f.t > 0.8) { f.state = 'snap'; f.t = 0; sound.sfx('crabTell'); }
+      up = 0.25;
+      m.eyes.forEach((e) => { e.visible = Math.sin(now * 0.7 + f.x * 3) > 0.95; });
+    } else if (f.state === 'snap') {
+      // it heaves up out of the mud (the warning), then bites down
+      const k = Math.min(1, f.t / 0.45);
+      up = 0.25 + k * 0.75; open = k;
+      m.eyes.forEach((e) => { e.visible = true; });
+      if (f.t >= 0.45 && !f.hitDone) { f.hitDone = true; touch(f, D.bite + 0.2, D.dmg); sound.sfx('snap'); }
+      if (f.t >= 0.9) { f.state = 'hidden'; f.t = 0; f.hitDone = false; }
+    } else if (f.state === 'bare') {
+      // washed out: all mouth, slow, and it can be hurt
+      f.bareT -= dt;
+      up = 1; open = 0.4 + Math.abs(Math.sin(now * 5)) * 0.4;
+      m.eyes.forEach((e) => { e.visible = true; });
+      moveFoe(f, tp.x * D.speed * 0.5 * dt, tp.z * D.speed * 0.5 * dt);
+      turnTo(f, Math.atan2(tp.x, tp.z), 4, dt);
+      if (tp.d < 1.0 && f.cd <= 0) { touch(f, 1.1, D.dmg); f.cd = 1.2; }
+      f.cd -= dt;
+      if (f.bareT <= 0) { f.state = 'hidden'; f.t = 0; sound.sfx('squelch'); }
+    } else if (f.state === 'stagger') { up = 1; if (f.t > 0.35) { f.state = f.bareT > 0 ? 'bare' : 'hidden'; f.t = 0; } }
+    m.heap.scale.y = lerp(m.heap.scale.y, up, Math.min(1, dt * 10));
+    m.jaw.rotation.x = -open * 0.9;
+    m.jaw.visible = up > 0.4;
+    f.barY = 1.0;
+  }
+  const hidden = (f) => f.kind === 'mudmimic' && (f.state === 'hidden' || f.state === 'snap' || f.state === 'up');
+
+  // ---------------------------------------------------------------------------
+  // The Drowned Bellringer: she hides under her great bell. When she tolls it, a ring of sound rolls out
+  // (roll through it) and the bronze glows hot. Pour the Jar on the hot bell and it cracks and lifts:
+  // for a few seconds she's out from under it. She drops small bells from the rafters (watch the shadows),
+  // and when she's hurt she tolls twice for every haul of the rope.
+  // ---------------------------------------------------------------------------
+  function ringer(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    const phase = f.hp / D.hp > 0.5 ? 0 : 1;
+    if (phase !== f.phase) { f.phase = phase; if (phase === 1) { sound.sfx('roar'); ctx.shake(0.6); ctx.toast('She tolls twice now'); } }
+    if (f.heat === undefined) { f.heat = 0; f.lift = 0; f.cracks = 0; }
+    // the bell: hot glow, lifting when cracked, swaying when tolled
+    const liftTo = f.state === 'exposed' ? 4.2 : 0;
+    f.lift = lerp(f.lift, liftTo, Math.min(1, dt * (liftTo ? 3 : 5)));
+    m.bell.position.y = f.lift;
+    m.heat.material.opacity = f.heat * (0.5 + Math.sin(now * 12) * 0.1);
+    m.her.position.y = f.state === 'exposed' ? 0 : -0.6;
+    m.her.visible = f.lift > 0.3 || f.state === 'exposed';
+    m.heart.scale.setScalar(1 + Math.sin(now * 6) * 0.15);
+    m.arms.forEach((a, i) => { a.sh.rotation.z = (i ? -1 : 1) * (0.3 + Math.sin(now * 1.6 + i) * 0.2); a.el.rotation.z = (i ? -1 : 1) * (0.4 + Math.sin(now * 2.1 + i) * 0.3); });
+    m.face.rotation.y = clamp(angTo(f.face, Math.atan2(tp.x, tp.z)), -0.8, 0.8);
+    f.barY = 0;
+    ctx.bossBar(D.name, Math.max(0, f.hp / D.hp));
+    if (ctx.bossHold && ctx.bossHold()) return;
+    // the bell cools if nobody pours on it
+    if (f.state !== 'hot' && f.state !== 'toll') f.heat = Math.max(0, f.heat - dt * 0.6);
+    if (f.state === 'up') { f.state = 'idle'; f.t = 0; f.next = 1.6; }
+    if (f.state === 'idle') {
+      f.next -= dt;
+      if (f.next <= 0) {
+        f.tolls = (f.tolls || 0) + 1;
+        const pk = f.tolls % 3 === 2 ? 'drop' : 'toll';
+        f.state = pk; f.t = 0; f.fired = 0;
+        if (pk === 'toll') sound.sfx('creak');
+      }
+    } else if (f.state === 'toll') {
+      // she hauls the rope (the bell rocks back: the warning), then the toll: a ring of sound, once or twice
+      const n = phase ? 2 : 1;
+      m.bell.rotation.z = f.t < 0.8 ? -Math.sin(f.t / 0.8 * Math.PI * 0.5) * 0.25 : Math.sin((f.t - 0.8) * 9) * 0.15 * Math.max(0, 1 - (f.t - 0.8));
+      if (f.fired < n && f.t >= 0.8 + f.fired * 0.9) {
+        f.fired++;
+        ctx.shake(0.4); sound.sfx('bellRing'); sound.sfx('impact');
+        const g2 = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 64), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd29a').multiplyScalar(1.4), transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+        g2.rotation.x = -Math.PI / 2; g2.position.set(f.x, f.y + 0.15, f.z); scene.add(g2);
+        waves.push({ g: g2, x: f.x, z: f.z, y: f.y, r: 2.4, max: D.wave + phase * 2, hit: false, speed: 6 + phase * 1.5 });
+        f.heat = Math.min(1, f.heat + (phase ? 0.5 : 1));
+      }
+      if (f.t >= 0.9 + n * 0.9) {
+        m.bell.rotation.z = 0;
+        // a full toll leaves the bronze glowing hot: the moment to pour
+        f.heat = 1; f.state = 'hot'; f.t = 0; f.fired = 0; sound.sfx('hiss'); ctx.number('The bell glows!', f.x, f.y + 5, f.z, true);
+      }
+    } else if (f.state === 'hot') {
+      f.heat = 1;
+      if (Math.random() < dt * 20) sparks.spawn({ x: f.x + (Math.random() - 0.5) * 3.6, y: f.y + 3.8, z: f.z + (Math.random() - 0.5) * 3.6, vy: 1.5, life: 0.8, size: 0.2, color: '#ffe0c0', glow: 0.6, drag: 1 });
+      // she keeps dropping bells while it's hot
+      if (f.t > 1.2 && !f.fired) { f.fired = 1; dropBells(f, phase ? 3 : 2); }
+      if (f.t >= D.hot) { f.state = 'idle'; f.t = 0; f.next = D.every[phase]; }
+    } else if (f.state === 'drop') {
+      if (!f.fired && f.t > 0.4) { f.fired = 1; dropBells(f, phase ? 4 : 3); sound.sfx('creak'); }
+      if (f.t > 1.6) { f.state = 'idle'; f.t = 0; f.next = D.every[phase]; }
+    } else if (f.state === 'exposed') {
+      // out from under the bell: her heart is bare
+      if (f.t >= D.stun) { f.state = 'lower'; f.t = 0; sound.sfx('creak'); }
+    } else if (f.state === 'lower') {
+      if (f.t > 0.6) { f.state = 'idle'; f.t = 0; f.next = 1.0; ctx.shake(0.4); sound.sfx('impact'); f.heat = 0; }
+    } else if (f.state === 'stagger') { f.state = 'idle'; f.t = 0; f.next = 0.5; }
+  }
+  // small bells fall from the rafters: a shadow first (the warning), then the bell
+  const falling = [];
+  function dropBells(f, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU, d = i === 0 ? 0 : 1.5 + Math.random() * 2.5;
+      const x = P.x + Math.cos(a) * d, z = P.z + Math.sin(a) * d;
+      if (Math.hypot(x - f.x, z - f.z) < f.D.r + 0.5) continue;
+      const sh = new THREE.Mesh(new THREE.CircleGeometry(1.0, 24), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.0, depthWrite: false }));
+      sh.rotation.x = -Math.PI / 2; sh.position.set(x, world.groundAt(x, z) + 0.05, z); scene.add(sh);
+      const bl = buildOrb(0.4);
+      bl.traverse((c) => { if (c.material) { c.material = c.material.clone(); c.material.color && c.material.color.set('#c88a43'); } });
+      bl.position.set(x, 12, z); scene.add(bl);
+      falling.push({ sh, bl, x, z, t: -i * 0.25, fall: 1.1 });
+    }
+  }
+  function updateFalling(dt) {
+    for (let i = falling.length - 1; i >= 0; i--) {
+      const b = falling[i];
+      b.t += dt;
+      const k = clamp(b.t / b.fall, 0, 1), gy = world.groundAt(b.x, b.z);
+      b.sh.material.opacity = k * 0.55; b.sh.scale.setScalar(0.4 + k * 0.6);
+      b.bl.position.y = gy + 12 * (1 - k * k);
+      if (b.t >= b.fall) {
+        sound.sfx('clank'); ctx.shake(0.15);
+        if (Math.hypot(P.x - b.x, P.z - b.z) < 1.1) ctx.hurtPlayer(1, b.x, b.z);
+        for (let k2 = 0; k2 < 10; k2++) { const a = Math.random() * TAU; sparks.spawn({ x: b.x, y: gy + 0.3, z: b.z, vx: Math.cos(a) * 3, vy: 1 + Math.random() * 2, vz: Math.sin(a) * 3, grav: 8, life: 0.5, size: 0.14, color: '#ffd29a', glow: 1.8 }); }
+        scene.remove(b.sh); scene.remove(b.bl); falling.splice(i, 1);
+      }
+    }
+  }
+  // water from the Tide Jar landing at (x, z): what it does to the creatures it reaches
+  function wash(x, z, rad) {
+    const out = { mimic: 0, bubble: 0, bell: false };
+    for (const f of foes) {
+      if (!f.alive) continue;
+      const d = Math.hypot(f.x - x, f.z - z);
+      if (f.kind === 'mudmimic' && d < rad + 0.6 && f.state !== 'bare') {
+        f.state = 'bare'; f.t = 0; f.bareT = f.D.bare; f.asleep = 0; out.mimic++;
+        sound.sfx('squelch'); ctx.number('Washed out!', f.x, f.y + 1.4, f.z, true);
+      }
+      if (f.kind === 'bubblebishop' && d < rad + 0.9 && popBubble(f)) out.bubble++;
+      if (f.kind === 'bellringer' && d < f.D.r + rad + 0.6) {
+        if (f.state === 'hot') {
+          f.state = 'exposed'; f.t = 0; f.heat = 0; f.cracks++; out.bell = true;
+          sound.sfx('hiss'); sound.sfx('crack'); ctx.shake(0.7); ctx.hitStop(0.15);
+          ctx.number('Cracked!', f.x, f.y + 5, f.z, true);
+          for (let i = 0; i < 40; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x + Math.cos(a) * 2, y: f.y + 1 + Math.random() * 3, z: f.z + Math.sin(a) * 2, vx: Math.cos(a) * 2, vy: 2 + Math.random() * 3, vz: Math.sin(a) * 2, drag: 1.5, life: 1.2, size: 0.3, color: '#f2f6f8', glow: 0.8 }); }
+        } else if (f.state !== 'exposed') { ctx.number('It isn’t hot yet', f.x, f.y + 5, f.z, false); }
+      }
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -785,8 +1057,28 @@ export function createFoes(ctx) {
   // Getting hit and falling
   // ---------------------------------------------------------------------------
   const tmp = new THREE.Vector3();
-  function hit(f, nx, nz, dmg, heavy, knock) {
+  function hit(f, nx, nz, dmg, heavy, knock, src) {
     if (!f.alive || !f.hittable) return false;
+    // the Bubble Bishop: a sling shot pops its bubble; blades slide off it
+    if (f.kind === 'bubblebishop' && f.shield) {
+      if (src === 'sling') { popBubble(f); return true; }
+      sound.sfx('bubble'); ctx.number('Blocked', f.x, f.y + f.D.hover + 1.6, f.z, false);
+      return true;
+    }
+    // the Rustgill's shield turns anything from the front while it's got it
+    if (f.kind === 'rustgill' && !(f.noShield > 0) && f.state !== 'stagger') {
+      const from = Math.atan2(-nx, -nz);
+      if (Math.abs(angTo(f.face, from)) < f.D.guard * Math.PI / 180) {
+        sound.sfx('clank'); ctx.number('Blocked', f.x, f.y + 2, f.z, false);
+        for (let i = 0; i < 8; i++) { const a = from + (Math.random() - 0.5) * 1.6; sparks.spawn({ x: f.x + Math.sin(f.face) * 0.6, y: f.y + 1, z: f.z + Math.cos(f.face) * 0.6, vx: Math.sin(a) * 3, vy: Math.random() * 2.5, vz: Math.cos(a) * 3, drag: 3, life: 0.35, size: 0.12, color: '#ffe9a8', glow: 2.6 }); }
+        f.kx += nx * knock * 0.3; f.kz += nz * knock * 0.3;
+        return true;
+      }
+    }
+    // a mud mimic in hiding: the blade just sinks into mud
+    if (hidden(f)) { sound.sfx('squelch'); ctx.number('Only mud…?', f.x, f.y + 1, f.z, false); return true; }
+    // the Bellringer: under her bell, nothing gets through
+    if (f.kind === 'bellringer' && f.state !== 'exposed') { sound.sfx('clank'); sound.sfx('bellHit'); ctx.number('Clang', f.x, f.y + 4, f.z, false); return true; }
     // the Doorcrab's claws stop anything that comes from the front
     if (f.kind === 'doorcrab' && f.state !== 'door' && f.state !== 'stagger') {
       const from = Math.atan2(-nx, -nz);
@@ -831,7 +1123,7 @@ export function createFoes(ctx) {
     ctx.number(String(dmg), f.x, hy + 0.7, f.z, heavy);
     // a heavy hit (or any hit on a creature mid-warning, for the puddle) knocks it out of what it was doing
     // (the guardian has poise: it flinches, but never drops what it's doing, so its warnings always play out)
-    if ((f.kind === 'gardener' || f.kind === 'barnaclemother') && f.hp > 0) { f.flinch = 1; }
+    if ((f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer') && f.hp > 0) { f.flinch = 1; }
     else if (f.hp > 0 && (heavy || (f.kind === 'mirrorpuddle' && f.state === 'tell'))) {
       if (f.state !== 'under' && f.state !== 'tell' || f.kind === 'mirrorpuddle') { f.state = 'stagger'; f.t = 0; f.m.body.position.x = 0; f.tellGlow = 0; }
     }
@@ -848,7 +1140,16 @@ export function createFoes(ctx) {
       bits.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * sp + nx * 2, vy: 2 + Math.random() * 3.5, vz: Math.sin(a) * sp + nz * 2, life: 1.3, size: 0.09 + Math.random() * 0.1, color: cols[i % 3], floor: f.y });
     }
     for (let i = 0; i < 22; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * 3.5, vy: Math.random() * 4, vz: Math.sin(a) * 3.5, drag: 3, grav: 3, life: 0.6, size: 0.18, color: i % 2 ? '#ffffff' : '#9ff3ff', glow: 3 }); }
-    const big = f.kind === 'gardener' || f.kind === 'barnaclemother';
+    const big = f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer';
+    if (f.kind === 'bellringer') {
+      ctx.bossBar(null);
+      for (const w of waves) scene.remove(w.g);
+      waves.length = 0;
+      for (const b of falling) { scene.remove(b.sh); scene.remove(b.bl); }
+      falling.length = 0;
+      for (let i = 0; i < 50; i++) { const a = Math.random() * TAU, sp = 2 + Math.random() * 5; bits.spawn({ x: f.x, y: f.y + 1 + Math.random() * 3, z: f.z, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 4, vz: Math.sin(a) * sp, life: 2, size: 0.12 + Math.random() * 0.18, color: ['#b07a3a', '#c88a43', '#d8e0e4'][i % 3], floor: f.y }); }
+      if (ctx.onGuardianDown) ctx.onGuardianDown(f);
+    }
     sound.sfx(big ? 'impact' : 'pop');
     ctx.hitStop(big ? 0.4 : 0.09);
     if (f.kind === 'barnaclemother') {
@@ -1083,6 +1384,10 @@ export function createFoes(ctx) {
       else if (f.kind === 'shardmite') shardmite(f, dt);
       else if (f.kind === 'barnacle') barnacle(f, dt);
       else if (f.kind === 'barnaclemother') mother(f, dt);
+      else if (f.kind === 'bubblebishop') bishop(f, dt);
+      else if (f.kind === 'rustgill') rustgill(f, dt);
+      else if (f.kind === 'mudmimic') mimic(f, dt);
+      else if (f.kind === 'bellringer') ringer(f, dt);
       if (!f.alive) continue;
       // knockback from your hits, sliding out
       if (Math.abs(f.kx) + Math.abs(f.kz) > 0.01) { moveFoe(f, f.kx * dt, f.kz * dt); const k = Math.exp(-9 * dt); f.kx *= k; f.kz *= k; }
@@ -1096,7 +1401,7 @@ export function createFoes(ctx) {
       f.flashT = Math.max(0, f.flashT - dt * 7);
       f.m.flash(Math.max(f.flashT, (f.tellGlow || 0) * (0.35 + 0.25 * Math.sin(performance.now() / 40))));
       // health bar: floats above, fades a little at full health (the guardian's is at the top of the screen)
-      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener' && f.kind !== 'barnaclemother' && !f.asleep;
+      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener' && f.kind !== 'barnaclemother' && f.kind !== 'bellringer' && !hidden(f) && !f.asleep;
       f.bar.group.visible = showBar;
       if (showBar) {
         f.bar.group.position.set(f.x, f.y + (f.barY || 1.2), f.z);
@@ -1110,6 +1415,7 @@ export function createFoes(ctx) {
     updateDrops(dt);
     updateEffects(dt);
     updateWaves(dt);
+    updateFalling(dt);
   }
 
   // you fell: everything in the Seep goes quiet again, nothing is lost
@@ -1122,6 +1428,8 @@ export function createFoes(ctx) {
     slows.length = 0;
     for (const w of waves) scene.remove(w.g);
     waves.length = 0;
+    for (const b of falling) { scene.remove(b.sh); scene.remove(b.bl); }
+    falling.length = 0;
     for (const e of effects) scene.remove(e.m);
     effects.length = 0;
     flood.k = 0; flood.to = 0;
@@ -1133,7 +1441,7 @@ export function createFoes(ctx) {
   }
 
   // targets for your swings and sling drops
-  function targets() { return foes.filter((f) => f.alive && f.hittable); }
+  function targets() { return foes.filter((f) => f.alive && f.hittable && !hidden(f)); }
   // the Seep goes quiet (after its fight, or when you come back from the Rift)
   function rest() {
     if (!S) return;
@@ -1143,5 +1451,5 @@ export function createFoes(ctx) {
   }
   // dragged along by the Tether (walls still stop it)
   function drag(f, dx, dz) { moveFoe(f, dx, dz); f.stunT = 0.3; if (f.state === 'loose') f.t = Math.min(f.t, 0.2); }
-  return { update, hit, targets, reset, rest, spawn, tethered, drag, list: foes, seep, dropHeart, dropSliver, slowAt, flood, alive: () => foes.some((f) => f.alive) };
+  return { update, hit, targets, reset, rest, spawn, tethered, drag, wash, list: foes, seep, dropHeart, dropSliver, slowAt, flood, alive: () => foes.some((f) => f.alive) };
 }

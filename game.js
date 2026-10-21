@@ -1,10 +1,10 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, STORY, TOOLS, CAVES } from '@rf/data';
-import { buildPlayer, buildSkyblade, buildTidesling, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
+import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, SEA } from '@rf/data';
+import { buildPlayer, buildSkyblade, buildTidesling, buildSailboat, buildJar, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
 import { createStory } from '@rf/story';
-import { buildCove, buildRift, buildCaves } from '@rf/world';
+import { buildCove, buildRift, buildCaves, buildTown, buildSeaPlace } from '@rf/world';
 import { createFoes } from '@rf/foes';
 import { createUI, loadPrefs, loadingDone, loadingFailed, view, updateView } from '@rf/ui';
 
@@ -247,6 +247,13 @@ const sound = (() => {
       case 'swing': hiss('bandpass', 900 * r, 3200 * r, 1.4, 0.13, 0.35 * k); tone('sine', 520 * r, 980 * r, 0.09, 0.04); break;
       case 'swingHeavy': hiss('bandpass', 500, 2600, 1.1, 0.24, 0.5); tone('triangle', 220, 440, 0.2, 0.06); break;
       case 'hit': tone('sine', 150 * r, 55, 0.16, 0.6 * k); hiss('highpass', 2500, 0, 0.7, 0.05, 0.3 * k); tone('square', 880 * r, 660, 0.05, 0.04 * k); break;
+      case 'bubble': tone('sine', 280 * r, 720 * r, 0.14, 0.18 * k); tone('sine', 520 * r, 1100 * r, 0.08, 0.08 * k, sfxBus, 0.06); break;
+      case 'hiss': hiss('highpass', 3200, 1400, 0.6, 0.55, 0.22 * k); break;
+      case 'swish': hiss('bandpass', 1400 * r, 3400 * r, 1.2, 0.16, 0.3 * k); break;
+      case 'chime': tone('sine', 1320 * r, 1300 * r, 0.9, 0.12); tone('sine', 1980 * r, 1960 * r, 0.6, 0.05); break;
+      case 'scoop': hiss('lowpass', 900, 260, 0.8, 0.32, 0.3); tone('sine', 240 * r, 120, 0.18, 0.12); break;
+      case 'pour': hiss('bandpass', 900 * r, 420, 0.9, 0.55, 0.32); tone('sine', 180, 90, 0.3, 0.08, sfxBus, 0.1); break;
+      case 'sail': hiss('lowpass', 500, 300, 0.6, 0.9, 0.2); tone('triangle', 196, 196, 0.5, 0.05); break;
       case 'wood': tone('triangle', 240 * r, 160, 0.1, 0.35 * k); tone('triangle', 410 * r, 300, 0.06, 0.15 * k); break;
       case 'roll': hiss('lowpass', 1400, 300, 0.8, 0.3, 0.32); break;
       case 'land': hiss('lowpass', 700, 200, 0.6, 0.12, 0.25); break;
@@ -357,6 +364,14 @@ let world, sparks, bits, ui, foes, story, paused = false, started = false;
 // the two places: the cove (Lanternhold) and the Rift. `world` and `foes` always point at the one you're in.
 let cove, coveRoot, foesCove, rift = null, riftRoot = null, foesRift = null, floodPlane = null, travelling = null;
 let caves = null, cavesRoot = null, foesCaves = null, cavesSaved = null;
+// the sea round's places: the Belfry (a dungeon like the caves), Brinemoor (a town), and the Glass Sea
+let belfry = null, belfryRoot = null, foesBelfry = null, belfrySaved = null;
+let brine = null, brineRoot = null, foesBrine = null;
+let seaW = null, seaRoot = null, foesSea = null;
+// which place is which
+const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : 'cove');
+const isDungeon = (w = world) => !!w && (w === caves || w === belfry);
+const outdoors = (w = world) => w === cove || w === brine || w === seaW;
 const camDir = new V3(...CONFIG.camera.dir).normalize();
 const camFwd = new V3(-camDir.x, 0, -camDir.z).normalize();
 const camRight = new V3().crossVectors(camFwd, new V3(0, 1, 0)).normalize();
@@ -649,7 +664,7 @@ function makeFoes(w, root) {
     onSeepClear: () => story.onSeepClear(),
     pullPlayer: (dx, dz) => { if (P.state !== 'dead' && !P.iframes) tryMove(dx, dz); },
     bossBar: (name, frac) => ui.bossBar(name, frac),
-    onGuardianDown: (f) => (f.kind === 'barnaclemother' ? caveBossDown(f) : riftEvent('guardianDown', f)),
+    onGuardianDown: (f) => (f.kind === 'barnaclemother' || f.kind === 'bellringer' ? caveBossDown(f) : riftEvent('guardianDown', f)),
     onKill: () => { stats.calmed++; },
     // the Seep only wakes while the story needs it; afterwards the stone circle stays quiet
     seepAwake: () => ['toShard', 'seep'].includes(story.state.step),
@@ -659,7 +674,7 @@ function makeFoes(w, root) {
 
 // ----- going between places: a fade to black, the swap, and a fade back -----
 function travel(to) {
-  if (travelling || (to === 'rift' && world === rift) || (to === 'cove' && world === cove) || (to === 'caves' && world === caves)) return;
+  if (travelling || placeOf(world) === to) return;
   story.state.nearShard = story.state.nearDoor = false; story.state.near = null;
   travelling = { t: 0, to, swapped: false };
   P.path = null; P.vx = P.vz = 0;
@@ -670,7 +685,7 @@ function updateTravel(dt) {
   const T = travelling;
   T.t += dt;
   if (!T.swapped) fade = Math.min(1, T.t / 0.7);
-  if (!T.swapped && T.t >= 0.75) { T.swapped = true; T.t = 0; T.from = world === caves ? 'caves' : world === rift ? 'rift' : 'cove'; swapTo(T.to); }
+  if (!T.swapped && T.t >= 0.75) { T.swapped = true; T.t = 0; T.from = placeOf(world); swapTo(T.to); }
   if (T.swapped) {
     fade = Math.max(0, 1 - T.t / 0.9);
     if (T.t >= 0.9) { travelling = null; fade = 0; ui.show(true); arrived(T.to, T.from); }
@@ -690,9 +705,52 @@ function swapTo(to) {
   projectiles.length = 0;
   foes.reset();
   ui.bossBar(null);
-  if (to === 'caves') {
+  const from = world;
+  if (isDungeon(from)) { if (from === caves) cavesSaved = caves.snapshot(); else belfrySaved = belfry.snapshot(); }
+  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot]) if (r) r.visible = false;
+  boatModel.visible = false;
+  if (P.boat) { P.boat = null; resetPose(); P.model.legL.rotation.x = P.model.legR.rotation.x = 0; P.iframes = false; }
+  P.model.root.rotation.z = 0;
+  P.path = null; P.state = P.state === 'dead' ? 'dead' : 'move';
+  if (hook) { hook = null; tether.g.visible = false; }
+  if (to === 'belfry') {
+    belfryBuilt();
+    belfryRoot.visible = true;
+    world = belfry; foes = foesBelfry;
+    applyLight(belfry.light);
+    P.x = belfry.spawn.x; P.z = belfry.spawn.z - 0.5; P.y = belfry.spawn.y; P.face = Math.PI;
+    populateCaves();
+    ui.buildMap(belfry.mapInfo, MAP_ROT, 'belfry');
+    syncKeys();
+  } else if (to === 'brine') {
+    brineBuilt();
+    brineRoot.visible = true;
+    world = brine; foes = foesBrine;
+    outdoorLight(28, 80);
+    if (from === belfry) { const d = brine.spots.door; P.x = d.x; P.z = d.z + 1.2; P.face = 0; }
+    else { P.x = brine.spawn.x; P.z = brine.spawn.z; P.face = 0; }
+    P.y = brine.groundAt(P.x, P.z);
+    foes.reset();
+    for (const c of brine.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 6 });
+    ui.buildMap(brine.mapInfo, MAP_ROT, 'brine');
+    syncKeys();
+  } else if (to === 'sea') {
+    seaBuilt();
+    seaRoot.visible = true;
+    world = seaW; foes = foesSea;
+    outdoorLight(60, 260);
+    const isl = SEA.islands.find((o) => o.id === (from === brine ? 'brinemoor' : 'lanternhold'));
+    P.x = isl.dock.x; P.z = isl.dock.z + (from === brine ? -4 : 3); P.y = 0;
+    P.face = from === brine ? Math.PI : 0;
+    P.boat = { speed: 0, course: null, hop: 0, lockT: 0 };
+    boatModel.visible = true;
+    foes.reset();
+    seaFoes();
+    ui.buildMap(seaW.mapInfo, MAP_ROT, 'sea');
+    syncKeys();
+  } else if (to === 'caves') {
     cavesBuilt();
-    coveRoot.visible = false; if (riftRoot) riftRoot.visible = false; cavesRoot.visible = true;
+    cavesRoot.visible = true;
     world = caves; foes = foesCaves;
     applyLight(caves.light);
     P.x = caves.spawn.x; P.z = caves.spawn.z - 0.5; P.y = caves.spawn.y; P.face = Math.PI;
@@ -702,7 +760,6 @@ function swapTo(to) {
   } else if (to === 'rift') {
     guardianSeen = false;
     if (riftRoot) riftRoot.visible = true;
-    if (cavesRoot) cavesRoot.visible = false;
     if (!rift) {
       riftRoot = new THREE.Group();
       scene.add(riftRoot);
@@ -722,18 +779,16 @@ function swapTo(to) {
     P.x = rift.spawn.x; P.z = rift.spawn.z; P.y = 0; P.face = Math.PI;
     ui.setMap(rift.mapState());
   } else {
-    const from = world;
-    if (riftRoot) riftRoot.visible = false;
-    if (cavesRoot) cavesRoot.visible = false;
     coveRoot.visible = true;
     world = cove; foes = foesCove;
-    scene.fog.near = 36; scene.fog.far = 95;
-    setClock(clockH);
+    outdoorLight(36, 95);
     foes.rest();
     if (from === caves) {
       // out of the cave mouth, onto the shore under the cliffs
-      cavesSaved = caves.snapshot();
       P.x = cove.mouth.x; P.z = cove.mouth.z + 1.7; P.y = cove.groundAt(P.x, P.z); P.face = 0;
+    } else if (from === seaW) {
+      // tied up at the dock, stepping off onto the planks
+      const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); P.face = Math.PI;
     } else placeBySeep();   // you step out beside the Seep, which has gone quiet for now
     ui.setMap(null);
     ui.buildMap(cove.mapInfo, MAP_ROT, 'cove');
@@ -742,6 +797,12 @@ function swapTo(to) {
   ui.setContext(null);
   camLook.set(P.x, P.y + 0.6, P.z);
   camPos.copy(camLook).addScaledVector(camDir, camDist);
+}
+// out in the open (the cove, a town, the sea): the clock's own light and sky, with this place's fog distance
+function outdoorLight(near, far) {
+  lightDir.copy(world.sunDir);
+  scene.fog.near = near; scene.fog.far = far;
+  setClock(clockH);
 }
 function placeBySeep() {
   const S = cove.seep;
@@ -753,7 +814,22 @@ function placeBySeep() {
   P.x = spot.x; P.z = spot.z; P.y = cove.groundAt(P.x, P.z); P.face = Math.atan2(S.x - P.x, S.z - P.z);
 }
 async function arrived(to, from) {
-  if (to === 'caves') {
+  if (to === 'belfry') {
+    ui.titleCard(BELFRY.name, BELFRY.region, BELFRY.line);
+    if (!belfry.state.visited) { belfry.state.visited = true; await story.say(STORY.belfryLines.enter); ui.showHint('bell', 'Strike the Tide Bell to turn the water', 6000); }
+  } else if (to === 'brine') {
+    if (from === 'sea') ui.titleCard(BRINEMOOR.name, BRINEMOOR.region, BRINEMOOR.line);
+    if (story.state.step === 'setSail') story.setStep('brinemoor');
+    saveSoon = 0.5;
+  } else if (to === 'sea') {
+    const C = STORY.setSailCard;
+    ui.titleCard(C.name, from === 'brine' ? 'Brinemoor waters' : C.region, C.line);
+    ui.showHint('boat', STORY.boatHint, 8000);
+    sound.sfx('sail');
+  } else if (to === 'cove' && from === 'sea') {
+    ui.titleCard('Lanternhold', 'The Keeper\u2019s Cove', 'Home, with the lamp lit.');
+    saveSoon = 0.5;
+  } else if (to === 'caves') {
     ui.titleCard(CAVES.name, CAVES.region, CAVES.line);
     if (!caves.state.visited) { caves.state.visited = true; await story.say(STORY.cavesEnter); }
   } else if (to === 'rift') {
@@ -844,6 +920,14 @@ function playtestJump(where) {
     });
   } else if (where === 'tether') {
     giveTool('tether'); ui.toast('Tether (for testing)');
+  } else if (where === 'sea' || where === 'brinemoor' || where === 'belfry') {
+    // the sea round, for testing: the Act so far is done, the Tether's yours, and off you go
+    if (travelling) return;
+    if (!story.past('setSail')) { story.applyState('setSail'); clock.running = true; }
+    giveTool('tether');
+    if (where === 'belfry') { if (!story.past('belfryIn')) story.setStep('belfryIn'); travel('belfry'); }
+    else if (where === 'brinemoor') { if (!story.past('brinemoor')) story.setStep('brinemoor'); travel('brine'); }
+    else { if (world === seaW) return; travel('sea'); }
   } else if (where === 'morning') {
     if (world !== cove) { ui.toast('Leave the Rift first'); return; }
     curtainTo(1, 0.5).then(() => {
@@ -869,17 +953,45 @@ function objectiveSpot() {
   if (st === 'rest') return sp.cottageDoor;
   if (['gullcliff', 'caves', 'cavesBoss'].includes(st)) return cove.mouth;
   if (st === 'boathouse') return sp.boathouse;
+  if (st === 'findTobin') return story.people().find((n) => n.id === 'tobin');
+  if (['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st)) return sp.lantern;
+  if (st === 'reportMaren2') return maren;
+  return null;
+}
+// where the story wants you, in a town or on the sea
+function placeGoal() {
+  const st = story.state.step;
+  if (world === brine) {
+    if (['brinemoor', 'reportHale'].includes(st)) return story.people(brine).find((n) => n.id === 'hale');
+    if (['belfry', 'belfryIn', 'belfryBoss'].includes(st)) return brine.spots.door;
+    if (['reportMaren2', 'act1Sea'].includes(st)) return brine.spots.pier;
+    return null;
+  }
+  if (world === seaW) {
+    const id = ['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st) ? 'brinemoor' : 'lanternhold';
+    const o = SEA.islands.find((v) => v.id === id);
+    return { x: o.dock.x / 2, z: o.dock.z / 2 };
+  }
   return null;
 }
 function updateIslandMap() {
-  const inCaves = world === caves;
-  const show = started && !intro && (world === cove || inCaves) && !story.state.cine && !story.state.ending && !bossIntro;
+  const inCaves = isDungeon();
+  const show = started && !intro && (world === cove || inCaves || world === brine || world === seaW) && !story.state.cine && !story.state.ending && !bossIntro;
   if (!show) { if (isleFrame !== -1) { ui.islandMap(null); isleFrame = -1; } return; }
   isleFrame = 1;
   const o = STORY.objectives[story.state.step];
   const objective = typeof o === 'function' ? o(story.state.hits, STORY.practiceHits) : o;
   if (inCaves) {
-    ui.islandMap({ x: P.x, z: P.z, face: P.face, people: [], goal: null, objective, title: CAVES.name, waystones: [] });
+    ui.islandMap({ x: P.x, z: P.z, face: P.face, people: [], goal: null, objective, title: world === belfry ? BELFRY.name : CAVES.name, waystones: [] });
+    return;
+  }
+  if (world === brine) {
+    ui.islandMap({ x: P.x, z: P.z, face: P.face, people: story.people(brine), goal: placeGoal(), objective, title: BRINEMOOR.name, waystones: [] });
+    return;
+  }
+  if (world === seaW) {
+    // the chart works in chart cells (two sea units each)
+    ui.islandMap({ x: P.x / 2, z: P.z / 2, face: P.face, people: [], goal: placeGoal(), objective, title: SEA.name, waystones: [], chart: true });
     return;
   }
   const news = story.hasNews();
@@ -922,11 +1034,14 @@ function readSave() {
 function writeSave() {
   if (!started || intro) return;
   const st = story.state;
-  const steady = world === cove && !travelling && P.state !== 'dead' && !st.ending && !st.cine;
+  const steady = (world === cove || world === brine) && !travelling && P.state !== 'dead' && !st.ending && !st.cine;
   const data = { v: 1, version: VERSION, step: st.step, hits: st.hits, maxHp: P.maxHp, shards: P.shards, pos: steady ? { x: +P.x.toFixed(2), z: +P.z.toFixed(2) } : null, stats: { ...stats }, ended, savedAt: Date.now(),
     // Act 1 and on
     tools: tools.owned, tool: tools.cur, lit: cove.waystones.filter((w) => w.lit).map((w) => w.id), kept: [...kept], memories, clock: clockH, clockOn: clock.running,
-    caves: caves ? caves.snapshot() : cavesSaved, inCaves: world === caves };
+    caves: caves ? caves.snapshot() : cavesSaved, inCaves: world === caves,
+    // the Glass Sea and on
+    belfry: belfry ? belfry.snapshot() : belfrySaved, at: travelling ? travelling.to : placeOf(world), jar: jar.full,
+    chart: seaW ? (() => { let t = ''; for (const v of seaW.mapInfo.seen) t += String.fromCharCode(v); return btoa(t); })() : seaSeen };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); savedAt = Date.now(); ui.savedMark(); } catch (_) { /* private mode: progress lives only as long as the page */ }
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (_) { /* fine */ } }
@@ -988,6 +1103,10 @@ async function beginJourney(save) {
   ended = !!save.ended;
   P.maxHp = save.maxHp || P.maxHp; P.hp = P.maxHp; P.shards = save.shards || 0;
   ui.setShards(P.shards);
+  // a guardian beaten in a journey saved before its scene finished: the story moves on as it should have
+  const O = STORY.order, before = (a, b) => O.indexOf(a) >= 0 && O.indexOf(a) < O.indexOf(b);
+  if (save.caves && save.caves.bossDone && before(save.step, 'reportOil')) save.step = 'reportOil';
+  if (save.belfry && save.belfry.bossDone && before(save.step, 'reportHale')) save.step = 'reportHale';
   const step = story.applyState(save.step, save.hits || 0);
   // tools, waystones, keepsakes, memories, the clock, the caves
   tools.owned = save.tools || ['sling']; tools.cur = tools.owned.includes(save.tool) ? save.tool : 'sling'; syncTools();
@@ -995,7 +1114,11 @@ async function beginJourney(save) {
   for (const id of save.kept || []) { kept.add(id); cove.takeKeepsake(id); }
   Object.assign(memories, save.memories || {});
   if (memories.breakfast) { cove.showKitchen(); }
+  if (memories.rain) { cove.showPorch(); }
   cavesSaved = save.caves || null;
+  belfrySaved = save.belfry || null;
+  seaSeen = save.chart || null;
+  setJarFull(!!save.jar);
   if (save.clockOn) { clock.running = true; clockH = save.clock || 9; setClock(clockH); }
   else if (story.past('gullcliff')) { clock.running = true; setClock(clockH = 9); }
   if (save.step !== step && step === 'enterRift') { foes.rest(); placeBySeep(); }
@@ -1004,11 +1127,20 @@ async function beginJourney(save) {
   else if (['morning', 'free'].includes(step)) { const d = cove.spots.lighthouseDoor; P.x = d.x + 0.4; P.z = d.z + 2.2; P.y = cove.groundAt(P.x, P.z); }
   else { P.x = cove.spawn.x; P.z = cove.spawn.z; P.y = cove.spawn.y; }
   P.face = Math.PI * 0.85;
+  // a journey saved in Brinemoor, under it or on the way back from it carries on in Brinemoor
+  const at = save.at || 'cove';
+  let pl = ['morning', 'free'].includes(step) ? TEXT.morning : PLACES.cove;
+  if (at === 'brine' || at === 'belfry' || (at === 'sea' && story.past('brinemoor') && !story.past('reportMaren2'))) {
+    swapTo('brine');
+    if (at === 'belfry') { const d = brine.spots.door; P.x = d.x; P.z = d.z + 1.2; }
+    else if (at === 'brine' && save.pos && brine.walkable(save.pos.x, save.pos.z, brine.groundAt(save.pos.x, save.pos.z), 0.4)) { P.x = save.pos.x; P.z = save.pos.z; }
+    P.y = brine.groundAt(P.x, P.z);
+    pl = BRINEMOOR;
+  } else if (at === 'sea') { const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); }
   started = true;
   snapCamera();
   ui.show(true);
   sound.sfx('wake');
-  const pl = ['morning', 'free'].includes(step) ? TEXT.morning : PLACES.cove;
   setTimeout(() => ui.titleCard(pl.name, pl.region, pl.line), 500);
   curtainTo(0, 1.4);
   savedAt = save.savedAt || 0;
@@ -1025,10 +1157,11 @@ async function onEnding() {
 // ===========================================================================
 // Keepsakes and waystones
 // ===========================================================================
-const KEEPSAKE_SET = ['cup', 'spoon', 'crust'];
 const kept = new Set();
 const memories = {};
-const keepsakesAll = () => KEEPSAKE_SET.every((k) => kept.has(k));
+// a memory is ready to remember once all three of its keepsakes are found (breakfast first, then the rain)
+const memoryReady = () => Object.keys(STORY.memories).find((id) => !memories[id] && STORY.memories[id].set.every((k) => kept.has(k))) || null;
+const keepsakesAll = () => !!memoryReady();
 async function foundKeepsake(k) {
   kept.add(k.id);
   const K = STORY.keepsakes[k.id];
@@ -1038,7 +1171,7 @@ async function foundKeepsake(k) {
   await ui.itemGet(K.name, K.line, null);
   story.state.busy = false;
   holdUp(false);
-  if (keepsakesAll()) ui.toast(STORY.keepsakeHint);
+  if (memoryReady() && STORY.memories[memoryReady()].set.includes(k.id)) ui.toast(STORY.keepsakeHint);
   saveSoon = 0.3;
 }
 function lightStone(w) {
@@ -1065,6 +1198,25 @@ async function warpTo(id) {
   await curtainTo(0, 0.6);
 }
 
+// the tide post in Brinemoor: sit a while, and the tide turns (low if it's in, high if it's out)
+async function waitTide() {
+  if (story.busy()) return;
+  story.state.busy = true;
+  ui.setContext(null);
+  const goingOut = tideAt(clockH) > -0.1;
+  await curtainTo(1, 0.8);
+  // the next low tide is at midnight or noon; the next high at six
+  const targets = goingOut ? [0, 12, 24] : [6, 18, 30];
+  const next = targets.find((h) => h > clockH + 0.5) || targets[0] + 24;
+  clockH = (next + 0.4) % 24;
+  setClock(clockH);
+  brine.setTide(tideAt(clockH));
+  sound.sfx('wake');
+  await curtainTo(0, 1.0);
+  ui.toast(goingOut ? STORY.tideOut : STORY.tideIn);
+  story.state.busy = false;
+  saveSoon = 0.5;
+}
 // ===========================================================================
 // Tools: the sling button holds them. The Tether bites brass rings, plates and creatures.
 // ===========================================================================
@@ -1137,7 +1289,40 @@ function tetherDir(aim) {
   }
   return best || mv;
 }
+// the Tide Jar: scoop near water, pour it where it's needed
+const jar = { full: false, cd: 0, tilt: 0 };
+const jarModel = (() => { const m = buildJar(); m.visible = false; return m; })();
+const jarWater = (() => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#7fe8ff').multiplyScalar(1.6) })); m.position.y = 0.4; m.visible = false; jarModel.add(m); return m; })();
+function setJarFull(on) { jar.full = on; jarWater.visible = on; ui.setJar(on); }
+function useJar(aim) {
+  if (jar.cd > 0 || P.state !== 'move') return;
+  const T = TOOLS.jar;
+  jar.cd = T.cooldown; jar.tilt = 1;
+  const dir = aim && Math.hypot(aim.x, aim.y) > 0.2 ? screenToWorld(aim.x, aim.y) : { x: Math.sin(P.face), z: Math.cos(P.face) };
+  P.face = Math.atan2(dir.x, dir.z);
+  if (!jar.full) {
+    if (world.waterNear && world.waterNear(P.x + dir.x * 0.8, P.z + dir.z * 0.8, T.reach)) {
+      setJarFull(true);
+      sound.sfx('scoop');
+      for (let i = 0; i < 12; i++) sparks.spawn({ x: P.x + dir.x * 1.2, y: P.y + 0.2, z: P.z + dir.z * 1.2, vx: (Math.random() - 0.5) * 2, vy: 1 + Math.random() * 2, vz: (Math.random() - 0.5) * 2, grav: 8, life: 0.5, size: 0.12, color: '#9fe8ff', glow: 1.4 });
+      ui.toast(STORY.belfryLines.jarFull);
+    } else { sound.sfx('deny'); ui.toast(STORY.belfryLines.jarEmpty); }
+    return;
+  }
+  // pour: a splash in front of you
+  setJarFull(false);
+  sound.sfx('pour');
+  const x = P.x + dir.x * 1.4, z = P.z + dir.z * 1.4, y = world.groundAt(x, z);
+  for (let i = 0; i < 26; i++) { const a = Math.random() * TAU, sp = Math.random() * 2.2; sparks.spawn({ x: P.x + dir.x * 0.6, y: P.y + 1.1, z: P.z + dir.z * 0.6, vx: dir.x * 3.2 + Math.cos(a) * sp * 0.4, vy: 1.5 + Math.random() * 1.5, vz: dir.z * 3.2 + Math.sin(a) * sp * 0.4, grav: 11, life: 0.6, size: 0.14, color: i % 3 ? '#7fd8f0' : '#e6fcff', glow: 1.6 }); }
+  splash(x, y, z, true);
+  const r1 = world.pour ? world.pour(x, z, T.splash) : { fire: 0, basin: false };
+  const r2 = foes.wash ? foes.wash(x, z, T.splash) : {};
+  if (r1.fire) { ui.toast(STORY.belfryLines.doused); saveSoon = 1; }
+  if (r1.basin) { ui.toast(STORY.belfryLines.basin); sound.sfx('doorOpen'); shake(0.3); saveSoon = 1; }
+  void r2;
+}
 function useTool(aim) {
+  if (tools.cur === 'jar') { useJar(aim); return; }
   if (tools.cur === 'tether') {
     if (hook || tetherCd > 0 || P.state !== 'move') return;
     let dir = tetherDir(aim);
@@ -1262,23 +1447,81 @@ function cavesBuilt() {
   caves.openGateChain = (rg) => { const dr = rg.gate; if (dr && !dr.open) { dr.open = true; for (const sd of dr.solids) { const i = caves.solids.indexOf(sd); if (i >= 0) caves.solids.splice(i, 1); } sound.sfx('doorOpen'); shake(0.25); caveEvent('gateUp'); } };
   cavesRoot.visible = false;
 }
+function belfryBuilt() {
+  if (belfry) return;
+  belfryRoot = new THREE.Group();
+  scene.add(belfryRoot);
+  belfry = buildCaves(belfryRoot, BELFRY);
+  belfry.restore(belfrySaved);
+  foesBelfry = makeFoes(belfry, belfryRoot);
+  belfry.attach({ P, foes: foesBelfry, sound, shake, onEvent: caveEvent, onMap: () => {} });
+  belfryRoot.visible = false;
+  belfryRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+}
+function brineBuilt() {
+  if (brine) return;
+  brineRoot = new THREE.Group();
+  scene.add(brineRoot);
+  brine = buildTown(brineRoot, BRINEMOOR);
+  foesBrine = makeFoes(brine, brineRoot);
+  brine.attach({ P, foes: foesBrine, sound, shake, onEvent: caveEvent, camera });
+  story.addPeople(brine, brineRoot, ['hale', 'jun', 'peg']);
+  for (const id of kept) brine.takeKeepsake(id);
+  brineRoot.visible = false;
+  brineRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+}
+function seaBuilt() {
+  if (seaW) return;
+  brineBuilt();
+  seaRoot = new THREE.Group();
+  scene.add(seaRoot);
+  seaW = buildSeaPlace(seaRoot, SEA, { lanternhold: cove.mapInfo, brinemoor: brine.mapInfo });
+  foesSea = makeFoes(seaW, seaRoot);
+  seaW.attach({ onEvent: caveEvent });
+  if (seaSeen) { const b = atob(seaSeen); for (let k = 0; k < Math.min(b.length, seaW.mapInfo.seen.length); k++) seaW.mapInfo.seen[k] = b.charCodeAt(k); }
+  seaRoot.visible = false;
+}
+let seaSeen = null;
+// bellfish drift over the open water, between the islands
+function seaFoes() {
+  for (const [x, z] of [[-40, 60], [-80, 100], [40, 40], [-20, -60], [90, 0]]) { const f = foes.spawn('bellfish', x, z, { placed: true, wake: 16 }); f.sea = true; }
+}
+// the Lantern: the boat at the cove's dock once Tobin has her afloat, and the one you sail
+const lantern = (() => { const m = buildSailboat(); m.visible = false; return m; })();
+const boatModel = (() => { const m = buildSailboat(); m.visible = false; return m; })();
+function showLantern() {
+  if (lantern.visible) return;
+  const l = cove.spots.lantern;
+  lantern.position.set(l.x - 1.9, -0.05, l.z + 0.2);
+  lantern.visible = true;
+  coveRoot.add(lantern);
+  cove.solids.push({ x: l.x - 1.9, z: l.z + 0.2, r: 0.9, h: 2 });
+}
 let bossSpawned = false;
 function populateCaves() {
   foes.reset();
-  for (const c of caves.populate()) { const f = foes.spawn(c.kind, c.x, c.z, { placed: true, wake: c.kind === 'barnacle' ? 10 : c.kind === 'shardmite' ? 5.5 : 7 }); f.amb = c.amb; }
+  for (const c of world.populate()) { const f = foes.spawn(c.kind, c.x, c.z, { placed: true, wake: c.kind === 'barnacle' ? 10 : c.kind === 'shardmite' ? 5.5 : c.kind === 'mudmimic' ? 3 : 7 }); f.amb = c.amb; }
   bossSpawned = false;
 }
 // the guardian wakes when you step into her chamber
 function checkCaveBoss() {
-  if (bossSpawned || caves.state.bossDone) return;
-  const b = caves.boss;
+  const W = world;
+  if (bossSpawned || W.state.bossDone) return;
+  const b = W.boss;
   if (Math.hypot(P.x - b.x, P.z - b.z) > 9.5) return;
   bossSpawned = true;
-  const f = foes.spawn('barnaclemother', b.x, b.z);
-  if (f.crack) { cavesRoot.remove(f.crack); f.crack = null; }
+  const bel = W === belfry;
+  const f = foes.spawn(bel ? 'bellringer' : 'barnaclemother', b.x, b.z);
+  if (f.crack) { W.root.remove(f.crack); f.crack = null; }
+  if (bel) { f.state = 'up'; f.hittable = true; f.m.root.visible = true; }
   f.room = { x0: b.x - 9, x1: b.x + 9, z0: b.z - 9, z1: b.z + 9 };
-  story.setStep('cavesBoss');
-  bossEntrance({
+  story.setStep(bel ? 'belfryBoss' : 'cavesBoss');
+  bossEntrance(bel ? {
+    find: () => foes.list.find((o) => o.kind === 'bellringer' && o.alive),
+    wide: { pos: new V3(b.x - 5, 1.2, b.z + 8), look: new V3(b.x, 4.5, b.z) },
+    close: (o) => ({ pos: new V3(o.x + 3, 2.4, o.z + 6.5), look: new V3(o.x, 3.6, o.z) }),
+    card: STORY.belfryLines.guardianCard, lines: STORY.belfryLines.guardian,
+  } : {
     find: () => foes.list.find((o) => o.kind === 'barnaclemother' && o.alive),
     wide: { pos: new V3(b.x - 4, 1.4, b.z + 9), look: new V3(b.x, 2.5, b.z) },
     close: (o) => ({ pos: new V3(o.x + 3.5, 3.6, o.z + 7.5), look: new V3(o.x, 2.8, o.z) }),
@@ -1296,11 +1539,19 @@ async function caveEvent(name, arg) {
   else if (name === 'gateUp') ui.toast('The gate rattles up');
   else if (name === 'shortcut') { sound.sfx('doorOpen'); ui.toast('A shortcut opens'); }
   else if (name === 'keepsake') await foundKeepsake(arg);
-  else if (name === 'exit') { if (!travelling) travel('cove'); }
+  else if (name === 'exit') { if (!travelling) travel(world === belfry ? 'brine' : 'cove'); }
+  else if (name === 'tide') { ui.toast(arg === 'high' ? STORY.belfryLines.tideHigh : STORY.belfryLines.tideLow); saveSoon = 1.5; }
+  else if (name === 'wheelHint') ui.toast('A water wheel, its channel bone dry. The basin beside it is empty.');
+  else if (name === 'fireHint') { if (!P.fireHinted) { P.fireHinted = true; ui.toast('Burning oil blocks the way'); } }
+  else if (name === 'barrel') {
+    sound.sfx('wood'); sound.sfx('splash');
+    for (let i = 0; i < 4; i++) foes.dropSliver(arg.x, 0.6, arg.z);
+    for (let i = 0; i < 12; i++) { const a = Math.random() * TAU; bits.spawn({ x: arg.x, y: 0.5, z: arg.z, vx: Math.cos(a) * 3, vy: 2 + Math.random() * 3, vz: Math.sin(a) * 3, life: 1, size: 0.12, color: i % 2 ? '#9a6b45' : '#5d6670', floor: 0 }); }
+  }
 }
-function syncKeys() { ui.setKeys(world === caves ? { small: caves.state.keys, big: caves.state.bigKey } : null); }
+function syncKeys() { ui.setKeys(isDungeon() ? { small: world.state.keys, big: world.state.bigKey } : null); }
 async function openChest(c) {
-  caves.openChest(c);
+  world.openChest(c);
   sound.sfx('treasure');
   for (let i = 0; i < 24; i++) { const a = Math.random() * TAU; sparks.spawn({ x: c.x, y: c.y + 0.8, z: c.z, vx: Math.cos(a) * 2, vy: 2 + Math.random() * 3, vz: Math.sin(a) * 2, grav: 4, life: 1, size: 0.16, color: i % 2 ? '#ffe9a8' : '#bff6ff', glow: 2.6 }); }
   holdUp(true);
@@ -1308,6 +1559,10 @@ async function openChest(c) {
     giveTool('tether');
     await ui.itemGet(STORY.tether.name, STORY.tether.line, null);
     ui.showHint('tool', 'Hold the tool button to choose a tool', 6000);
+  } else if (c.item === 'jar') {
+    giveTool('jar');
+    await ui.itemGet(STORY.belfryLines.jar.name, STORY.belfryLines.jar.line, null);
+    ui.showHint('tool', 'Hold the tool button to choose the Jar', 6000);
   } else if (c.item === 'smallKey') await ui.itemGet(STORY.smallKey.name, STORY.smallKey.line, null);
   else if (c.item === 'bigKey') await ui.itemGet(STORY.bigKey.name, STORY.bigKey.line, null);
   holdUp(false);
@@ -1333,15 +1588,41 @@ function potsHit(x, z, rad) {
 
 // the Barnacle Mother falls: a heart, the oil, and a column of light to climb out by
 async function caveBossDown(f) {
+  // the win counts at once: the heart, the oil and the next step are yours before any words are said,
+  // so a fall, a quit or a closed tab in the middle of the scene can't lose them
+  if (f.kind === 'bellringer') return belfryBossDown(f);
+  if (caves.state.bossDone) return;
   caves.guardianDown();
+  P.maxHp += 2; P.hp = P.maxHp;
+  story.setStep('reportOil');
+  writeSave();
+  P.safe = 99;
   await gwait(1.2);
   await story.say(STORY.guardianDown);
-  P.maxHp += 2; P.hp = P.maxHp;
   holdUp(true);
   await ui.itemGet(STORY.heartUp.name, STORY.heartUp.line, null);
   await ui.itemGet(STORY.oil.name, STORY.oil.line, null);
   holdUp(false);
-  story.setStep('reportOil');
+  P.safe = 0.5;
+  ui.toast('A shaft of light leads up and out');
+  saveSoon = 0.3;
+}
+// the Bellringer falls: a heart, the page in Maren's hand, and the bell silent at last
+async function belfryBossDown(f) {
+  if (belfry.state.bossDone) return;
+  belfry.guardianDown();
+  P.maxHp += 2; P.hp = P.maxHp;
+  story.setStep('reportHale');
+  writeSave();
+  P.safe = 99;
+  const L = STORY.belfryLines;
+  await gwait(1.4);
+  await story.say(L.down);
+  holdUp(true);
+  await ui.itemGet(L.heart.name, L.heart.line, null);
+  await ui.itemGet(L.page.name, L.page.line, null);
+  holdUp(false);
+  P.safe = 0.5;
   ui.toast('A shaft of light leads up and out');
   saveSoon = 0.3;
 }
@@ -1389,8 +1670,10 @@ function hurtPlayer(dmg, fx, fz) {
   if (P.hp <= 0) fallDown();
   return true;
 }
+let deadAt = { x: 0, z: 0 };
 function fallDown() {
   stats.falls++;
+  deadAt = { x: P.x, z: P.z };
   P.state = 'dead'; P.t = 0; P.path = null; P.kx *= 0.4; P.kz *= 0.4;
   sound.sfx('fall');
   for (const st of [ui.input.attack, ui.input.ranged]) st.down = false;
@@ -1413,8 +1696,20 @@ function deadUpdate(dt) {
     ui.bossBar(null);
     if (world.onFell) world.onFell();
     // in the caves, everything that lives there is back in its place, the guardian included
-    if (world === caves) { populateCaves(); if (story.state.step === 'cavesBoss') story.setStep('caves', true); }
+    if (isDungeon()) {
+      populateCaves();
+      if (story.state.step === 'cavesBoss') story.setStep('caves', true);
+      if (story.state.step === 'belfryBoss') story.setStep('belfryIn', true);
+    }
+    if (world === brine) { foes.reset(); for (const c of brine.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 6 }); }
     P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.groundAt(P.x, P.z);
+    if (world === seaW) {
+      // out at sea: you come to, drifting, off the nearest island you can dock at
+      let best = null, bd = 1e9;
+      for (const o of SEA.islands) if (o.open) { const d = Math.hypot(deadAt.x - o.dock.x, deadAt.z - o.dock.z); if (d < bd) { bd = d; best = o; } }
+      P.x = best.dock.x; P.z = best.dock.z + (best.id === 'brinemoor' ? -6 : 6); P.y = 0;
+      if (P.boat) { P.boat.speed = 0; P.boat.course = null; }
+    }
     P.vx = P.vz = P.kx = P.kz = 0;
     P.hp = P.maxHp; P.invuln = 1.5;
     P.state = 'move'; P.t = 0; P.face = Math.PI * 0.85;
@@ -1422,14 +1717,82 @@ function deadUpdate(dt) {
     deadSat = 1;
     P.waking = 1;
     camLook.set(P.x, P.y + 0.6, P.z);
-    ui.titleCard(world === cove ? TEXT.fallen : 'You wake where you came in', world === cove ? 'The Keeper\u2019s Cove' : RIFT.name, 'Nothing is lost in the Prologue.');
+    const wn = world === cove ? 'The Keeper\u2019s Cove' : world === caves ? CAVES.name : world === belfry ? BELFRY.name : world === brine ? BRINEMOOR.name : RIFT.name;
+    ui.titleCard(world === cove ? TEXT.fallen : 'You wake where you came in', wn, story.past('free') ? 'Nothing you found is lost.' : 'Nothing is lost in the Prologue.');
     sound.sfx('wake');
   }
   m.root.position.set(P.x, P.y, P.z);
 }
 
+// ----- sailing the Lantern: the stick steers, a tap (or the chart) sets a course, the boot hops -----
+function sailUpdate(dt) {
+  const B = P.boat, I = ui.input, S2 = SEA;
+  P.invuln = Math.max(0, P.invuln - dt);
+  P.fireCd = Math.max(0, P.fireCd - dt);
+  B.lockT = Math.max(0, B.lockT - dt);
+  let throttle = 0, want = null;
+  if (I.move.active && Math.hypot(I.move.x, I.move.y) > 0.15) { const d = screenToWorld(I.move.x, I.move.y); want = Math.atan2(d.x, d.z); throttle = Math.min(1, Math.hypot(I.move.x, I.move.y) * 1.3); B.course = null; }
+  else if (B.course) {
+    const dx = B.course.x - P.x, dz = B.course.z - P.z, d = Math.hypot(dx, dz);
+    if (d < 3) B.course = null; else { want = Math.atan2(dx, dz); throttle = d < 10 ? 0.5 : 1; }
+  }
+  if (want !== null) P.face += clamp(Math.atan2(Math.sin(want - P.face), Math.cos(want - P.face)), -S2.turn * dt, S2.turn * dt);
+  B.speed = lerp(B.speed, S2.speed * throttle, Math.min(1, dt * (throttle > B.speed / S2.speed ? 0.9 : 1.4)));
+  const cur = world.currentAt(P.x, P.z);
+  const vx = Math.sin(P.face) * B.speed + cur.x, vz = Math.cos(P.face) * B.speed + cur.z;
+  const nx = P.x + vx * dt, nz = P.z + vz * dt;
+  if (!world.landAt(nx, nz)) { P.x = nx; P.z = nz; }
+  // running into a coast: slide along it, keeping the course (so a course set across an island finds its way round)
+  else if (!world.landAt(nx, P.z)) { P.x = nx; B.speed *= 1 - dt * 1.5; }
+  else if (!world.landAt(P.x, nz)) { P.z = nz; B.speed *= 1 - dt * 1.5; }
+  else {
+    // nose-first into it: turn away from the land a little and slow right down
+    B.speed *= 0.3;
+    const l = world.landAt(P.x + Math.sin(P.face + 0.6) * 3, P.z + Math.cos(P.face + 0.6) * 3), r2 = world.landAt(P.x + Math.sin(P.face - 0.6) * 3, P.z + Math.cos(P.face - 0.6) * 3);
+    P.face += (l && !r2 ? -1 : 1) * dt * 2.5;
+  }
+  P.vx = vx; P.vz = vz;
+  // a locked island turns you away
+  const near = world.islandNear(P.x, P.z, 7);
+  if (near && near.locked) {
+    const o = near.o, dx = P.x - o.x, dz = P.z - o.z, d = Math.hypot(dx, dz) || 1;
+    P.x = o.x + dx / d * (o.r + 8.1); P.z = o.z + dz / d * (o.r + 8.1); B.speed *= 0.5; B.course = null;
+    if (B.lockT <= 0) { ui.toast(o.locked); B.lockT = 5; sound.sfx('deny'); }
+  }
+  // the boot: a hop over the waves (you can't be hurt mid-air)
+  if (I.roll.pressed) { I.roll.pressed = false; if (B.hop <= 0) { B.hop = S2.hop; sound.sfx('roll'); } }
+  let hy = 0;
+  if (B.hop > 0) { B.hop -= dt; const k = 1 - B.hop / S2.hop; hy = Math.sin(k * Math.PI) * 1.3; P.iframes = true; if (B.hop <= 0) { P.iframes = false; splash(P.x, 0, P.z, true); } }
+  // the sling still slings (the sword button too, out here)
+  const firing = I.ranged.down || (I.attack.down && !B.dockable);
+  if (firing && P.fireCd <= 0) { fire(aimFor(I.ranged.down ? I.ranged : I.attack, WEAPONS.tidesling.range)); P.fireCd = 1 / WEAPONS.tidesling.rate; }
+  if (I.use) { I.use = null; }
+  // the boat: bobbing, heeling into turns, the sail full with speed
+  const t = performance.now() / 1000;
+  P.y = hy;
+  boatModel.position.set(P.x, -0.08 + hy + Math.sin(t * 1.6) * 0.06, P.z);
+  boatModel.rotation.set(Math.sin(t * 1.2) * 0.03, P.face, (want !== null ? clamp(Math.atan2(Math.sin(want - P.face), Math.cos(want - P.face)), -1, 1) : 0) * -0.12 * (B.speed / S2.speed) + Math.sin(t * 1.1) * 0.03);
+  boatModel.userData.sail.rotation.y = -0.25 - (B.speed / S2.speed) * 0.2;
+  boatModel.userData.pennant.rotation.y = Math.sin(t * 4) * 0.4;
+  const m = P.model;
+  m.root.position.set(P.x - Math.sin(P.face) * 0.9, boatModel.position.y + 0.3, P.z - Math.cos(P.face) * 0.9);
+  m.root.rotation.y = P.face;
+  m.legL.rotation.x = -1.3; m.legR.rotation.x = -1.3;
+  m.armL.rotation.set(-0.8, 0, 0); m.armR.rotation.set(firing ? -1.5 : -0.6, 0, 0);
+  P.spin.position.y = 0.2;
+  // a wake behind, spray at the bow
+  if (B.speed > 2 && Math.random() < dt * 30) sparks.spawn({ x: P.x - Math.sin(P.face) * 1.8 + (Math.random() - 0.5) * 0.8, y: 0.05, z: P.z - Math.cos(P.face) * 1.8 + (Math.random() - 0.5) * 0.8, vy: 0.3, life: 0.9, size: 0.2, color: '#f4fbff', glow: 0.4, drag: 2 });
+  if (B.speed > 5 && Math.random() < dt * 12) sparks.spawn({ x: P.x + Math.sin(P.face) * 1.8, y: 0.2, z: P.z + Math.cos(P.face) * 1.8, vx: Math.cos(P.face) * (Math.random() - 0.5) * 4, vy: 1.5, vz: -Math.sin(P.face) * (Math.random() - 0.5) * 4, grav: 8, life: 0.5, size: 0.14, color: '#e6fcff', glow: 0.6 });
+  // docking: the sword button offers "Dock" at an island's dock
+  const dk = world.islandNear(P.x, P.z, 9);
+  B.dockable = dk && dk.dock ? dk.o : null;
+  ui.setContext(B.dockable ? 'dock' : null);
+  if (B.dockable && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; travel(B.dockable.id === 'lanternhold' ? 'cove' : 'brine'); }
+  I.attack.pressed = false;
+}
 function updatePlayer(dt) {
   if (dt <= 0) return;
+  if (P.boat && P.state !== 'dead') { sailUpdate(dt); return; }
   if (P.state === 'dead') { deadUpdate(dt); return; }
   if (P.state === 'tether') { tetherFly(dt); return; }
   // knockback from a hit slides you back a little, whatever you're doing
@@ -1691,10 +2054,10 @@ function updateProjectiles(dt) {
     for (const d of world.dummies) if (Math.hypot(d.x - p.x, d.z - p.z) < d.r + S.size && p.y < d.root.position.y + 1.6) { hitD = d; break; }
     const gy = world.groundAt(p.x, p.z);
     let hitF = null;
-    if (!hitD) for (const f of foes.targets()) if (Math.hypot(f.x - p.x, f.z - p.z) < f.D.r + S.size + 0.1 && p.y < f.y + (f.kind === 'bellfish' ? 2.4 : 1.4)) { hitF = f; break; }
+    if (!hitD) for (const f of foes.targets()) if (Math.hypot(f.x - p.x, f.z - p.z) < f.D.r + S.size + 0.1 && p.y < f.y + (f.kind === 'bellfish' || f.kind === 'bubblebishop' ? 2.6 : f.kind === 'bellringer' ? 5 : 1.4)) { hitF = f; break; }
     if (hitF) {
       const l = Math.hypot(p.vx, p.vz) || 1;
-      foes.hit(hitF, p.vx / l, p.vz / l, S.dmg, false, S.knock);
+      foes.hit(hitF, p.vx / l, p.vz / l, S.dmg, false, S.knock, 'sling');
       stop = Math.max(stop, 0.02);
       done = true; hitD = hitF;
     } else if (!hitD && world.targetAt(p.x, p.y, p.z, S.size)) {
@@ -1785,7 +2148,7 @@ function gameplayCam(out, outLook) {
   // look a little ahead of where you're heading (the lead is smoothed in updatePlayer)
   outLook.set(P.x + (P.leadX || 0) * C.lookAhead, P.y + 0.6, P.z + (P.leadZ || 0) * C.lookAhead);
   const portrait = clamp(0.85 / camera.aspect, 1, 1.55);
-  const dist = C.dist * ui.input.zoom * portrait;
+  const dist = C.dist * ui.input.zoom * portrait * (P.boat ? 1.75 : 1);
   out.copy(outLook).addScaledVector(camDir, dist);
 }
 const wantPos = new V3(), wantLook = new V3();
@@ -1876,13 +2239,14 @@ function tick(dt) {
   P.safe = Math.max(0, (P.safe || 0) - dt);
   if (wheelSlow) simDt *= 0.2;   // choosing a tool: the world slows almost to a stop
   if (started && !intro && world === cove) story.update(dt);
-  if (world === caves && started) {
-    // in the caves the sword button opens chests
-    const c = !story.busy() && P.state === 'move' ? caves.chestNear(P) : null;
+  else if (started && !intro && world === brine) story.updateTown(dt, brine);
+  if (isDungeon() && started) {
+    // in a dungeon the sword button opens chests
+    const c = !story.busy() && P.state === 'move' ? world.chestNear(P) : null;
     ui.setContext(c ? 'open' : null);
     if (c && ui.input.attack.pressed && !travelling) { ui.input.attack.pressed = false; ui.input.attack.down = false; openChest(c); }
     checkCaveBoss();
-  } else if (world !== cove) ui.setContext(null);
+  } else if (world !== cove && world !== brine && world !== seaW) ui.setContext(null);
   if (travelling) updateTravel(dt);
   if (floodPlane) floodPlane.position.y = -0.3 + foesRift.flood.k * 0.42;
   ui.talkFrame(dt);
@@ -1890,9 +2254,21 @@ function tick(dt) {
   if (started && !intro && !busy) {
     // the sword button says "Talk" when someone is near: then it talks instead of swinging
     // (only in the cove: there's no one to talk to and no door to open inside the Rift)
-    if (world === cove && ui.input.attack.pressed && story.tryTalk()) { ui.input.attack.pressed = false; ui.input.attack.down = false; }
-    if (ui.input.tap) { if (P.state === 'move' && !ui.input.ranged.down) walkTo(ui.input.tap.x, ui.input.tap.y); ui.input.tap = null; }
+    if ((world === cove || world === brine) && ui.input.attack.pressed && story.tryTalk()) { ui.input.attack.pressed = false; ui.input.attack.down = false; }
+    if (ui.input.tap) {
+      if (P.boat) { const h = groundUnder(ui.input.tap.x, ui.input.tap.y); if (h) { P.boat.course = { x: h.x, z: h.z }; tapRing.position.set(h.x, 0.1, h.z); tapRing.visible = true; tapRing.userData.t = 0; } }
+      else if (P.state === 'move' && !ui.input.ranged.down) walkTo(ui.input.tap.x, ui.input.tap.y);
+      ui.input.tap = null;
+    }
     updatePlayer(simDt);
+    // the water rose round you (the Belfry's bell, Brinemoor's tide): it lifts you out onto dry ground
+    if (world.deepAt && !P.boat && P.state === 'move' && world.deepAt(P.x, P.z)) {
+      const d = world.nearestDry(P.x, P.z);
+      splash(P.x, P.y, P.z, true); sound.sfx('splash');
+      P.x = d.x; P.z = d.z; P.y = world.groundAt(P.x, P.z); P.path = null; P.vx = P.vz = 0;
+      ui.toast('The water lifts you out');
+    }
+    jar.cd = Math.max(0, jar.cd - simDt);
     updateHook(simDt);
     updateProjectiles(simDt);
     foes.update(simDt, camera);
@@ -1942,18 +2318,27 @@ function tick(dt) {
   updateIslandMap();
   const dark = Math.max(fade, curtain.k);
   // the clock and the tide
-  if (started && clock.running && world === cove && !story.state.cine && !story.state.ending) {
+  if (started && clock.running && outdoors() && !story.state.cine && !story.state.ending) {
     clockH = (clockH + dt / 60) % 24;
     clock.acc = (clock.acc || 0) + dt;
     if (clock.acc > 0.25) { clock.acc = 0; setClock(clockH); }
   }
   cove.seaLevel = clock.running ? tideAt(clockH) : -0.08;
+  if (brine) brine.setTide(clock.running ? tideAt(clockH) : -0.08);
+  // the Jar rides at your hip while it's the tool in hand, and tips when you use it
+  jarModel.visible = tools.cur === 'jar' && !P.boat && P.state !== 'dead';
+  if (jarModel.visible) {
+    jar.tilt = Math.max(0, jar.tilt - dt * 2.5);
+    if (jarModel.parent !== P.model.root) P.model.root.add(jarModel);
+    jarModel.position.set(-0.32, 0.55 + jar.tilt * 0.5, 0.12 + jar.tilt * 0.3);
+    jarModel.rotation.set(jar.tilt * 1.6, 0, 0);
+  }
   // the journey's clock, and saving now and then
   if (started && !intro) {
     stats.time += dt;
     if (saveSoon >= 0) { saveSoon -= dt; if (saveSoon < 0) writeSave(); }
     saveClock += dt;
-    if (saveClock > 30 && !busy && world === cove) { saveClock = 0; writeSave(); }
+    if (saveClock > 30 && !busy && (world === cove || world === brine)) { saveClock = 0; writeSave(); }
   }
   const FU = post.final.uniforms;
   cineFlash.k = Math.max(0, cineFlash.k - dt * 1.6);
@@ -1979,7 +2364,7 @@ try {
   bits = createBits(scene, 320);
   world.fx.sparks = sparks;
   foesCove = foes = makeFoes(cove, coveRoot);
-  scene.add(aimMark, tapRing, tether.g);
+  scene.add(aimMark, tapRing, tether.g, boatModel);
   ui = createUI({
     canvas, prefs,
     isPaused: () => paused,
@@ -1993,6 +2378,7 @@ try {
     onTool: (id) => setTool(id),
     onWheel: (open) => { wheelSlow = open; },
     onWarp: (id) => warpTo(id),
+    onChart: (x, z) => { if (P.boat) { P.boat.course = { x: x * 2, z: z * 2 }; ui.toast('Course set'); } },
     journey,
     sfx: (n) => sound.sfx(n),
   });
@@ -2012,8 +2398,12 @@ try {
     startClock: () => { clock.running = true; },
     lightStone: (w) => lightStone(w),
     foundKeepsake: (k) => foundKeepsake(k),
-    keepsakesReady: () => keepsakesAll() && !memories.breakfast,
-    remembered: () => { memories.breakfast = 1; saveSoon = 0.3; },
+    keepsakesReady: () => memoryReady(),
+    remembered: (id = 'breakfast') => { memories[id] = 1; saveSoon = 0.3; },
+    current: () => world,
+    setClock: (h) => { clockH = h; setClock(h); clock.running = true; },
+    showLantern: () => showLantern(),
+    waitTide: () => waitTide(),
   });
   setTime(0);
   applyQuality();
@@ -2031,7 +2421,7 @@ try {
   setTimeout(showTitle, 450);
   addEventListener('pagehide', () => writeSave());
   document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, jar, setJarFull, waitTide, get place() { return placeOf(world); }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

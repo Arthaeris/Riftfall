@@ -393,6 +393,9 @@ body.rot .mapCv { width: min(62vw, 56vh); height: min(62vw, 56vh); }
 .wTool.on { transform: scale(1.18); background: radial-gradient(110% 110% at 32% 22%, rgba(255, 255, 255, 0.6), rgba(159, 243, 255, 0.3) 60%), rgba(20, 14, 44, 0.75); border-color: #bff6ff; }
 .wTool.on b { opacity: 1; }
 .act.ranged.tool { color: #ffd29a; }
+.act.ranged .jarFill { opacity: 0; transition: opacity 0.3s; }
+.act.ranged.jarFull .jarFill { opacity: 1; fill: #7fe8ff; }
+.act.ranged.jarFull { color: #bff6ff; }
 /* a small notch on the tool button says "hold me for more" */
 .act.ranged.multi::after { content: ''; position: absolute; left: 6px; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: #ffd29a; box-shadow: 0 0 6px rgba(255, 210, 154, 0.9); }
 body.lefty .act.ranged.multi::after { left: auto; right: 6px; }
@@ -418,4 +421,4 @@ body.lefty .act.ranged.multi::after { left: auto; right: 6px; }
 .itemGet p { margin: 0 0 12px; font-size: 14.5px; line-height: 1.45; color: var(--ink-2); }
 .igTap { font-size: 11px; font-weight: 800; letter-spacing: 0.24em; text-transform: uppercase; color: var(--accent); animation: tapPulse 2.2s ease-in-out infinite; }
 .mk.way { width: 10px; height: 10px; background: #bff6ff; transform: rotate(45deg) scaleX(0.7); box-shadow: 0 0 6px rgba(159, 243, 255, 0.9); }
-body.hasKeys .quest { top: calc(var(--pad-t) + 100px); }
+body.hasKeys .quest, body.hasKeys .shards:not(.hidden) ~ .quest { top: calc(var(--pad-t) + 100px); }

@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.7.1';
+export const VERSION = '0.8.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -170,6 +170,48 @@ export const FOES = {
     knockTaken: 0,
     drops: [16, 20],
   },
+  bubblebishop: {
+    name: 'Bubble Bishop',
+    desc: 'A drowned priest who never stopped preaching. Its sermon is a bubble, and the bubble turns blades.',
+    hp: 26, r: 0.5, dmg: 1, speed: 1.1,
+    hover: 1.1, keep: [3.5, 6],
+    every: [2.6, 3.4],     // seconds between its bubble sermons
+    tell: 0.7,
+    bubbles: 3, bubbleSpeed: 2.6, bubbleLife: 3.6,
+    bare: 4.5,             // seconds before a popped shield bubble grows back
+    knockTaken: 0.7,
+    drops: [2, 3],
+  },
+  rustgill: {
+    name: 'Rustgill Knight',
+    desc: 'A fish in a rusted helm, sworn to a drowned lord. It hides behind a shield made from a ship\u2019s wheel.',
+    hp: 48, r: 0.6, dmg: 1, speed: 1.5,
+    turn: 2.2, guard: 70,  // its shield blocks hits from this many degrees either side of straight ahead
+    reach: 2.0, tell: 0.6, thrust: 0.22, rest: 0.9,
+    knockTaken: 0.4,
+    drops: [3, 4],
+  },
+  mudmimic: {
+    name: 'Mud Mimic',
+    desc: 'A puddle of harbour mud with a mouth in it. It waits. Wash it out and it can\u2019t hide.',
+    hp: 30, r: 0.55, dmg: 1, speed: 2.0,
+    bite: 1.4,             // it snaps at you from hiding when you come this close
+    bare: 6,               // seconds it stays washed out before it gathers itself again
+    knockTaken: 0.6,
+    drops: [2, 4],
+  },
+  bellringer: {
+    name: 'The Drowned Bellringer',
+    desc: 'She rang the Belfry\u2019s bell every hour for three hundred years, and she has not stopped because she drowned.',
+    hp: 320, r: 2.0, dmg: 1, speed: 0,
+    heat: 2.2,             // seconds it takes her bell to glow hot enough to crack
+    hot: 5.5,              // how long it stays hot (pour the Jar on it then)
+    stun: 4.5,             // how long she's out from under the bell after it cracks
+    every: [2.2, 1.7],
+    wave: 9,
+    knockTaken: 0,
+    drops: [18, 22],
+  },
   gardener: {
     name: 'The Weeping Gardener',
     desc: 'A great tree hanging upside down from a crack in the Rift. Its tears fall upward; the fruit on its branches are tiny worlds.',
@@ -188,6 +230,10 @@ export const TOOLS = {
   tether: {
     name: 'Tether', desc: 'A keeper\u2019s grapple on a line of sky-thread. Bite a brass ring to cross a gap; pull shells, plates and creatures toward you.',
     range: 9.5, speed: 30, pull: 15, cooldown: 0.45,
+  },
+  jar: {
+    name: 'Tide Jar', desc: 'A jar that holds a little piece of the sea. Scoop up water, then pour it where it\u2019s needed.',
+    reach: 1.8, splash: 1.7, cooldown: 0.5,
   },
 };
 
@@ -264,6 +310,163 @@ export const CAVES = {
   ],
 };
 
+// ----- the Sunken Belfry: the second legacy dungeon. Same map letters as Gullcliff Caves, plus:
+//   ,  sunken floor (dry at low water, too deep at high)    a b  stairs down into it
+//   F  a floating crate (rides the water up, a stepping stone at high water)
+//   W  the Tide Bell: strike it to turn the water high or low   ~  a pool (scoop from it)
+//   i  burning oil (pour water on it)   o  a dry basin   Q  the water-wheel door it turns
+//   u  bubble bishop   g  rustgill knight   M  mud mimic
+export const BELFRY = {
+  name: 'The Sunken Belfry',
+  region: 'Under the drowned square of Brinemoor',
+  line: 'Its bell has rung beneath the water every hour since the sky broke.',
+  theme: 'belfry',
+  ambush: { x0: 8, z0: 1, x1: 30, z1: 5 },
+  water: { high: -0.08, low: -1.6, start: 'high' },
+  keepsake: 'button', boss: 'bellringer', tool: 'jar',
+  map: [
+    '################################################################',
+    '########.t...................t.#################################',
+    '########............g..........#################################',
+    '########.....u........s.....K..#######..t..#####################',
+    '########..........s.....u......#####.........###################',
+    '########.t...................t.####~.........~##################',
+    '###############dd#################.............#################',
+    '###############..#################.............#################',
+    '###############..################...............################',
+    '###############QQ################.t...........t.################',
+    '########t........o.....##########.......X.......################',
+    '########.~~...........t##########...............################',
+    '########.~~.......M....##########...............################',
+    '########...............###########.............#################',
+    '########....M..........###########.............#################',
+    '########............p..############~.........~##################',
+    '########t.............t#######...............###################',
+    '########...............#######......##..t..#####################',
+    '##################...#########......############################',
+    '##################...#########...###############################',
+    '##################iii#########...###############################',
+    '##################...#########...###############################',
+    '##################...#########...###############################',
+    '##################...#########BBB###############################',
+    '##################...........................###################',
+    '##################.t..................,,::c:.###################',
+    '####,,,,,,,,######..p.................FF::::.##########.......##',
+    '###,k,,,,,,,,#####....................,,::::.##########t.....t##',
+    '###,,,,,,,,,,#####.......,,,,,,,,,,,,,.......##########.......##',
+    '###,,,,,,m,,,#####.......,,,,,,,,,,,,,.......##########...T...##',
+    '###,,,,,,,,,,ab.......r..,,,,,,,,,,,,,..r....###,,,,###.......##',
+    '###,,,,,,,,,,ab..........,,,,,,W,,,,,,..........FFFF..D.......##',
+    '###,,,,,,,,,,ab..........,,,,,,,,,,,,,..........FFFF..D.......##',
+    '###,,,m,,,,,,#####.......,,,,,,,,,,,,,..........FFFF..D.......##',
+    '###,,,,,,,,,,#####....r..,,,,,,,,,,,,,..r....###,,,,###..g....##',
+    '###,,,,,,,,,,#####.......,,,,,,,,,,,,,.......##########....~~.##',
+    '###,,u,,,,,,,#####...........aaaaa...........##########....~~.##',
+    '###,,,,,,,,p,#####...........bbbbb........p..##########tp....t##',
+    '####,,,,,,,,######.tu......................t.##########.......##',
+    '##################...........................###################',
+    '##############################...###############################',
+    '##############################...###############################',
+    '##############################...###############################',
+    '##############################...###############################',
+    '#########################.............##########################',
+    '#########################.t.........t.##########################',
+    '#########################....m...m....##########################',
+    '#########################...........p.##########################',
+    '#########################..r.......r..##########################',
+    '#########################.............##########################',
+    '#########################.............##########################',
+    '#########################.t....P....t.##########################',
+    '#########################...p.....p...##########################',
+    '##############################...###############################',
+    '##############################EEE###############################',
+    '################################################################',
+  ],
+};
+
+// ----- Brinemoor: a fishing town on stilts over its own drowned older town
+//   ~ sea   , sand   = boardwalk   . drowned street   1 2 3 stairs   H house   R ruin   Z the Belfry's tower
+//   B the Belfry door   D the pier   P where the boat ties up   g grass   # rock   L the old light
+//   T the tide post   h Hale   j Jun   q Peg   l lamp   b J keepsakes   M mud mimic   m mirrorpuddle
+export const BRINEMOOR = {
+  name: 'Brinemoor',
+  region: 'The Glass Sea',
+  line: 'Built on stilts over the town it used to be.',
+  map: [
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DPD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~,,,,,,,DDD,,,,,,,,~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~,,,,,,,,,DDD,,,,,,,,,,~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~==========================================~~~~~~~~~',
+    '~~~~~~~~~===HHHHHH================HHHHHH==HHHHHH===~~~~~~~~~',
+    '~~~~~~~~~===HHHHHH================HHHHHH==HHHHHH===~~~~~~~~~',
+    '~~~~~~~~~===HHHHHH================HHHHHH==HHHHHH===~~~~~~~~~',
+    '~~~~~~~~~=========h================================~~~~~~~~~',
+    '~~~~~~~~~====l============l=====T===q=======l======~~~~~~~~~',
+    '~~~~~~~~~==========================================~~~~~~~~~',
+    '~~~~~~~~~==========.........333.........===========~~~~~~~~~',
+    '~~~~~~~~~==========.........222.........=====HHHHH=~~~~~~~~~',
+    '~~~~~~~~,=HHHH=====.........111.........=====HHHHH=,~~~~~~~~',
+    '~~~~~~~~,=HHHH=====...RRRR..............=====HHHHH=,~~~~~~~~',
+    '~~~~~~~,,=HHHH=====...RRRR.....ZZZZZ.123=====HHHHH=,,~~~~~~~',
+    '~~~~~~~,,=HHHH=====...RRRR.....ZZZZZ.123=====HHHHH=,,~~~~~~~',
+    '~~~~~~~,,=HHHH=====............ZZZZZ.123===========,,~~~~~~~',
+    '~~~~~~~,,==========.......M....ZZZZZ....===========,,~~~~~~~',
+    '~~~~~~~,,========j=321.........ZZZZZ....===========,,~~~~~~~',
+    '~~~~~~~,,=l========321...........B......=========l=,,~~~~~~~',
+    '~~~~~~~,,==========321..................===========,,~~~~~~~',
+    '~~~~~~~,,==========......f.......RRR....===========,,~~~~~~~',
+    '~~~~~~~,,=HHHH=====...........m..RRR....===========,,~~~~~~~',
+    '~~~~~~~,,=HHHH=====..m...........RRR....=====HHHHH=,,~~~~~~~',
+    '~~~~~~~,,=HHHH=====....J................=====HHHHH=,,~~~~~~~',
+    '~~~~~~~,,=HHHH=====.........111.....M...=====HHHHH=,,~~~~~~~',
+    '~~~~~~~,,=HHHH=====.........222.........=====HHHHH=,,~~~~~~~',
+    '~~~~~~~,,==========.........333.........=====HHHHH=,,~~~~~~~',
+    '~~~~~~~,,==========================================,,~~~~~~~',
+    '~~~~~~~,,==================l===l===================,,~~~~~~~',
+    '~~~~~~~~,==========HHHHHH=========HHHHHH===========,~~~~~~~~',
+    '~~~~~~~~,==========HHHHHH=========HHHHHH===========,~~~~~~~~',
+    '~~~~~~~~~====l=====HHHHHH=========HHHHHH=====l=====~~~~~~~~~',
+    '~~~~~~~~~==========HHHHHH=========HHHHHH=========b=~~~~~~~~~',
+    '~~~~~~~~~==========================================~~~~~~~~~',
+    '~~~~~~~~~~~,,ggggggggggggggggggggggggggggggggg,,,~~~~~~~~~~~',
+    '~~~~~~~~~~~~,ggggggggggggggggggggggggggggggggg,,~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~ggggggggggggggggggggggggggggggggg,~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~ggggggggggggggggLgggggggggggggggg~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~ggggggggggggggggggggggggggggggggg~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~###################################~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~###################################~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~,,,,,,,,,,,,,,,,,,~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  ],
+};
+
+// ----- the Glass Sea: the sea chart, with every island on it (a sea unit is four of an island's blocks)
+export const SEA = {
+  name: 'The Glass Sea',
+  line: 'Every wave catches a little of the broken sky.',
+  half: 260,
+  islands: [
+    { id: 'lanternhold', name: 'Lanternhold', x: 0, z: 0, dock: { x: 6.6, z: 14 }, open: true },
+    { id: 'brinemoor', name: 'Brinemoor', x: -130, z: 150, dock: { x: -129.5, z: 134 }, open: true },
+    { id: 'cinderglass', name: 'Cinderglass Atoll', x: 150, z: 96, r: 16, locked: 'A ring of boiling water keeps you off. Not yet.' },
+    { id: 'saltglass', name: 'Saltglass Flats', x: -190, z: -40, r: 22, locked: 'The shallows are full of rocks you can\u2019t see. Not yet.' },
+    { id: 'choir', name: 'The Hushed Choir', x: 40, z: -180, r: 14, locked: 'A wall of fog that hums. Your sail goes slack. Not yet.' },
+  ],
+  // currents: they carry the boat along (the first runs most of the way to Brinemoor)
+  currents: [
+    { x0: -14, z0: 34, x1: -104, z1: 112, w: 11, speed: 4 },
+    { x0: 70, z0: -30, x1: 130, z1: 60, w: 12, speed: 6 },
+    { x0: -120, z0: 30, x1: -160, z1: -40, w: 10, speed: 5 },
+  ],
+  speed: 7.5, turn: 1.6, hop: 0.6,
+};
+
 // ----- the Seep: the clearing where the fallen shard leaks creatures into Lanternhold -----
 export const SEEP = {
   name: 'The Seep',
@@ -309,6 +512,9 @@ export const NPCS = {
   wenna: { name: 'Wenna', color: '#ff9f80', role: 'Baker' },
   pip: { name: 'Pip', color: '#9fd8ff', role: 'Trouble' },
   ennis: { name: 'Ennis', color: '#e8d48a', role: 'Lamplighter' },
+  hale: { name: 'Hale', color: '#9fd8c8', role: 'Harbour-master' },
+  jun: { name: 'Jun', color: '#ffb38a', role: 'Diver' },
+  peg: { name: 'Peg', color: '#e8a0c0', role: 'Innkeeper' },
 };
 
 // ----- the Prologue, step by step. Each step has an objective line; Maren's lines are said when you talk to her. -----
@@ -336,7 +542,15 @@ export const STORY = {
     cavesBoss: 'Something guards the oil store. Defeat it',
     reportOil: 'Bring the lamp oil to Maren',
     boathouse: 'Cross the ravine on Knot Hill to the old boathouse',
-    act1End: 'The sea is waiting. (More of Act 1 arrives in the next build.)',
+    findTobin: 'Tell Tobin about the old boathouse',
+    setSail: 'Board the boat at the dock and sail south-west to Brinemoor',
+    brinemoor: 'Find Brinemoor\u2019s harbour-master',
+    belfry: 'Wait for low tide, then enter the Sunken Belfry in the drowned square',
+    belfryIn: 'Silence the bell beneath Brinemoor',
+    belfryBoss: 'Something rings the bell. Stop it',
+    reportHale: 'Tell Hale the bell is silent',
+    reportMaren2: 'Sail home and show Maren the page',
+    act1Sea: 'Something stirs out by Bell Rock. (The next part of Act 1 arrives in the next build.)',
   },
   // the Prologue in chapters, for the journal in the pause menu (each lists the steps it covers)
   chapters: [
@@ -346,10 +560,12 @@ export const STORY = {
     { name: 'The Drowned Orchard', steps: ['enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift'] },
     { name: 'First Light', steps: ['rest', 'morning', 'ending'] },
     { name: 'Act 1 \u00b7 Gullcliff', steps: ['free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil'] },
-    { name: 'Act 1 \u00b7 The Boathouse', steps: ['boathouse', 'act1End'] },
+    { name: 'Act 1 \u00b7 The Boathouse', steps: ['boathouse', 'findTobin', 'setSail'] },
+    { name: 'Act 1 \u00b7 Brinemoor', steps: ['brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2'] },
+    { name: 'Act 1 \u00b7 Bell Rock', steps: ['act1Sea'] },
   ],
   // every step in order (saving and the journal use this)
-  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'act1End'],
+  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea'],
   maren: {
     findMaren: [
       'There you are. I thought the tide had taken you.',
@@ -405,7 +621,21 @@ export const STORY = {
       'The lamp will burn tonight. Thank you.',
     ],
     boathouse: ['The ravine on Knot Hill. The Tether will get you across.'],
-    act1End: ['A boat. That\u2019s what we need. Tobin will know.'],
+    findTobin: ['A boat. That\u2019s what we need. Tobin will know what to do with it.'],
+    setSail: ['South-west, past the current. Brinemoor\u2019s bell used to carry all the way here on a still night.'],
+    brinemoor: ['Brinemoor. Hale keeps the harbour there, if he\u2019s still as stubborn as he was.'],
+    belfry: ['The Belfry. Go carefully.'],
+    belfryIn: ['The Belfry. Go carefully.'],
+    belfryBoss: ['The Belfry. Go carefully.'],
+    reportHale: ['Hale will want to know.'],
+    reportMaren2: [
+      'You\u2019re back. And salt to the eyebrows. What\u2019s that you\u2019ve got?',
+      '\u2026Give it here.',
+      'That\u2019s my hand. My letters, my blots. I don\u2019t remember writing a word of it.',
+      'A Weaver. Old keepers\u2019 stories, apprentice. Nothing more.',
+      'Go and get some sleep. And keep the page. I don\u2019t want it in the house.',
+    ],
+    act1Sea: ['Bell Rock. Tobin says the water there has been warm since the Belfry went quiet. I don\u2019t like warm water.'],
   },
   // after the beacon is lit: night falls, then the first Riftfall
   riftfallAfter: [
@@ -434,6 +664,7 @@ export const STORY = {
     ennis: {
       before: ['Ennis. I light the lamps. All of them, every evening, for forty years.', 'Wick, flame, glass, door. That\u2019s the whole job. Most people never notice.'],
       after: ['Did you see the sky? I lit every lamp twice. Didn\u2019t help, but it felt like something.'],
+      after2: ['A boat at the dock again. Like the old days. I\u2019ll hang a lamp on the bow post for you.'],
       morning: [
         'See the waystones? Old lanterns on stone posts, all over the island. The first keepers put them there.',
         'Light one and it remembers you. Then you can find your way back to it in a blink. Look on your map.',
@@ -460,13 +691,92 @@ export const STORY = {
     { who: '', text: 'The old boathouse. The doors are swollen shut with salt, and the slipway runs down into empty water.' },
     { who: '', text: 'Someone has carved a lighthouse into the door, and under it a word you can\u2019t read yet.' },
   ],
-  roundEnd: 'You have reached the edge of this build. The sea opens in the next one.',
+  roundEnd: 'You have reached the edge of this build. More of the Glass Sea arrives in the next one.',
+  // Act 1: the boat, the sea, Brinemoor and the Belfry
+  tobinBoat: [
+    { who: 'tobin', text: 'The old keepers\u2019 boathouse? Nobody\u2019s opened that door in thirty years.' },
+    { who: 'tobin', text: 'There was a boat in there once. The Lantern. Fastest thing on the Glass Sea, and the only one that could find its way in fog.' },
+    { who: 'tobin', text: 'Give me the afternoon. If her hull\u2019s sound, I\u2019ll have her at the dock by evening.' },
+  ],
+  tobinDone: [
+    { who: 'tobin', text: 'She floats. Mostly. The sail\u2019s new, the lamp at the bow is old. It still lights.' },
+    { who: 'tobin', text: 'Steer with your stick, or tap where you want to go. Tap the boot to hop, the sling still slings, and the chart\u2019s on your map.' },
+    { who: 'tobin', text: 'Brinemoor\u2019s south-west. Follow the current and you\u2019ll be there before the tide turns.' },
+  ],
+  sail: 'Sail',
+  dock: 'Dock',
+  setSailCard: { name: 'The Glass Sea', region: 'Lanternhold waters', line: 'Every wave catches a little of the broken sky.' },
+  boatHint: 'Steer with the stick or tap the sea \u00b7 the boot hops \u00b7 the map is your chart',
+  hale: {
+    brinemoor: [
+      'Lanternhold colours on that sail. Maren\u2019s boat. Then you\u2019re her apprentice.',
+      'Hale. Harbour-master, for what the harbour\u2019s worth these days.',
+      'Since the sky broke, the old bell under the square has been ringing. Every hour, under the water. And every time it rings, the tide comes in wrong.',
+      'Half my town\u2019s gone under twice this week. The other half won\u2019t sleep for the noise.',
+      'The Belfry door is in the drowned square. You can only reach it at low tide. Jun knows the streets down there; ask her.',
+      'If you can stop that bell, Brinemoor will owe you. If you can\u2019t, at least come back up.',
+    ],
+    belfry: ['Low tide, then the square. The tide post on the boardwalk will tell you when.'],
+    reportHale: [
+      'Listen. You hear that? Nothing. Three hundred years of bells, and nothing.',
+      'The tide\u2019s turning right again. You did that.',
+      'What\u2019s that you found down there? Paper, dry as bone. Under the sea.',
+      'Keepers\u2019 writing. Take it to Maren. I don\u2019t want to be the one to read it.',
+      'And come back when you like. There\u2019ll always be a bunk at Peg\u2019s for you.',
+    ],
+    after: ['The nets come up full again. Strange fish, mind. One of them was folded like paper.'],
+  },
+  jun: {
+    before: [
+      'You\u2019re going down there? Good. I\u2019ve been wanting someone mad enough.',
+      'The tide post on the north boardwalk: sit there and you can wait for the water to go out. Or come in.',
+      'At low tide the drowned square is dry enough to walk. Mind the puddles. Some of them have teeth.',
+      'The Belfry\u2019s tower is in the middle of the square. Its door faces south.',
+    ],
+    after: ['I went down after you came up. The bell\u2019s cracked clean through. I never thought I\u2019d miss the noise.'],
+  },
+  peg: {
+    before: ['Welcome to the Drowned Anchor. Best stew on the stilts. Only stew on the stilts.', 'If the bell wakes you, the rooms upstairs are higher. Not much higher.'],
+    after: ['Quiet night last night. Folk didn\u2019t know what to do with themselves. I sold a lot of stew.'],
+  },
+  tidePost: 'Wait for the tide',
+  tideOut: 'The tide goes out. The drowned square is dry.',
+  tideIn: 'The tide comes in. The drowned square goes under.',
+  belfryLines: {
+    enter: [{ who: '', text: 'The door opens on air that hasn\u2019t moved in three hundred years. Far below, a bell tolls, and the water shivers.' }],
+    tideHigh: 'The water rises',
+    tideLow: 'The water drains away',
+    jar: { name: 'Tide Jar', line: 'A jar that holds a piece of the sea. Hold the tool button to choose it. Use it by water to scoop, use it again to pour: douse flames, fill basins, wash things out of hiding.' },
+    jarFull: 'The Jar is full',
+    jarEmpty: 'Nothing to pour. Scoop up water first',
+    doused: 'The flames hiss out',
+    basin: 'The basin fills; somewhere, a wheel begins to turn',
+    guardianCard: { name: 'The Drowned Bellringer', region: 'Guardian of the Sunken Belfry', line: 'Cool the bell, and she has nowhere to hide.' },
+    guardian: [{ who: '', text: 'The great bell swings. Beneath it, something with long pale arms holds the rope, and has never once let go.' }],
+    down: [{ who: '', text: 'The bell cracks from crown to lip. The ringing stops. In the silence, something drifts down from the rafters: a page, perfectly dry.' }],
+    heart: { name: 'Bell-bronze Heart', line: 'Your health grows by one heart.' },
+    page: { name: 'A page in Maren\u2019s hand', line: '\u201cEvery bell I hung was a lock, and every lock a lie I told the sky. The Weaver will come for what I took. Let them listen to the bells, and not to the lamp.\u201d' },
+  },
+  // a second memory: a rainy day
+  // going to sleep in Maren's cottage
   // keepsakes: odd little things only the apprentice notices
   keepsakes: {
     spoon: { name: 'A spoon that is always warm', line: 'Why would anyone leave a spoon up here? It is warm, as if someone just put it down.' },
     crust: { name: 'A crust that never goes stale', line: 'Bread, out on the Flats. It smells like Wenna\u2019s, but it isn\u2019t hers.' },
     cup: { name: 'A chipped cup', line: 'Blue-rimmed, chipped on one side. You know exactly where your thumb goes.' },
+    boat: { name: 'A paper boat', line: 'Folded from a page of nothing. It has never been wet, and it isn\u2019t now.' },
+    button: { name: 'A yellow button', line: 'From a raincoat you\u2019ve never owned. You can almost feel the hood.' },
+    puddle: { name: 'A puddle in a jar', line: 'Someone kept a puddle. Rain on a street that never was, still rippling.' },
   },
+  memories: {
+    breakfast: { set: ['cup', 'spoon', 'crust'], name: 'Breakfast' },
+    rain: { set: ['boat', 'button', 'puddle'], name: 'A rainy day' },
+  },
+  rememberRain: [
+    { who: '', text: 'You set the paper boat, the button and the puddle on the lamp-room sill. For a moment it rains, inside, and you aren\u2019t wet.' },
+    { who: '', text: 'Up on the Heights, something unfolds that was always there.' },
+  ],
+  rememberedRain: { name: 'A memory: A rainy day', line: 'Your health grows by one heart. On the Heights stands a covered porch with a bench, out of the rain.' },
   keepsakeSet: 'Breakfast',
   keepsakeHint: 'Three odd things. They feel like they belong together, somewhere near the lamp.',
   remember: [

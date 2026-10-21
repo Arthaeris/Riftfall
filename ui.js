@@ -54,18 +54,25 @@ function voxelHeart(state) {
 // The UI
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
+// The stage is always landscape. A phone held upright (or locked upright) gets the whole game turned sideways,
+// so turning the phone never changes anything.
+export const view = { rot: false, w: innerWidth, h: innerHeight };
+export function updateView() {
+  const rot = matchMedia('(pointer: coarse)').matches && innerHeight > innerWidth;
+  view.rot = rot;
+  view.w = rot ? innerHeight : innerWidth;
+  view.h = rot ? innerWidth : innerHeight;
+  document.body.classList.toggle('rot', rot);
+  return view;
+}
+// a point on the screen -> the same point on the (maybe turned) stage
+export function toStage(cx, cy) { return view.rot ? { x: cy, y: innerWidth - cx } : { x: cx, y: cy }; }
+updateView();
+
 export function createUI(opts) {
   const prefs = opts.prefs;
   const root = $('#ui');
   root.innerHTML = '';
-
-  // Riftfall is played sideways: holding the phone upright shows a gentle reminder (and pauses)
-  if (!$('.rotate')) {
-    document.body.appendChild(el('div', 'rotate', '<div class="rotBox"><div class="rotPhone"><i></i></div><div class="rotTitle">Turn your phone sideways</div><div class="rotSub">Riftfall is played in landscape.</div></div>'));
-  }
-  const portrait = matchMedia('(orientation: portrait) and (pointer: coarse)');
-  const onTurn = () => { if (portrait.matches && opts.isStarted()) pause(); };
-  if (portrait.addEventListener) portrait.addEventListener('change', onTurn); else portrait.addListener(onTurn);
 
   // shared input state, read by the game every frame
   const input = {
@@ -74,6 +81,7 @@ export function createUI(opts) {
     ranged: { down: false, pressed: false, aim: { x: 0, y: 0, active: false } },
     roll: { pressed: false },
     ability: { pressed: false },
+    tap: null,        // a quick tap on the ground: { x, y } on the stage, the game walks you there
     mouse: { x: 0, y: 0, has: false },
     zoom: 1,
     any: false,       // set on any input, so the opening shot can be skipped
@@ -92,10 +100,12 @@ export function createUI(opts) {
   hud.appendChild(numbers);
   root.appendChild(hud);
 
-  // ----- action buttons -----
+  // ----- action buttons: an arc around the sword, each with a cooldown ring -----
   const pad = el('div', 'pad');
-  const mkBtn = (cls, icon, label) => { const b = el('button', 'act ' + cls, `<span class="ring"></span><span class="ic">${icon}</span>`); b.setAttribute('aria-label', label); pad.appendChild(b); return b; };
-  const bAttack = mkBtn('attack', ICON.sword, 'Attack');
+  pad.appendChild(el('div', 'padGlow'));
+  const RING = '<svg class="cd" viewBox="0 0 100 100"><circle cx="50" cy="50" r="47"/></svg>';
+  const mkBtn = (cls, icon, label, extra = '') => { const b = el('button', 'act ' + cls, `${RING}<span class="ic">${icon}</span>${extra}`); b.setAttribute('aria-label', label); pad.appendChild(b); return b; };
+  const bAttack = mkBtn('attack', ICON.sword, 'Attack', '<span class="pips"><i></i><i></i><i></i></span>');
   const bRanged = mkBtn('ranged', ICON.sling, 'Sling');
   const bRoll = mkBtn('roll', ICON.roll, 'Roll');
   const bAbility = mkBtn('ability hidden', ICON.spark, 'Ability');   // appears once an ability is unlocked
@@ -108,29 +118,37 @@ export function createUI(opts) {
   function applyLayout() { document.body.classList.toggle('lefty', !!prefs.lefty); }
   applyLayout();
 
-  // ----- touch: a joystick wherever you put your thumb, buttons that aim when you drag them -----
+  // ----- touch -----
+  // one finger: a quick tap walks you there; a drag brings up the joystick (on the left side of the screen)
+  // two fingers: pinch to zoom. The buttons aim when you drag them.
   const canvas = opts.canvas;
   const touches = new Map();      // pointerId -> what it's doing
   const R = 56;                   // joystick radius (px)
   const AIM_R = 46;
+  const TAP_MOVE = 12, TAP_TIME = 350;
   let pinch = null;
+  const stagePt = (e) => toStage(e.clientX, e.clientY);
+  const onButtonSide = (x) => (prefs.lefty ? x < view.w * 0.4 : x > view.w * 0.6);
   const btnFor = (t) => (t === bAttack ? input.attack : t === bRanged ? input.ranged : null);
   function startButton(e, btn) {
     e.preventDefault();
     input.any = true;
     if (btn === bRoll) { input.roll.pressed = true; pulse(bRoll); return; }
-    if (btn === bAbility) { pulse(bAbility); opts.onLocked && opts.onLocked(); return; }
+    if (btn === bAbility) { pulse(bAbility); return; }
     const st = btnFor(btn);
     st.down = true; st.pressed = true;
     st.aim.active = false; st.aim.x = st.aim.y = 0;
     const r = btn.getBoundingClientRect();
-    touches.set(e.pointerId, { kind: 'btn', btn, st, cx: r.left + r.width / 2, cy: r.top + r.height / 2 });
+    const c = toStage(r.left + r.width / 2, r.top + r.height / 2);
+    touches.set(e.pointerId, { kind: 'btn', btn, st, cx: c.x, cy: c.y });
     btn.classList.add('held');
     try { btn.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
   }
   for (const b of [bAttack, bRanged, bRoll, bAbility]) b.addEventListener('pointerdown', (e) => startButton(e, b));
   function moveButton(t, e) {
-    const dx = e.clientX - t.cx, dy = e.clientY - t.cy, len = Math.hypot(dx, dy);
+    const p = stagePt(e);
+    let dx = p.x - t.cx, dy = p.y - t.cy;
+    const len = Math.hypot(dx, dy);
     if (len > 18) {
       t.st.aim.active = true;
       t.st.aim.x = dx / len; t.st.aim.y = dy / len;
@@ -147,49 +165,64 @@ export function createUI(opts) {
     t.btn.classList.remove('held');
     aimRing.style.display = 'none';
   }
+  function releaseStick(t) {
+    if (!t.stick) return;
+    t.stick = false;
+    input.move.x = input.move.y = 0; input.move.active = false;
+    joy.classList.add('fade');
+    setTimeout(() => { if (![...touches.values()].some((x) => x.stick)) joy.style.display = 'none'; }, 180);
+  }
+  function updatePinch() {
+    const d = Math.hypot(pinch.a.x - pinch.b.x, pinch.a.y - pinch.b.y) || 1;
+    input.zoom = Math.max(0.65, Math.min(1.5, pinch.z * pinch.d0 / d));
+  }
   canvas.addEventListener('pointerdown', (e) => {
     input.any = true;
     if (opts.isPaused()) return;
+    const p = stagePt(e);
     if (e.pointerType === 'mouse') {
       // desktop: left = swing, right = sling, toward the cursor
-      input.mouse.has = true; input.mouse.x = e.clientX; input.mouse.y = e.clientY;
+      input.mouse.has = true; input.mouse.x = p.x; input.mouse.y = p.y;
       const st = e.button === 2 ? input.ranged : input.attack;
       st.down = true; st.pressed = true;
       touches.set(e.pointerId, { kind: 'mouse', st, button: e.button });
       return;
     }
-    const others = [...touches.values()].filter((t) => t.kind === 'joy');
-    // the right side belongs to the buttons: a thumb landing there doesn't start the joystick
-    const buttonSide = prefs.lefty ? e.clientX < innerWidth * 0.4 : e.clientX > innerWidth * 0.6;
-    if (!others.length && buttonSide) return;
-    if (others.length === 1) {
-      // a second finger on the field: pinch to zoom
-      const a = others[0];
-      pinch = { a: a, startD: Math.hypot(e.clientX - a.x, e.clientY - a.y) || 1, z: input.zoom, id: e.pointerId, x: e.clientX, y: e.clientY };
-      touches.set(e.pointerId, { kind: 'pinch' });
+    const field = [...touches.values()].filter((t) => t.kind === 'field');
+    if (field.length === 1 && !pinch) {
+      // a second finger: pinch to zoom (the first finger stops steering)
+      const a = field[0];
+      releaseStick(a);
+      a.pinched = true;
+      const b = { kind: 'pinch2', x: p.x, y: p.y };
+      pinch = { a, b, d0: Math.hypot(p.x - a.x, p.y - a.y) || 1, z: input.zoom };
+      touches.set(e.pointerId, b);
       return;
     }
-    touches.set(e.pointerId, { kind: 'joy', sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY });
-    joy.style.display = 'block';
-    joy.style.left = e.clientX + 'px'; joy.style.top = e.clientY + 'px';
-    joy.classList.remove('fade');
-    joy.firstChild.style.transform = '';
-    hideHint('move');
+    if (field.length >= 2 || pinch) return;
+    touches.set(e.pointerId, { kind: 'field', sx: p.x, sy: p.y, x: p.x, y: p.y, t0: performance.now(), stick: false, pinched: false, far: 0 });
   });
   window.addEventListener('pointermove', (e) => {
-    if (e.pointerType === 'mouse') { input.mouse.has = true; input.mouse.x = e.clientX; input.mouse.y = e.clientY; }
+    const p = stagePt(e);
+    if (e.pointerType === 'mouse') { input.mouse.has = true; input.mouse.x = p.x; input.mouse.y = p.y; }
     const t = touches.get(e.pointerId);
     if (!t) return;
     if (t.kind === 'btn') { moveButton(t, e); return; }
-    if (t.kind === 'pinch' && pinch) {
-      const d = Math.hypot(e.clientX - pinch.a.x, e.clientY - pinch.a.y) || 1;
-      input.zoom = Math.max(0.65, Math.min(1.5, pinch.z * pinch.startD / d));
-      return;
+    t.x = p.x; t.y = p.y;
+    if (pinch && (pinch.a === t || pinch.b === t)) { updatePinch(); return; }
+    if (t.kind !== 'field' || t.pinched) return;
+    let dx = t.x - t.sx, dy = t.y - t.sy;
+    t.far = Math.max(t.far, Math.hypot(dx, dy));
+    // a drag turns into the joystick, which appears where the drag started
+    if (!t.stick && t.far > TAP_MOVE && !onButtonSide(t.sx)) {
+      t.stick = true;
+      joy.style.display = 'block';
+      joy.style.left = t.sx + 'px'; joy.style.top = t.sy + 'px';
+      joy.classList.remove('fade');
+      input.tap = null;
+      hideHint('move');
     }
-    if (t.kind === 'joy') {
-      t.x = e.clientX; t.y = e.clientY;
-      if (pinch && pinch.a === t) { const d = Math.hypot(pinch.x - t.x, pinch.y - t.y) || 1; input.zoom = Math.max(0.65, Math.min(1.5, pinch.z * pinch.startD / d)); return; }
-      let dx = t.x - t.sx, dy = t.y - t.sy;
+    if (t.stick) {
       const len = Math.hypot(dx, dy);
       // the base follows your thumb if you drag far, so you never run out of stick
       if (len > R * 1.25) { const k = (len - R * 1.25) / len; t.sx += dx * k; t.sy += dy * k; dx = t.x - t.sx; dy = t.y - t.sy; joy.style.left = t.sx + 'px'; joy.style.top = t.sy + 'px'; }
@@ -204,12 +237,12 @@ export function createUI(opts) {
     touches.delete(e.pointerId);
     if (t.kind === 'btn') endButton(t);
     else if (t.kind === 'mouse') t.st.down = false;
-    else if (t.kind === 'pinch') pinch = null;
-    else if (t.kind === 'joy') {
-      if (pinch && pinch.a === t) pinch = null;
-      input.move.x = input.move.y = 0; input.move.active = false;
-      joy.classList.add('fade');
-      setTimeout(() => { if (![...touches.values()].some((x) => x.kind === 'joy')) joy.style.display = 'none'; }, 180);
+    else if (t.kind === 'pinch2') pinch = null;
+    else if (t.kind === 'field') {
+      if (pinch && pinch.a === t) { pinch = null; touches.forEach((o, id) => { if (o.kind === 'pinch2') touches.delete(id); }); }
+      // a quick tap that didn't wander: walk there
+      if (!t.stick && !t.pinched && t.far <= TAP_MOVE && performance.now() - t.t0 < TAP_TIME && e.type === 'pointerup') { input.tap = { x: t.x, y: t.y }; hideHint('move'); }
+      releaseStick(t);
     }
   }
   window.addEventListener('pointerup', endPointer);
@@ -333,10 +366,10 @@ export function createUI(opts) {
       </div>
       <details class="group help">
         <summary class="gTitle">Controls</summary>
-        <p><b>Move</b> — drag anywhere on the left. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
+        <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
         <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
       </details>
-      <div class="foot">Riftfall v${VERSION} · Prologue, round 1.1</div>
+      <div class="foot">Riftfall v${VERSION} · Prologue, round 1.2</div>
     </div>`;
   root.appendChild(sheet);
   function syncSheet() {
@@ -373,7 +406,20 @@ export function createUI(opts) {
   document.addEventListener('visibilitychange', () => { if (document.hidden && opts.isStarted()) pause(); });
 
   // ----- the ability button shows its (still locked) charge -----
-  function setCooldowns(rollReady) { bRoll.classList.toggle('cool', !rollReady); }
+  // cooldown rings fill back up; pips show where you are in the sword combo
+  const ringOf = (b) => b.querySelector('.cd circle');
+  let lastCd = '';
+  function setCooldowns(rollLeft, slingLeft, combo) {
+    const key = rollLeft.toFixed(2) + slingLeft.toFixed(2) + combo;
+    if (key === lastCd) return;
+    lastCd = key;
+    const C = 295.3;   // circumference of the ring
+    ringOf(bRoll).style.strokeDashoffset = (C * rollLeft).toFixed(1);
+    ringOf(bRanged).style.strokeDashoffset = (C * slingLeft).toFixed(1);
+    bRoll.classList.toggle('cool', rollLeft > 0.001);
+    bRanged.classList.toggle('cool', slingLeft > 0.001);
+    bAttack.querySelectorAll('.pips i').forEach((p, i) => p.classList.toggle('on', i < combo));
+  }
 
   return {
     input, setHearts, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,

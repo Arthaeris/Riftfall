@@ -28,6 +28,7 @@ const ICON = {
   spark: '<svg viewBox="0 0 48 48"><path d="M24 5l4 14 14 5-14 5-4 14-4-14-14-5 14-5z" fill="currentColor"/></svg>',
   lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5" fill="currentColor"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2.4" fill="none"/></svg>',
   talk: '<svg viewBox="0 0 48 48"><path d="M9 12h30a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4H22l-8 7v-7H9a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4z" fill="currentColor"/><circle cx="16" cy="23" r="2.6" fill="#1d1b4a"/><circle cx="24" cy="23" r="2.6" fill="#1d1b4a"/><circle cx="32" cy="23" r="2.6" fill="#1d1b4a"/></svg>',
+  enter: '<svg viewBox="0 0 48 48"><path d="M12 42V18a12 12 0 0 1 24 0v24z" fill="none" stroke="currentColor" stroke-width="4"/><path d="M24 14l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="currentColor"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.6" fill="currentColor"/></svg>',
 };
 
@@ -382,9 +383,39 @@ export function createUI(opts) {
   function setContext(kind) {
     if (kind === ctxKind) return;
     ctxKind = kind;
-    bAttack.querySelector('.ic').innerHTML = kind === 'talk' ? ICON.talk : ICON.sword;
+    bAttack.querySelector('.ic').innerHTML = kind === 'talk' ? ICON.talk : kind === 'enter' ? ICON.enter : ICON.sword;
     bAttack.classList.toggle('ctx', !!kind);
-    bAttack.setAttribute('aria-label', kind === 'talk' ? 'Talk' : 'Attack');
+    bAttack.setAttribute('aria-label', kind === 'talk' ? 'Talk' : kind === 'enter' ? 'Enter' : 'Attack');
+  }
+
+  // ----- the guardian's health, across the top of the screen -----
+  const boss = el('div', 'bossBar', '<div class="bbName"></div><div class="bbTrack"><i class="bbChip"></i><i class="bbFill"></i></div>');
+  hud.appendChild(boss);
+  let bossChip = 1;
+  function bossBar(name, frac) {
+    if (!name) { boss.classList.remove('on'); return; }
+    if (!boss.classList.contains('on')) { boss.querySelector('.bbName').textContent = name; boss.classList.add('on'); bossChip = frac; }
+    boss.querySelector('.bbFill').style.width = (frac * 100).toFixed(1) + '%';
+    bossChip = Math.max(frac, bossChip - 0.004);
+    boss.querySelector('.bbChip').style.width = (bossChip * 100).toFixed(1) + '%';
+  }
+
+  // ----- the map of the Rift: rooms you've seen, the one you're in, the guardian's and the treasure -----
+  const map = el('div', 'miniMap hidden');
+  hud.appendChild(map);
+  let mapKey = '';
+  function setMap(state) {
+    if (!state) { map.classList.add('hidden'); mapKey = ''; return; }
+    const k = JSON.stringify(state);
+    if (k === mapKey) return;
+    mapKey = k;
+    map.classList.remove('hidden');
+    const shown = state.rooms.filter((rm) => rm.seen);
+    const i0 = Math.min(...shown.map((rm) => rm.i)), j0 = Math.min(...shown.map((rm) => rm.j));
+    const i1 = Math.max(...shown.map((rm) => rm.i)), j1 = Math.max(...shown.map((rm) => rm.j));
+    map.style.gridTemplateColumns = `repeat(${i1 - i0 + 1}, 22px)`;
+    map.style.gridTemplateRows = `repeat(${j1 - j0 + 1}, 16px)`;
+    map.innerHTML = shown.map((rm) => `<i class="mr ${rm.visited ? 'v' : 's'} ${rm.here ? 'here' : ''} ${rm.type}" style="grid-column:${rm.i - i0 + 1};grid-row:${rm.j - j0 + 1}"></i>`).join('');
   }
 
   // ----- hints: small, once, then gone -----
@@ -455,12 +486,17 @@ export function createUI(opts) {
         <label class="row"><span>Damage numbers</span><input type="checkbox" class="sw" data-pref="numbers"></label>
         <label class="row"><span>Left-handed buttons</span><input type="checkbox" class="sw" data-pref="lefty"></label>
       </div>
+      <div class="group">
+        <div class="gTitle">Playtest shortcuts</div>
+        <div class="jumps"><button data-jump="riftfall">Skip to the Riftfall</button><button data-jump="rift">Go into the Rift</button></div>
+        <p class="sub">For testing only: these skip story steps. Saving arrives in round 5.</p>
+      </div>
       <details class="group help">
         <summary class="gTitle">Controls</summary>
         <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
         <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
       </details>
-      <div class="foot">Riftfall v${VERSION} · Prologue, round 3</div>
+      <div class="foot">Riftfall v${VERSION} · Prologue, round 4</div>
     </div>`;
   root.appendChild(sheet);
   function syncSheet() {
@@ -468,10 +504,11 @@ export function createUI(opts) {
     sheet.querySelectorAll('input[data-pref]').forEach((i) => { if (i.type === 'checkbox') i.checked = !!prefs[i.dataset.pref]; else i.value = prefs[i.dataset.pref]; });
   }
   sheet.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act], .seg button');
+    const t = e.target.closest('[data-act], [data-jump], .seg button');
     if (e.target === sheet) { resume(); return; }
     if (!t) return;
     if (t.dataset.act === 'resume') { resume(); return; }
+    if (t.dataset.jump) { resume(); opts.onJump && opts.onJump(t.dataset.jump); return; }
     if (t.parentElement.classList.contains('seg')) { prefs.quality = t.dataset.v; changed(); }
   });
   sheet.addEventListener('input', (e) => {
@@ -513,7 +550,7 @@ export function createUI(opts) {
   }
 
   return {
-    input, setHearts, setShards, hurt, setObjective, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
+    input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

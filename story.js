@@ -40,7 +40,7 @@ export function createStory(ctx) {
     scene.add(m);
     return m;
   })();
-  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep'].includes(S.step);
+  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift'].includes(S.step);
 
   function updateNpcs(dt) {
     const now = performance.now() / 1000;
@@ -126,7 +126,8 @@ export function createStory(ctx) {
   function afterMaren() {
     if (S.step === 'findMaren') setStep('practice');
     else if (S.step === 'reportPractice') { setStep('beacon'); if (world.beacon.on) beaconLit(); }
-    else if (S.step === 'reportSeep') { setStep('rest'); ui.toast(STORY.roundEnd); sound.sfx('clear'); }
+    else if (S.step === 'reportSeep') setStep('enterRift');
+    else if (S.step === 'reportRift') { setStep('rest'); ui.toast(STORY.roundEnd); sound.sfx('clear'); }
   }
 
   // ---------------------------------------------------------------------------
@@ -305,19 +306,30 @@ export function createStory(ctx) {
       if (Math.hypot(P.x - S.talkTarget.x, P.z - S.talkTarget.z) < 1.8) talk(S.talkTarget);
       else if (!P.path) S.talkTarget = null;
     }
+    // the shard, once it has become a door: it glimmers, and the sword button offers "Enter"
+    const sh = world.seep;
+    S.nearShard = S.step === 'enterRift' && !S.busy && P.state === 'move' && Math.hypot(P.x - sh.x, P.z - sh.z) < 2.6;
+    if (S.step === 'enterRift' && Math.random() < dt * 30) {
+      const a = performance.now() / 300 + Math.random() * 0.6, rr = 0.9 + Math.random() * 0.5;
+      sparks.spawn({ x: sh.x + Math.cos(a) * rr, y: world.groundAt(sh.x, sh.z) + 0.3 + Math.random() * 2, z: sh.z + Math.sin(a) * rr, vx: -Math.sin(a) * 1.2, vz: Math.cos(a) * 1.2, vy: 0.6, drag: 0.5, life: 1.2, size: 0.14, color: Math.random() < 0.5 ? '#9ff3ff' : '#ff9fe0', glow: 3, flicker: 1 });
+    }
     // the sword button offers "Talk" when someone is close and nothing is fighting you
     const n = !S.busy && P.state === 'move' && !ctx.foes.seep.sealed ? nearestTalker() : null;
-    ui.setContext(n ? 'talk' : null);
+    ui.setContext(S.nearShard ? 'enter' : n ? 'talk' : null);
     S.near = n;
   }
-  function tryTalk() { if (S.near && !S.busy) { talk(S.near); return true; } return false; }
+  function tryTalk() {
+    if (S.nearShard && !S.busy) { ctx.travel('rift'); return true; }
+    if (S.near && !S.busy) { talk(S.near); return true; }
+    return false;
+  }
   function begin() { setStep('findMaren'); }
 
-  return { update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
+  return { update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, say: (lines) => ui.say(lines.map((l) => line(l.who, l.text))), busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
     // for testing: skip ahead
     if (step === 'beacon') { setStep('beacon'); }
     else if (step === 'riftfall') { beaconLit(); S.riftIn = 0.1; }
-    else if (step === 'night') { S.night = S.nightTo = 1; ctx.setTime(1); SKY_UNIFORMS.uCrackPower.value = 1; world.setShard(true); setStep('toShard'); }
+    else if (step === 'night' || step === 'enterRift') { S.night = S.nightTo = 1; S.riftIn = undefined; ctx.setTime(1); SKY_UNIFORMS.uCrackPower.value = 1; SKY_UNIFORMS.uCrackGrow.value = 1; world.setShard(true); world.beacon.light(); setStep(step === 'night' ? 'toShard' : 'enterRift'); }
     else setStep(step);
   } };
 }

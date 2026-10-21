@@ -1022,6 +1022,91 @@ export function buildFoe(kind) {
     // roots spreading over the ground
     for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; K.box(body, 0.6, 0.08, 0.12, bark[i % 3], Math.cos(a) * 0.35, 0.04, Math.sin(a) * 0.35).rotation.y = -a; }
     root.add(blob(0.9, 0.9));
+  } else if (kind === 'doorcrab') {
+    // a broad crab with big claws in front, and an old front door on its back for a shell
+    const shell = ['#d4583f', '#e06a4f', '#b8462f'];
+    K.box(body, 1.1, 0.34, 0.9, shell[0], 0, 0.32, 0);
+    K.box(body, 0.9, 0.16, 0.74, shell[1], 0, 0.52, 0);
+    for (const s2 of [1, -1]) {
+      for (const zz of [-0.25, 0, 0.25]) { const l = pivot(body, s2 * 0.55, 0.3, zz); l.rotation.z = s2 * 0.5; K.box(l, 0.4, 0.07, 0.07, shell[2], s2 * 0.2, 0, 0); out['leg' + s2 + zz] = l; }
+      for (const xx of [-0.14, 0.14]) { K.box(body, 0.05, 0.22, 0.05, shell[2], xx, 0.6, 0.38); K.box(body, 0.1, 0.1, 0.1, '#f4fbff', xx, 0.74, 0.38); K.box(body, 0.05, 0.05, 0.03, '#1d1726', xx, 0.75, 0.43); }
+    }
+    out.claws = [];
+    for (const s2 of [1, -1]) {
+      const c = pivot(body, s2 * 0.42, 0.36, 0.42);
+      K.box(c, 0.16, 0.16, 0.36, shell[1], 0, 0, 0.12);
+      K.box(c, 0.36, 0.3, 0.36, shell[0], 0, 0.04, 0.42);
+      const pin = pivot(c, 0, 0.1, 0.42); K.box(pin, 0.3, 0.1, 0.36, shell[2], 0, 0.04, 0.08); out.claws.push({ c, pin, s: s2 });
+    }
+    // the door, standing on its back like a hermit's shell: frame, panels, a knob, a little window
+    const door = pivot(body, 0, 0.58, -0.32);
+    door.rotation.x = -0.35;
+    K.box(door, 0.92, 1.3, 0.1, '#5d3d26', 0, 0.62, 0);
+    K.box(door, 0.8, 1.18, 0.08, '#7a8a6a', 0, 0.62, -0.03);
+    K.box(door, 0.28, 0.4, 0.09, '#6a7a5a', -0.18, 0.95, -0.04); K.box(door, 0.28, 0.4, 0.09, '#6a7a5a', 0.18, 0.95, -0.04);
+    K.box(door, 0.28, 0.32, 0.09, '#6a7a5a', -0.18, 0.35, -0.04); K.box(door, 0.28, 0.32, 0.09, '#6a7a5a', 0.18, 0.35, -0.04);
+    K.box(door, 0.08, 0.08, 0.06, '#d9b55a', 0.28, 0.62, -0.1);
+    K.box(door, 0.3, 0.18, 0.02, '#1d2a3a', 0, 1.1, -0.08);
+    // what's behind the door: nothing, glowing a little
+    const leaf = pivot(door, -0.4, 0.62, -0.06);
+    out.void = K.box(door, 0.76, 1.12, 0.02, '#120a24', 0, 0.62, -0.02, 1);
+    out.void.visible = false;
+    out.door = door;
+    root.add(blob(1.4, 1.2));
+  } else if (kind === 'lullabypod') {
+    // a woven cocoon; light shows through its seams more and more until it hatches
+    const silk = ['#d8cfe6', '#c9bedc', '#e6def0'];
+    const pod = pivot(body, 0, 0, 0);
+    out.pod = pod;
+    [[0.5, 0.2, 0.15], [0.7, 0.3, 0.42], [0.76, 0.3, 0.72], [0.62, 0.26, 1.0], [0.36, 0.22, 1.22], [0.14, 0.14, 1.38]].forEach(([w, h, y], k) => K.box(pod, w, h, w * 0.92, silk[k % 3], 0, y, 0));
+    out.seams = [];
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * TAU;
+      const m = K.box(pod, 0.04, 0.6, 0.04, '#ffd3f2', Math.cos(a) * 0.38, 0.72, Math.sin(a) * 0.36, 1.2);
+      out.seams.push(m);
+    }
+    for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + 0.4; K.box(body, 0.5, 0.06, 0.12, '#5c8f3e', Math.cos(a) * 0.4, 0.03, Math.sin(a) * 0.4).rotation.y = -a; }
+    root.add(blob(1.0, 1.0));
+  } else if (kind === 'gardener') {
+    // a great tree hanging upside down from a crack in the dark above; its crown sways near the ground,
+    // there's a face in its trunk, and the fruit are tiny worlds
+    const hang = pivot(body, 0, 0, 0);
+    out.hang = hang;
+    const bark = ['#4e3a30', '#5d463a', '#433128'];
+    for (let k = 0; k < 7; k++) K.box(hang, 1.2 - k * 0.04, 0.6, 1.1 - k * 0.04, bark[k % 3], (k % 2 - 0.5) * 0.06, 3.6 + k * 0.6, 0);
+    // roots spreading into the ceiling crack
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; const r2 = pivot(hang, Math.cos(a) * 0.4, 7.6, Math.sin(a) * 0.4); r2.rotation.set(Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9); K.box(r2, 0.2, 1.6, 0.2, bark[k % 3], 0, 0.7, 0); }
+    // the face
+    out.eyes = [];
+    for (const x of [-0.26, 0.26]) { K.box(hang, 0.24, 0.18, 0.04, '#120a24', x, 4.6, 0.56); out.eyes.push(K.box(hang, 0.12, 0.08, 0.02, '#9ff3ff', x, 4.58, 0.585, 2.6)); }
+    K.box(hang, 0.36, 0.12, 0.04, '#120a24', 0, 4.15, 0.56);
+    // the crown, hanging low, with branches out to the sides
+    out.branches = [];
+    const crown = pivot(hang, 0, 3.2, 0);
+    out.crown = crown;
+    const leaf = ['#3f7a5a', '#4a8a66', '#356a4e'];
+    K.box(crown, 2.6, 0.9, 2.4, leaf[0], 0, -0.4, 0);
+    K.box(crown, 2.0, 0.7, 1.9, leaf[1], 0, -1.0, 0);
+    K.box(crown, 1.2, 0.5, 1.1, leaf[2], 0, -1.45, 0);
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * TAU + 0.3;
+      const br = pivot(crown, 0, -0.3, 0);
+      br.rotation.y = a;
+      K.box(br, 0.22, 0.22, 2.2, bark[k % 3], 0, 0, 1.4);
+      K.box(br, 1.0, 0.6, 1.0, leaf[k % 3], 0, -0.2, 2.5);
+      out.branches.push(br);
+    }
+    // fruit: little worlds. A snowy one, a sunny one, a sea one, a forest one.
+    out.fruit = [];
+    [['#f4fbff', '#cfe8ff'], ['#ffd36b', '#f29a3a'], ['#4fb2d4', '#2a6f8f'], ['#7cc35e', '#3f7a3a']].forEach(([c1, c2], k) => {
+      const a = (k / 4) * TAU + 0.8, f = pivot(crown, Math.cos(a) * 1.3, -1.3, Math.sin(a) * 1.2);
+      K.box(f, 0.03, 0.4, 0.03, '#4e3a30', 0, 0.2, 0);
+      K.box(f, 0.36, 0.36, 0.36, c1, 0, -0.1, 0, 1.5); K.box(f, 0.2, 0.12, 0.38, c2, 0.04, -0.05, 0, 1.4);
+      out.fruit.push(f);
+    });
+    // its heart: a glowing core under the crown, where the hits land
+    out.heart = K.box(crown, 0.5, 0.5, 0.5, '#9ff3ff', 0, -1.85, 0, 2.6);
+    root.add(blob(3.4, 3.4));
   }
   root.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.castShadow = true; });
   return out;
@@ -1189,5 +1274,115 @@ export function buildNpc(kind) {
     box(sw, 0.18, 0.04, 0.04, '#6b4a33', 0, 0, 0.09);
     box(sw, 0.06, 0.03, 0.5, '#c8a77a', 0, 0, 0.36);
   }
+  return m;
+}
+
+// ---------------------------------------------------------------------------
+// The Drowned Orchard: props (built into batches like the cove's)
+// ---------------------------------------------------------------------------
+export const ORCHARD = {
+  // a fruit tree that has grown up under the sea: pale trunk, blue-green leaves, glowing fruit
+  tree(b, g, x, y, z, r, s = 1) {
+    b.push(x, y, z, r() * TAU, 0, 0, s);
+    b.box(0.36, 1.8, 0.36, '#8a8a7a', 0, 0.9, 0);
+    b.box(0.6, 0.2, 0.6, '#6f7a6a', 0, 0.1, 0);
+    const leaf = pick(['#3f8a8a', '#4a9a92', '#357a7a'], r);
+    b.box(1.9, 1.0, 1.9, leaf, 0, 2.2, 0, { ao: 0.8 });
+    b.box(1.3, 0.7, 1.3, shade(leaf, 1.12), 0.1, 2.9, 0, { ao: 0.85 });
+    b.box(0.7, 0.6, 0.7, shade(leaf, 0.9), 0.8, 2.0, 0.3);
+    b.box(0.6, 0.5, 0.6, shade(leaf, 0.95), -0.8, 2.3, -0.4);
+    for (let k = 0; k < 6; k++) b.box(0.08, 0.6 + r() * 0.5, 0.08, '#2f6a5a', (r() - 0.5) * 1.8, 1.4, (r() - 0.5) * 1.8, { jitter: 0.1 });
+    b.pop();
+    g.push(x, y, z, 0, 0, 0, s);
+    for (let k = 0; k < 4; k++) g.box(0.2, 0.2, 0.2, pick(['#ffb38a', '#ff8fd0', '#ffd36b'], r), (r() - 0.5) * 1.6, 1.75 + r() * 0.3, (r() - 0.5) * 1.6, { glow: 1.6, jitter: 0 });
+    g.pop();
+  },
+  coral(b, g, x, y, z, r) {
+    const c = pick(['#ff7a8a', '#ff9f6b', '#c98bff', '#ffcf6b'], r);
+    for (let k = 0; k < 5; k++) {
+      const h = 0.4 + r() * 0.9, ox = (r() - 0.5) * 0.9, oz = (r() - 0.5) * 0.9;
+      b.box(0.16, h, 0.16, c, x + ox, y + h / 2, z + oz, { rotZ: (r() - 0.5) * 0.5, rotX: (r() - 0.5) * 0.5 });
+      b.box(0.24, 0.12, 0.24, shade(c, 1.15), x + ox, y + h, z + oz);
+    }
+    b.box(1.1, 0.25, 1.0, '#7d8a8a', x, y + 0.12, z, { top: '#8f9c9a' });
+  },
+  rock(b, x, y, z, r) {
+    b.push(x, y, z, r() * TAU);
+    b.box(1.4, 0.9, 1.1, '#6f7c86', 0, 0.45, 0, { top: '#7f8e98' });
+    b.box(0.9, 0.6, 0.8, '#7a8892', 0.2, 1.1, 0, { top: '#8a9aa4' });
+    b.box(0.7, 0.12, 0.6, '#3f8a6a', -0.2, 0.95, 0.1);
+    b.pop();
+  },
+  kelp(b, x, y, z, r) {
+    for (let k = 0; k < 4; k++) {
+      const ox = (r() - 0.5) * 0.8, oz = (r() - 0.5) * 0.8, h = 1.4 + r() * 1.6;
+      for (let s = 0; s < h; s += 0.35) b.box(0.12, 0.36, 0.06, s % 0.7 < 0.35 ? '#3f7a3a' : '#4a8a46', x + ox + Math.sin(s * 2 + k) * 0.08, y + s + 0.18, z + oz, { jitter: 0.1 });
+    }
+  },
+  pool(b, g, x, y, z) {
+    // a pool of light in the floor: a spring of the Rift's water
+    for (let k = 0; k < 10; k++) { const a = (k / 10) * TAU; b.box(0.5, 0.2, 0.5, '#8a9aa4', x + Math.cos(a) * 1.2, y + 0.1, z + Math.sin(a) * 1.2, { rotY: a }); }
+    g.box(2.0, 0.04, 2.0, '#5fd6ec', x, y + 0.03, z, { glow: 1.1, jitter: 0, ao: 1 });
+  },
+  // hanging jellyfish lanterns: they glow and bob over the rooms
+  jelly(g, x, y, z, r) {
+    const c = pick(['#ff9fe0', '#9ff3ff', '#ffd29a'], r);
+    g.box(0.5, 0.3, 0.5, c, x, y, z, { glow: 1.4, jitter: 0 });
+    g.box(0.34, 0.18, 0.34, '#ffffff', x, y + 0.2, z, { glow: 1.6, jitter: 0 });
+    for (let k = 0; k < 4; k++) g.box(0.04, 0.6, 0.04, c, x + (k - 1.5) * 0.12, y - 0.42, z, { glow: 0.9, jitter: 0 });
+  },
+};
+
+// a little voxel fish that swims through the air of the Rift
+export function buildFish(color) {
+  const b = new Batch(95);
+  b.box(0.36, 0.2, 0.14, color, 0, 0, 0);
+  b.box(0.14, 0.18, 0.04, shade(color, 0.85), -0.24, 0, 0);
+  b.box(0.04, 0.04, 0.15, '#1d1726', 0.12, 0.04, 0);
+  const m = b.mesh(); m.castShadow = false; m.matrixAutoUpdate = true;
+  return m;
+}
+
+// the treasure chest: lid opens
+export function buildChest() {
+  const K = kit();
+  const root = new THREE.Group();
+  K.box(root, 1.0, 0.5, 0.7, '#8b5e3c', 0, 0.25, 0);
+  K.box(root, 1.04, 0.08, 0.74, '#c9a24a', 0, 0.06, 0);
+  const lid = pivot(root, 0, 0.5, -0.35);
+  K.box(lid, 1.04, 0.24, 0.74, '#9a6b45', 0, 0.12, 0.35);
+  K.box(lid, 1.06, 0.06, 0.76, '#c9a24a', 0, 0.2, 0.35);
+  K.box(root, 0.16, 0.2, 0.06, '#d9b55a', 0, 0.45, 0.37);
+  const glow = K.box(root, 0.8, 0.1, 0.5, '#ffe9a8', 0, 0.48, 0, 3);
+  glow.visible = false;
+  root.add(blob(1.2, 1.0));
+  root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return { root, lid, glow };
+}
+
+// the heart-glass: what the Gardener leaves behind
+export function buildHeartGlass() {
+  const b = new Batch(96);
+  b.box(0.6, 0.9, 0.6, '#9ff3ff', 0, 0, 0, { glow: 2.2, rotY: 0.785, jitter: 0 });
+  b.box(0.36, 0.6, 0.36, '#ffffff', 0, 0.1, 0, { glow: 3, rotY: 0.3, jitter: 0 });
+  b.box(0.3, 0.5, 0.3, '#ff9fe0', 0.3, -0.2, 0, { glow: 2, rotZ: 0.5, jitter: 0 });
+  const m = b.mesh(MAT.glow); m.castShadow = false; m.matrixAutoUpdate = true;
+  return m;
+}
+
+// floors of the Rift get moving caustics, like light through water
+export const CAUSTICS = { uTime: { value: 0 } };
+export function causticMaterial() {
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = CAUSTICS.uTime;
+    sh.vertexShader = 'varying vec3 vWp; varying vec3 vWn;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n vWp = (modelMatrix * vec4(transformed, 1.0)).xyz; vWn = normalize(mat3(modelMatrix) * objectNormal);');
+    sh.fragmentShader = 'uniform float uTime; varying vec3 vWp; varying vec3 vWn;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      vec2 cp = vWp.xz * 0.55;
+      float c1 = sin(cp.x * 2.1 + uTime * 1.1 + sin(cp.y * 1.7 + uTime * 0.7) * 1.4);
+      float c2 = sin(cp.y * 2.3 - uTime * 0.9 + sin(cp.x * 1.3 - uTime * 0.6) * 1.6);
+      float caus = pow(max(0.0, 1.0 - abs(c1 + c2) * 0.6), 6.0);
+      totalEmissiveRadiance += vec3(0.35, 0.85, 0.9) * caus * 0.35 * clamp(vWn.y, 0.0, 1.0);`);
+  };
   return m;
 }

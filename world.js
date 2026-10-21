@@ -1,9 +1,9 @@
 /* Riftfall — world.js
    Places: the ground you walk on, what stands on it, what lives in it, and what you can't walk through.
-   Round 1 holds one place: the Keeper's Cove on Lanternhold, at dusk. */
+   Two places so far: the Keeper's Cove on Lanternhold, and the first Rift, the Drowned Orchard. */
 import * as THREE from 'three';
-import { PALETTE } from '@rf/data';
-import { Batch, MAT, PROPS, rng, fbm, noise, col, shade, pick, clamp, lerp, TAU, buildSea, buildSky, buildGrass, buildBoat, buildDummy, WIND, SKY_UNIFORMS } from '@rf/art';
+import { PALETTE, RIFT } from '@rf/data';
+import { Batch, MAT, PROPS, ORCHARD, rng, fbm, noise, col, shade, pick, clamp, lerp, TAU, buildSea, buildSky, buildGrass, buildBoat, buildDummy, buildFish, buildChest, buildHeartGlass, causticMaterial, CAUSTICS, WIND, SKY_UNIFORMS } from '@rf/art';
 
 const V3 = THREE.Vector3;
 const N = 60;                 // the cove is N x N cells of 1 x 1
@@ -772,3 +772,407 @@ export function buildCove(scene) {
 }
 
 function hashJ(i, j) { const h = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return h - Math.floor(h); }
+
+// ===========================================================================
+// The Rift: a floor of rooms on a grid, Isaac-style. Each room is RW x RD inside, with a wall between rooms
+// and a doorway wherever two rooms meet. Doors seal while a room still has creatures in it.
+// ===========================================================================
+export function buildRift(root, seed = 7) {
+  const r = rng(seed);
+  const RW = RIFT.roomW, RD = RIFT.roomD, G = 7, PX = RW + 1, PZ = RD + 1;
+  // ----- the layout: start in the middle, grow rooms that touch exactly one existing room -----
+  const key = (i, j) => i + ',' + j;
+  const rooms = new Map();
+  const add = (i, j, type) => { const rm = { i, j, type, doors: [], cleared: type !== 'combat', visited: false, seen: false, depth: 0 }; rooms.set(key(i, j), rm); return rm; };
+  const start = add(3, 3, 'start');
+  const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const count = (i, j) => N4.filter(([a, b]) => rooms.has(key(i + a, j + b))).length;
+  let guard = 0;
+  while (rooms.size < RIFT.rooms && guard++ < 500) {
+    const list = [...rooms.values()];
+    const from = list[Math.floor(r() * list.length)];
+    const [a, b] = N4[Math.floor(r() * 4)];
+    const i = from.i + a, j = from.j + b;
+    if (i < 1 || j < 1 || i >= G - 1 || j >= G - 1 || rooms.has(key(i, j)) || count(i, j) !== 1) continue;
+    // keep the start room open on the south side, so the first view is into the floor
+    add(i, j, 'combat');
+  }
+  // distances from the start
+  const dist = new Map([[key(start.i, start.j), 0]]);
+  const queue = [start];
+  while (queue.length) { const c = queue.shift(); for (const [a, b] of N4) { const k = key(c.i + a, c.j + b); if (rooms.has(k) && !dist.has(k)) { dist.set(k, dist.get(key(c.i, c.j)) + 1); queue.push(rooms.get(k)); } } }
+  for (const rm of rooms.values()) rm.depth = dist.get(key(rm.i, rm.j)) || 0;
+  // the guardian waits behind the furthest room, in a new dead end; the treasure in another dead end
+  const ends = (exclude) => {
+    const out = [];
+    for (const rm of rooms.values()) for (const [a, b] of N4) {
+      const i = rm.i + a, j = rm.j + b;
+      if (i < 1 || j < 1 || i >= G - 1 || j >= G - 1 || rooms.has(key(i, j)) || count(i, j) !== 1 || (exclude && exclude(rm))) continue;
+      out.push({ i, j, from: rm });
+    }
+    return out;
+  };
+  const far = ends((rm) => rm.type !== 'combat').sort((p, q) => q.from.depth - p.from.depth)[0] || ends()[0];
+  const boss = add(far.i, far.j, 'guardian'); boss.cleared = false; boss.depth = far.from.depth + 1;
+  const tEnds = ends((rm) => rm === boss).filter((e) => Math.abs(e.i - boss.i) + Math.abs(e.j - boss.j) > 1);
+  const tr = tEnds.length ? tEnds[Math.floor(r() * tEnds.length)] : null;
+  if (tr) { const t = add(tr.i, tr.j, 'treasure'); t.depth = tr.from.depth + 1; }
+  start.visited = true;
+
+  // ----- cells: floor, wall, doorway -----
+  const W = G * PX + 1, D = G * PZ + 1;
+  const cell = new Uint8Array(W * D);   // 0 nothing, 1 floor, 2 wall, 3 doorway (open), 4 doorway (sealed)
+  const CX = start.i * PX + 1 + RW / 2, CZ = start.j * PZ + 1 + RD / 2;   // so the start room is centred on 0, 0
+  const wx = (ix) => ix - CX, wz = (iz) => iz - CZ;
+  const cellOf = (x, z) => [Math.floor(x + CX), Math.floor(z + CZ)];
+  const at = (ix, iz) => (ix < 0 || iz < 0 || ix >= W || iz >= D ? 0 : cell[iz * W + ix]);
+  for (const rm of rooms.values()) {
+    const ox = rm.i * PX, oz = rm.j * PZ;
+    rm.ox = ox; rm.oz = oz;
+    rm.x0 = wx(ox + 1); rm.x1 = wx(ox + 1 + RW); rm.z0 = wz(oz + 1); rm.z1 = wz(oz + 1 + RD);
+    rm.cx = (rm.x0 + rm.x1) / 2; rm.cz = (rm.z0 + rm.z1) / 2;
+    for (let iz = oz; iz <= oz + PZ; iz++) for (let ix = ox; ix <= ox + PX; ix++) {
+      const inside = ix > ox && ix < ox + PX && iz > oz && iz < oz + PZ;
+      if (inside) cell[iz * W + ix] = 1; else if (!cell[iz * W + ix]) cell[iz * W + ix] = 2;
+    }
+  }
+  // doorways between neighbours
+  const doors = [];
+  for (const rm of rooms.values()) {
+    for (const [a, b] of [[1, 0], [0, 1]]) {
+      const nb = rooms.get(key(rm.i + a, rm.j + b));
+      if (!nb) continue;
+      const cells = a ? [[rm.ox + PX, rm.oz + RD / 2], [rm.ox + PX, rm.oz + RD / 2 + 1]] : [[rm.ox + RW / 2, rm.oz + PZ], [rm.ox + RW / 2 + 1, rm.oz + PZ]];
+      for (const [ix, iz] of cells) cell[iz * W + ix] = 3;
+      const d = { cells, rooms: [rm, nb], horiz: !!a, open: true, rise: 0 };
+      d.x = wx(cells[0][0]) + (a ? 0.5 : 1); d.z = wz(cells[0][1]) + (a ? 1 : 0.5);
+      doors.push(d); rm.doors.push(d); nb.doors.push(d);
+    }
+  }
+  const roomAt = (x, z) => { for (const rm of rooms.values()) if (x >= rm.x0 && x <= rm.x1 && z >= rm.z0 && z <= rm.z1) return rm; return null; };
+
+  // ----- building it -----
+  const floor = new Batch(21), walls = new Batch(22), glow = new Batch(23), props = new Batch(24);
+  const sandCols = ['#c9c2a4', '#beb79a', '#d2cbae', '#b8b398'];
+  const tmpC = new THREE.Color();
+  for (let iz = 0; iz < D; iz++) for (let ix = 0; ix < W; ix++) {
+    const c = at(ix, iz);
+    if (!c) continue;
+    const x0 = wx(ix), z0 = wz(iz), x1 = x0 + 1, z1 = z0 + 1;
+    if (c === 1 || c === 3 || c === 4) {
+      // seabed, a little darker next to walls
+      const nearWall = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => at(ix + a, iz + b) === 2);
+      tmpC.set(pick(sandCols, r)).multiplyScalar((nearWall ? 0.82 : 1) * (0.95 + r() * 0.1));
+      if (r() < 0.12) tmpC.set('#7fa89a').multiplyScalar(0.95 + r() * 0.1);   // a patch of sea-grass
+      floor.quad([x0, 0, z1], [x1, 0, z1], [x1, 0, z0], [x0, 0, z0], [0, 1, 0], tmpC);
+    } else if (c === 2) {
+      // walls: old stone overgrown with weed. Outer walls to the north and west stand tall; everything else is low,
+      // so the camera can always see into the room
+      const outerN = at(ix, iz - 1) === 0, outerW = at(ix - 1, iz) === 0;
+      const tall = outerN || outerW;
+      const h = tall ? 2.8 : 0.9;
+      const stone = pick(['#5f6f78', '#56656e', '#687882'], r);
+      walls.box(1, h, 1, stone, x0 + 0.5, h / 2, z0 + 0.5, { top: r() < 0.5 ? '#4a7a5a' : shade(stone, 1.15) });
+      if (r() < 0.25) walls.box(0.3, 0.5 + r() * 0.6, 0.3, '#3f7a3a', x0 + 0.5 + (r() - 0.5) * 0.4, h + 0.3, z0 + 0.5 + (r() - 0.5) * 0.4, { jitter: 0.15 });
+    }
+  }
+  // pillars where walls meet, with a glowing jelly lantern on some
+  for (const rm of rooms.values()) for (const [x, z] of [[rm.x0, rm.z0], [rm.x1, rm.z0], [rm.x0, rm.z1], [rm.x1, rm.z1]]) {
+    walls.box(1.3, 1.6, 1.3, '#4f5d66', x, 0.8, z, { top: '#5f7d6a' });
+  }
+  const solids = [], targets = [], decor = [];
+  for (const rm of rooms.values()) for (const [x, z] of [[rm.x0, rm.z0], [rm.x1, rm.z0], [rm.x0, rm.z1], [rm.x1, rm.z1]]) solids.push({ x, z, r: 0.75, h: 1.6 });
+  const take = new Set();
+  const place = (x, z) => take.add(Math.floor(x + CX) + ',' + Math.floor(z + CZ));
+  const free = (x, z) => !take.has(Math.floor(x + CX) + ',' + Math.floor(z + CZ));
+  // furniture from the layouts; keep the cross through the doorways clear
+  for (const rm of rooms.values()) {
+    if (rm.type === 'start') {
+      // a quiet room: a ring of coral round a pool, light falling from above
+      ORCHARD.pool(props, glow, rm.cx, 0, rm.cz - 1.5);
+      for (const [dx, dz] of [[-5, -3.5], [5, -3.5]]) { ORCHARD.tree(props, glow, rm.cx + dx, 0, rm.cz + dz, r, 0.9); solids.push({ x: rm.cx + dx, z: rm.cz + dz, r: 0.75, h: 3.5 }); }
+      for (const [dx, dz] of [[-6, 3], [6, 3]]) ORCHARD.kelp(props, rm.cx + dx, 0, rm.cz + dz, r);
+    } else if (rm.type === 'treasure') {
+      for (const [dx, dz] of [[-3, -2], [3, -2], [-3, 2], [3, 2]]) { ORCHARD.coral(props, glow, rm.cx + dx, 0, rm.cz + dz, r); solids.push({ x: rm.cx + dx, z: rm.cz + dz, r: 0.55, h: 1.2 }); }
+    } else if (rm.type === 'guardian') {
+      // a crack in the floor right under where it hangs, and the dark above
+      for (let k = 0; k < 9; k++) { const a = (k / 9) * TAU; glow.box(1.6, 0.03, 0.08, '#9ff3ff', rm.cx + Math.cos(a) * 0.9, 0.02, rm.cz - 1.5 + Math.sin(a) * 0.9, { rotY: -a, glow: 1.6, jitter: 0, ao: 1 }); }
+      for (const [dx, dz] of [[-6.5, -4.5], [6.5, -4.5], [-6.5, 4.5], [6.5, 4.5]]) ORCHARD.kelp(props, rm.cx + dx, 0, rm.cz + dz, r);
+    } else {
+      const lay = RIFT.layouts[Math.floor(r() * RIFT.layouts.length)];
+      const flip = r() < 0.5 ? -1 : 1;
+      for (const [t, dx0, dz] of lay) {
+        const dx = dx0 * flip, x = rm.cx + dx, z = rm.cz + dz;
+        if (Math.abs(dx) < 1.6 || Math.abs(dz) < 1.4) { if (t !== 'p') continue; }   // keep the ways between doors open
+        if (t === 't') { ORCHARD.tree(props, glow, x, 0, z, r, 0.85 + r() * 0.25); solids.push({ x, z, r: 0.75, h: 3.6 }); }
+        else if (t === 'c') { ORCHARD.coral(props, glow, x, 0, z, r); solids.push({ x, z, r: 0.55, h: 1.2 }); }
+        else if (t === 'r') { ORCHARD.rock(props, x, 0, z, r); solids.push({ x, z, r: 0.8, h: 1.7 }); }
+        else if (t === 'k') { ORCHARD.kelp(props, x, 0, z, r); solids.push({ x, z, r: 0.35, h: 2.6 }); }
+        else if (t === 'p') ORCHARD.pool(props, glow, x, 0, z);
+        place(x, z);
+      }
+    }
+    // jellyfish lanterns float over every room
+    for (let k = 0; k < 3; k++) ORCHARD.jelly(glow, rm.cx + (r() - 0.5) * (RW - 4), 3.4 + r() * 1.2, rm.cz + (r() - 0.5) * (RD - 4), r);
+    // fish swimming circles
+    for (let k = 0; k < 3; k++) {
+      const f = buildFish(pick(['#ffb38a', '#9fd8ff', '#ffd36b', '#ff8fd0', '#c6f8ff'], r));
+      root.add(f);
+      decor.push({ m: f, cx: rm.cx + (r() - 0.5) * 6, cz: rm.cz + (r() - 0.5) * 4, rad: 1.5 + r() * 3, y: 1.8 + r() * 1.8, sp: (0.4 + r() * 0.5) * (r() < 0.5 ? -1 : 1), ph: r() * TAU });
+    }
+  }
+  const floorMesh = floor.mesh(causticMaterial()); floorMesh.castShadow = false;
+  root.add(floorMesh, walls.mesh(), props.mesh());
+  const gm = glow.mesh(MAT.glow); gm.castShadow = false; root.add(gm);
+  // shafts of light from the surface far above
+  const shaftMat = new THREE.ShaderMaterial({
+    uniforms: { uTime: CAUSTICS.uTime },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'uniform float uTime; varying vec2 vUv; void main() { float a = smoothstep(0.0, 0.25, vUv.x) * smoothstep(1.0, 0.75, vUv.x) * vUv.y * (0.11 + 0.04 * sin(uTime * 0.8 + vUv.x * 6.0)); gl_FragColor = vec4(vec3(0.6, 0.95, 1.0) * a, a); }',
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  });
+  for (const rm of rooms.values()) for (let k = 0; k < 2; k++) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6 + r() * 1.2, 9), shaftMat);
+    m.position.set(rm.cx + (r() - 0.5) * 9, 4.3, rm.cz + (r() - 0.5) * 6);
+    m.rotation.set(0.25, r() * TAU, 0.3);
+    root.add(m);
+  }
+
+  // ----- door gates: walls of coral and light that rise out of the doorway -----
+  for (const d of doors) {
+    const b = new Batch(30 + doors.indexOf(d)), g = new Batch(60 + doors.indexOf(d));
+    for (let k = 0; k < 5; k++) {
+      const off = -0.8 + k * 0.4, h = 1.6 + (k % 2) * 0.4;
+      const x = d.horiz ? d.x : d.x + off, z = d.horiz ? d.z + off : d.z;
+      b.box(0.22, h, 0.22, '#d4583f', x, h / 2, z, { top: '#ff8a6a' });
+      g.box(0.1, h * 0.8, 0.1, '#9ff3ff', x + 0.05, h * 0.45, z + 0.05, { glow: 1.6, jitter: 0 });
+    }
+    const grp = new THREE.Group();
+    grp.add(b.mesh());
+    const gmm = g.mesh(MAT.glow); gmm.castShadow = false; grp.add(gmm);
+    grp.position.y = -2.4;
+    grp.visible = false;
+    root.add(grp);
+    d.gate = grp;
+    d.solids = d.horiz ? [{ x: d.x, z: d.z - 0.5, r: 0.55, h: 2 }, { x: d.x, z: d.z + 0.5, r: 0.55, h: 2 }] : [{ x: d.x - 0.5, z: d.z, r: 0.55, h: 2 }, { x: d.x + 0.5, z: d.z, r: 0.55, h: 2 }];
+  }
+
+  // treasure chest and the heart-glass
+  const treasureRoom = [...rooms.values()].find((rm) => rm.type === 'treasure');
+  let chest = null;
+  if (treasureRoom) {
+    chest = buildChest();
+    chest.root.position.set(treasureRoom.cx, 0, treasureRoom.cz);
+    root.add(chest.root);
+    solids.push({ x: treasureRoom.cx, z: treasureRoom.cz, r: 0.6, h: 0.8 });
+    chest.open = false;
+  }
+  const heartGlass = buildHeartGlass();
+  heartGlass.visible = false;
+  root.add(heartGlass);
+
+  // ----- what the game asks the world (the same questions the cove answers) -----
+  function groundAt(x, z) {
+    const [ix, iz] = cellOf(x, z);
+    const c = at(ix, iz);
+    return c === 1 || c === 3 ? 0 : 3;
+  }
+  function terrainOk(x, z, y, rad) {
+    for (const [ox, oz] of [[0, 0], [rad, 0], [-rad, 0], [0, rad], [0, -rad], [rad * 0.7, rad * 0.7], [-rad * 0.7, rad * 0.7], [rad * 0.7, -rad * 0.7], [-rad * 0.7, -rad * 0.7]]) if (groundAt(x + ox, z + oz) > 0.5) return false;
+    return true;
+  }
+  function solidAt(x, z, rad) {
+    for (const s of solids) if (Math.hypot(x - s.x, z - s.z) < s.r + rad) return s;
+    return null;
+  }
+  function walkable(x, z, y, rad = 0.3) { return terrainOk(x, z, y, rad) && !solidAt(x, z, rad); }
+  function shotBlocked(x, y, z, rad = 0.08) {
+    if (groundAt(x, z) > y) return true;
+    for (const s of solids) if (Math.hypot(x - s.x, z - s.z) < s.r + rad && y < (s.h === undefined ? 3 : s.h)) return true;
+    return false;
+  }
+  function targetAt() { return null; }
+  // A* for tap-to-walk, on the cells
+  function findPath(fx0, fz0, tx, tz) {
+    const [si, sj] = cellOf(fx0, fz0);
+    let [ti, tj] = cellOf(tx, tz);
+    const ok = (i, j) => { const c = at(i, j); return (c === 1 || c === 3) && !solidAt(wx(i) + 0.5, wz(j) + 0.5, 0.2); };
+    if (!ok(ti, tj)) {
+      let best = null, bd = 1e9;
+      for (let rr = 1; rr <= 3 && !best; rr++) for (let dj = -rr; dj <= rr; dj++) for (let di = -rr; di <= rr; di++) { if (ok(ti + di, tj + dj)) { const d = Math.hypot(di, dj); if (d < bd) { bd = d; best = [ti + di, tj + dj]; } } }
+      if (!best) return null;
+      [ti, tj] = best;
+    }
+    const startK = sj * W + si, goal = tj * W + ti;
+    const g = new Map([[startK, 0]]), from = new Map(), closed = new Set();
+    const open = [[Math.hypot(ti - si, tj - sj), startK]];
+    let steps = 0;
+    while (open.length && steps++ < 5000) {
+      let bi = 0; for (let k = 1; k < open.length; k++) if (open[k][0] < open[bi][0]) bi = k;
+      const [, cur] = open.splice(bi, 1)[0];
+      if (cur === goal) break;
+      if (closed.has(cur)) continue;
+      closed.add(cur);
+      const ci = cur % W, cj = Math.floor(cur / W);
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const ni = ci + di, nj = cj + dj, n = nj * W + ni;
+        if (!ok(ni, nj) || closed.has(n)) continue;
+        if (di && dj && (!ok(ci + di, cj) || !ok(ci, cj + dj))) continue;
+        const ng = g.get(cur) + (di && dj ? 1.414 : 1);
+        if (ng < (g.has(n) ? g.get(n) : 1e9)) { g.set(n, ng); from.set(n, cur); open.push([ng + Math.hypot(ti - ni, tj - nj), n]); }
+      }
+    }
+    if (!from.has(goal) && goal !== startK) return null;
+    const pts = [];
+    for (let c = goal; c !== undefined && c !== startK; c = from.get(c)) pts.push({ x: wx(c % W) + 0.5, z: wz(Math.floor(c / W)) + 0.5 });
+    pts.reverse();
+    if (walkable(tx, tz, 0, 0.3)) pts.push({ x: tx, z: tz });
+    return pts;
+  }
+  function clearLine(ax, az, bx, bz) {
+    const d = Math.hypot(bx - ax, bz - az), n = Math.ceil(d / 0.25);
+    for (let k = 1; k <= n; k++) if (!walkable(ax + (bx - ax) * k / n, az + (bz - az) * k / n, 0, 0.32)) return false;
+    return true;
+  }
+
+  // ----- rooms coming alive: seal, fight, open -----
+  let hooks = null, current = start, sealed = null;
+  const pending = [];   // waves still to come in the sealed room
+  function attach(h) { hooks = h; }
+  function setDoor(d, open) {
+    if (d.open === open) return;
+    d.open = open;
+    for (const [ix, iz] of d.cells) cell[iz * W + ix] = open ? 3 : 4;
+    for (const s of d.solids) { const i = solids.indexOf(s); if (!open && i < 0) solids.push(s); if (open && i >= 0) solids.splice(i, 1); }
+    d.gate.visible = true;
+  }
+  function seal(rm) {
+    sealed = rm;
+    for (const d of rm.doors) setDoor(d, false);
+    hooks.sound.sfx('barrierUp');
+    hooks.shake(0.2);
+  }
+  function unseal(rm, quiet) {
+    for (const d of rm.doors) setDoor(d, true);
+    sealed = null;
+    if (!quiet) hooks.sound.sfx('barrierDown');
+  }
+  function spawnSpot(rm) {
+    const P = hooks.P;
+    for (let k = 0; k < 40; k++) {
+      const x = rm.x0 + 1.5 + r() * (RW - 3), z = rm.z0 + 1.5 + r() * (RD - 3);
+      if (Math.hypot(x - P.x, z - P.z) < 3.5) continue;
+      if (!walkable(x, z, 0, 0.6)) continue;
+      if (hooks.foes.list.some((f) => f.alive && Math.hypot(f.x - x, f.z - z) < 1.4)) continue;
+      return { x, z };
+    }
+    return { x: rm.cx, z: rm.cz - 2 };
+  }
+  function enterRoom(rm) {
+    current = rm;
+    if (!rm.visited) {
+      rm.visited = true;
+      if (rm.type === 'combat') {
+        const sets = RIFT.waves[Math.min(RIFT.waves.length - 1, Math.max(0, rm.depth - 1))];
+        pending.length = 0;
+        pending.push(...sets.map((w) => w.slice()));
+        seal(rm);
+        rm.wait = 0.6;
+      } else if (rm.type === 'guardian') {
+        seal(rm);
+        hooks.onEvent('guardian', rm);
+        rm.wait = 1.4;
+        pending.length = 0;
+        pending.push(['gardener']);
+      } else if (rm.type === 'treasure') hooks.onEvent('treasureRoom', rm);
+    }
+    for (const d of rm.doors) for (const nb of d.rooms) nb.seen = true;
+    hooks.onMap();
+  }
+  function update(dt, t, P) {
+    CAUSTICS.uTime.value = t;
+    // which room are you in?
+    const rm = roomAt(P.x, P.z);
+    if (rm && rm !== current && !sealed) enterRoom(rm);
+    // a sealed room sends its waves, one after another
+    if (sealed) {
+      if (sealed.wait > 0) sealed.wait -= dt;
+      else if (pending.length && !hooks.foes.alive()) {
+        const wave = pending.shift();
+        for (const kind of wave) {
+          if (kind === 'gardener') {
+            const f = hooks.foes.spawn('gardener', sealed.cx, sealed.cz - 1.5);
+            f.room = { x0: sealed.x0, x1: sealed.x1, z0: sealed.z0, z1: sealed.z1 };
+          } else { const p = spawnSpot(sealed); hooks.foes.spawn(kind, p.x, p.z); }
+        }
+        sealed.wait = 0.8;
+      } else if (!pending.length && !hooks.foes.alive() && sealed.type !== 'guardian') {
+        // the room is clear
+        sealed.cleared = true;
+        const was = sealed;
+        unseal(sealed);
+        hooks.sound.sfx('roomClear');
+        if (Math.random() < 0.35 || P.hp < P.maxHp * 0.5) hooks.foes.dropHeart(was.cx, 0, was.cz);
+        hooks.onMap();
+      }
+    }
+    // gates rise and fall
+    for (const d of doors) {
+      d.rise += ((d.open ? 0 : 1) - d.rise) * Math.min(1, dt * 7);
+      d.gate.position.y = -2.4 + d.rise * 2.4;
+      if (d.open && d.rise < 0.01) d.gate.visible = false;
+    }
+    // the treasure chest opens when you walk up to it
+    if (chest && !chest.open && Math.hypot(P.x - chest.root.position.x, P.z - chest.root.position.z) < 1.5) {
+      chest.open = true;
+      hooks.onEvent('chest', chest);
+    }
+    if (chest) { chest.lid.rotation.x = lerp(chest.lid.rotation.x, chest.open ? -1.9 : 0, Math.min(1, dt * 5)); chest.glow.visible = chest.open; }
+    // the heart-glass turns and glows; touching it takes you home
+    if (heartGlass.visible) {
+      heartGlass.rotation.y = t * 1.2;
+      heartGlass.position.y = 1.2 + Math.sin(t * 2) * 0.12;
+      if (Math.random() < dt * 20) fx.sparks && fx.sparks.spawn({ x: heartGlass.position.x + (Math.random() - 0.5) * 1.2, y: 0.4 + Math.random() * 1.6, z: heartGlass.position.z + (Math.random() - 0.5) * 1.2, vy: 0.8, life: 1.2, size: 0.14, color: Math.random() < 0.5 ? '#9ff3ff' : '#ff9fe0', glow: 3, flicker: 1 });
+      if (!heartGlass.taken && Math.hypot(P.x - heartGlass.position.x, P.z - heartGlass.position.z) < 1.3) { heartGlass.taken = true; hooks.onEvent('exit'); }
+    }
+    // fish swim, bubbles rise in the room you're in
+    for (const f of decor) {
+      const a = t * f.sp + f.ph;
+      f.m.position.set(f.cx + Math.cos(a) * f.rad, f.y + Math.sin(t * 1.3 + f.ph) * 0.3, f.cz + Math.sin(a) * f.rad);
+      f.m.rotation.y = -a + (f.sp > 0 ? 0 : Math.PI);
+    }
+    if (fx.sparks && current && Math.random() < dt * 10) fx.sparks.spawn({ x: current.x0 + Math.random() * RW, y: 0.1, z: current.z0 + Math.random() * RD, vy: 0.9 + Math.random() * 0.6, vx: (Math.random() - 0.5) * 0.2, drag: 0.1, life: 3, size: 0.09, color: '#c6f8ff', glow: 1.4, flicker: 1 });
+  }
+  function guardianDown(f) {
+    const rm = sealed;
+    if (!rm) return;
+    rm.cleared = true;
+    heartGlass.position.set(rm.cx, 1.2, rm.cz - 1.5);
+    heartGlass.visible = true;
+    setTimeout(() => { if (sealed === rm) unseal(rm); hooks.onMap(); }, 1200);
+  }
+  // you fell: the room you were fighting in opens again, and its creatures wait for you to come back
+  function onFell() {
+    if (sealed) {
+      const rm = sealed;
+      unseal(rm, true);
+      if (!rm.cleared) rm.visited = false;
+      pending.length = 0;
+    }
+    current = start;
+    hooks.onMap();
+  }
+  function mapState() {
+    return { rooms: [...rooms.values()].map((rm) => ({ i: rm.i, j: rm.j, type: rm.type, visited: rm.visited, seen: rm.seen || rm.visited, cleared: rm.cleared, here: rm === current })) };
+  }
+  const fx = { sparks: null };
+  return {
+    name: 'rift', root, groundAt, walkable, terrainOk, solidAt, shotBlocked, targetAt, targets, findPath, clearLine, update, fx,
+    dummies: [], solids, seep: null, shardOn: () => false, setSeepPower() {}, setNight() {},
+    contain: (x, z) => !sealed || (x > sealed.x0 + 0.5 && x < sealed.x1 - 0.5 && z > sealed.z0 + 0.5 && z < sealed.z1 - 0.5),
+    spawn: { x: start.cx, z: start.cz + 3.5, y: 0 },
+    sunDir: new V3(0.25, 1, 0.35).normalize(),
+    attach, guardianDown, onFell, mapState, rooms, chest, heartGlass, sealed: () => sealed,
+    light: { hemiSky: '#6fc0cc', hemiGround: '#1d3240', hemiI: 1.55, sun: '#c8f0ff', sunI: 1.6, fog: '#14404c', fogNear: 12, fogFar: 46, grade: [0.94, 1.02, 1.05], exposure: 1.05 },
+  };
+}

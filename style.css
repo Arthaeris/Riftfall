@@ -218,3 +218,24 @@ body.talking .pad .act { pointer-events: none; }
 .act.attack.ctx { color: var(--accent-2); border-color: rgba(255, 210, 154, 0.55); box-shadow: 0 0 0 3px rgba(255, 210, 154, 0.18), 0 10px 24px -10px rgba(8, 4, 24, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
 .act.attack.ctx .pips { opacity: 0; }
 body.cine .hud, body.cine .pad, body.cine .quest { opacity: 0 !important; pointer-events: none !important; }
+
+/* ---------- the guardian's bar ---------- */
+.bossBar { position: absolute; left: 50%; top: calc(var(--pad-t) + 4px); width: min(440px, 52vw); transform: translate(-50%, -10px); opacity: 0; transition: opacity 0.6s, transform 0.6s; text-align: center; }
+.bossBar.on { opacity: 1; transform: translate(-50%, 0); }
+.bbName { font-family: var(--serif); font-size: 17px; letter-spacing: 0.04em; color: #fff; text-shadow: 0 2px 8px rgba(5, 2, 20, 0.8); margin-bottom: 5px; }
+.bbTrack { position: relative; height: 9px; border-radius: 2px; background: rgba(10, 6, 24, 0.7); border: 1px solid rgba(255, 255, 255, 0.28); overflow: hidden; box-shadow: 0 4px 14px rgba(5, 2, 20, 0.5); }
+.bbTrack i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; }
+.bbChip { background: #fff3e0; }
+.bbFill { background: linear-gradient(180deg, #ff8a96, #e0404f); transition: width 0.12s; }
+
+/* ---------- the Rift's map ---------- */
+.miniMap { position: absolute; right: calc(var(--pad-r) + 54px); top: var(--pad-t); display: grid; gap: 3px; padding: 6px; border-radius: 10px; background: rgba(10, 8, 28, 0.38); border: 1px solid rgba(255, 255, 255, 0.14); opacity: 0.85; }
+.mr { display: block; border-radius: 2px; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.18); position: relative; }
+.mr.v { background: rgba(200, 240, 255, 0.42); }
+.mr.here { background: #e6fcff; box-shadow: 0 0 8px rgba(159, 243, 255, 0.9); }
+.mr.guardian::after, .mr.treasure::after, .mr.start::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; transform: translate(-50%, -50%) rotate(45deg); }
+.mr.guardian::after { background: #ff5f6d; }
+.mr.treasure::after { background: #ffd29a; }
+.mr.start::after { background: rgba(159, 243, 255, 0.9); width: 4px; height: 4px; }
+.jumps { display: flex; gap: 8px; flex-wrap: wrap; }
+.jumps button { flex: 1; padding: 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.16); font-weight: 700; font-size: 13px; }

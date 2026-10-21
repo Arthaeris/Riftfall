@@ -3,7 +3,7 @@
    and the Seep, the clearing that seals itself and sends them out in waves. */
 import * as THREE from 'three';
 import { FOES, SEEP, TEXT } from '@rf/data';
-import { buildFoe, buildBar, buildSliver, buildHeartPickup, buildBarrier, buildRiftCrack, buildGlyphRing, buildOrb, clamp, lerp, TAU } from '@rf/art';
+import { buildFoe, buildBar, buildSliver, buildHeartPickup, buildBarrier, buildRiftCrack, buildGlyphRing, buildOrb, clamp, lerp, TAU, Batch, MAT } from '@rf/art';
 
 const smooth = (t) => t * t * (3 - 2 * t);
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -13,7 +13,7 @@ const angTo = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 //                     number(text, x, y, z, heavy), addSkyglass(n), heal(n), toast(text), playerDead()
 export function createFoes(ctx) {
   const { scene, world, P, sparks, bits, sound } = ctx;
-  const S = world.seep;
+  const S = world.seep || null;   // the Seep lives in the cove; the Rift has rooms instead
   const foes = [], orbs = [], drops = [], effects = [];
 
   // ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ export function createFoes(ctx) {
     m.root.position.set(x, y, z);
     m.root.visible = false;
     scene.add(m.root);
-    const bar = buildBar(kind === 'bellfish' ? 0.8 : 0.9);
+    const bar = buildBar(kind === 'bellfish' ? 0.8 : kind === 'doorcrab' ? 1.1 : 0.9);
     bar.group.visible = false;
     scene.add(bar.group);
     const crack = buildRiftCrack();
@@ -47,7 +47,8 @@ export function createFoes(ctx) {
   // ---------------------------------------------------------------------------
   function moveFoe(f, dx, dz) {
     const step = (x, z) => {
-      if (seep.sealed && Math.hypot(x - S.x, z - S.z) > S.r - 0.75) return false;
+      if (S && seep.sealed && Math.hypot(x - S.x, z - S.z) > S.r - 0.75) return false;
+      if (world.contain && !world.contain(x, z)) return false;
       return world.terrainOk(x, z, world.groundAt(f.x, f.z), f.D.r * 0.6, 0.55) && !world.solidAt(x, z, f.D.r * 0.6);
     };
     if (step(f.x + dx, f.z + dz)) { f.x += dx; f.z += dz; return true; }
@@ -277,12 +278,282 @@ export function createFoes(ctx) {
   }
 
   // ---------------------------------------------------------------------------
+  // Doorcrab: turns slowly to face you and blocks from the front. Its claws snap when you're close.
+  // Get behind it and the door on its back swings open onto nothing, pulling you in, then slams.
+  // ---------------------------------------------------------------------------
+  function doorcrab(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    f.t += dt;
+    f.doorCd = Math.max(0, (f.doorCd || 0) - dt);
+    const now = performance.now() / 1000;
+    const want = Math.atan2(tp.x, tp.z);
+    const behind = Math.abs(angTo(f.face, want)) > 1.9;
+    let walk = 0;
+    if (f.state === 'up' || f.state === 'chase') {
+      f.state = 'chase';
+      turnTo(f, want, D.turn, dt);
+      // sidle toward you, sideways like a crab
+      if (tp.d > 1.4) { moveFoe(f, tp.x * D.speed * dt, tp.z * D.speed * dt); walk = 1; }
+      f.cd = (f.cd || 0) - dt;
+      if (!behind && tp.d < D.reach && f.cd <= 0 && Math.abs(angTo(f.face, want)) < 0.6) { f.state = 'tell'; f.t = 0; sound.sfx('crabTell'); }
+      else if (behind && tp.d < D.doorReach && f.doorCd <= 0) { f.state = 'door'; f.t = 0; f.slammed = false; sound.sfx('doorOpen'); }
+      m.claws.forEach((c) => { c.c.rotation.x = lerp(c.c.rotation.x, -0.15, Math.min(1, dt * 6)); c.pin.rotation.x = Math.sin(now * 3 + c.s) * 0.1; });
+    } else if (f.state === 'tell') {
+      const k = Math.min(1, f.t / D.tell);
+      m.claws.forEach((c) => { c.c.rotation.x = -0.9 * k; c.pin.rotation.x = 0.6 * k; });
+      f.tellGlow = k * 0.8;
+      if (f.t >= D.tell) { f.state = 'snap'; f.t = 0; f.tellGlow = 0; sound.sfx('snap'); }
+    } else if (f.state === 'snap') {
+      const k = Math.min(1, f.t / D.snap);
+      m.claws.forEach((c) => { c.c.rotation.x = lerp(-0.9, 0.35, k); c.pin.rotation.x = lerp(0.6, -0.1, k); });
+      if (!f.hitDone) {
+        const hx = f.x + Math.sin(f.face) * 1.1, hz = f.z + Math.cos(f.face) * 1.1;
+        if (Math.hypot(P.x - hx, P.z - hz) < 0.95 && ctx.hurtPlayer(D.dmg, f.x, f.z)) f.hitDone = true;
+      }
+      if (f.t >= D.snap + D.rest) { f.state = 'chase'; f.t = 0; f.hitDone = false; f.cd = 0.9; }
+    } else if (f.state === 'door') {
+      // the door swings open: a dark nothing that pulls
+      const k = Math.min(1, f.t / 0.25);
+      m.door.rotation.x = lerp(-0.35, -1.6, smooth(k));
+      m.void.visible = true;
+      const bx = f.x - Math.sin(f.face) * 0.9, bz = f.z - Math.cos(f.face) * 0.9;
+      const dx = bx - P.x, dz = bz - P.z, d = Math.hypot(dx, dz);
+      if (f.t < D.doorOpen && d > 0.3 && d < D.doorReach + 0.6) ctx.pullPlayer(dx / d * D.pull * dt, dz / d * D.pull * dt);
+      if (Math.random() < 0.6) sparks.spawn({ x: bx + (Math.random() - 0.5), y: f.y + 0.6 + Math.random() * 0.6, z: bz + (Math.random() - 0.5), vx: (bx - P.x) * 0.2, vz: (bz - P.z) * 0.2, life: 0.5, size: 0.14, color: '#7a5aa8', glow: 1.6 });
+      if (f.t >= D.doorOpen && !f.slammed) {
+        f.slammed = true;
+        sound.sfx('doorSlam');
+        ctx.shake(0.25);
+        if (d < 1.3) ctx.hurtPlayer(D.dmg, bx, bz);
+      }
+      if (f.t >= D.doorOpen) m.door.rotation.x = lerp(m.door.rotation.x, -0.35, Math.min(1, dt * 18));
+      if (f.t >= D.doorOpen + 0.35) { f.state = 'chase'; f.t = 0; f.doorCd = D.doorCd; m.void.visible = false; }
+    } else if (f.state === 'stagger') {
+      if (f.t >= 0.4) { f.state = 'chase'; f.t = 0; }
+    }
+    // legs scuttle
+    for (const key of Object.keys(m)) if (key.startsWith('leg')) m[key].rotation.x = Math.sin(now * 14 + key.length) * 0.35 * walk;
+    f.barY = 1.9;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lullaby Pod: sits and hums. Its seams glow brighter and brighter, and if you leave it, it hatches.
+  // ---------------------------------------------------------------------------
+  function pod(f, dt) {
+    const D = f.D, m = f.m;
+    f.t += dt;
+    if (f.state === 'up') { f.state = 'brood'; f.t = 0; }
+    const k = clamp(f.t / D.hatch, 0, 1);
+    m.seams.forEach((s2, i) => { s2.scale.set(1, 0.6 + k * 0.9, 1); s2.material.color.copy(s2.material.userData.base).multiplyScalar(0.6 + k * 2.4 + Math.sin(f.t * 6 + i) * 0.2 * k); });
+    const shiver = k > 0.75 ? Math.sin(f.t * 50) * 0.06 * (k - 0.75) * 4 : 0;
+    m.pod.rotation.z = shiver + Math.sin(f.t * 1.4) * 0.04;
+    m.pod.scale.setScalar(1 + Math.sin(f.t * 2.4) * 0.03 + k * 0.08);
+    f.hum = (f.hum || 0) - dt;
+    if (f.hum <= 0) { f.hum = 2.2; if (Math.hypot(P.x - f.x, P.z - f.z) < 9) sound.sfx('hum'); }
+    if (f.t >= D.hatch) {
+      // it splits open and what was inside climbs out
+      f.alive = false; f.hittable = false;
+      sound.sfx('hatch');
+      for (let i = 0; i < 18; i++) { const a = Math.random() * TAU; bits.spawn({ x: f.x, y: f.y + 0.8, z: f.z, vx: Math.cos(a) * 2.5, vy: 2 + Math.random() * 3, vz: Math.sin(a) * 2.5, life: 1.2, size: 0.1, color: '#d8cfe6', floor: f.y }); }
+      scene.remove(f.m.root); scene.remove(f.bar.group);
+      D.brood.forEach((kind, i) => { const a = (i / D.brood.length) * TAU + Math.random(); spawn(kind, f.x + Math.cos(a) * 0.9, f.z + Math.sin(a) * 0.9); });
+      return;
+    }
+    f.barY = 1.8;
+  }
+
+  // ---------------------------------------------------------------------------
+  // The Weeping Gardener. Hangs upside down over the room; its heart glows under the crown, where hits land.
+  // Phase 1: root rings and falling fruit-worlds. Phase 2: adds the branch sweep. Phase 3: its tears flood the floor.
+  // ---------------------------------------------------------------------------
+  const slows = [];   // frost patches from fallen snow-fruit: they slow you
+  const flood = { k: 0, to: 0 };
+  function gardener(f, dt) {
+    const D = f.D, m = f.m;
+    f.t += dt;
+    const now = performance.now() / 1000;
+    const frac = f.hp / D.hp;
+    const phase = frac > D.phases[0] ? 0 : frac > D.phases[1] ? 1 : 2;
+    if (phase !== f.phase) {
+      f.phase = phase;
+      if (phase > 0) {
+        sound.sfx('roar'); ctx.shake(0.6);
+        ctx.toast(phase === 1 ? 'The Gardener tears itself loose' : 'The Gardener weeps, and the floor floods');
+        spawn('mirrorpuddle', f.x - 3, f.z + 2.5); spawn('mirrorpuddle', f.x + 3, f.z + 2.5);
+        if (phase === 2) flood.to = 1;
+      }
+    }
+    // it sways; lower and angrier as it weakens
+    m.hang.rotation.z = Math.sin(now * 0.7) * 0.05;
+    m.hang.rotation.x = Math.sin(now * 0.5) * 0.04;
+    m.hang.position.y = -phase * 0.35;
+    m.crown.rotation.y += dt * (0.15 + phase * 0.1);
+    m.fruit.forEach((fr, i) => { fr.rotation.z = Math.sin(now * 1.5 + i) * 0.2; });
+    m.heart.scale.setScalar(1 + Math.sin(now * 3) * 0.08);
+    // tears falling upward from its eyes
+    if (Math.random() < dt * 8) { const e = m.eyes[Math.random() < 0.5 ? 0 : 1]; const p = e.getWorldPosition(tmp); sparks.spawn({ x: p.x, y: p.y, z: p.z + 0.1, vy: 1.4, vx: (Math.random() - 0.5) * 0.3, life: 1.4, size: 0.12, color: '#9ff3ff', glow: 2.4, drag: 0.2 }); }
+    f.barY = 0;
+    // attacks
+    if (f.state === 'up') { f.state = 'idle'; f.t = 0; f.next = 1.6; }
+    if (f.state === 'idle') {
+      f.next -= dt;
+      if (f.next <= 0) {
+        const opts = phase === 0 ? ['roots', 'fruit'] : ['roots', 'fruit', 'sweep'];
+        if (phase === 2) opts.push('weep');
+        let pick2 = opts[Math.floor(Math.random() * opts.length)];
+        if (pick2 === f.lastAttack && Math.random() < 0.6) pick2 = opts[(opts.indexOf(pick2) + 1) % opts.length];
+        f.lastAttack = pick2;
+        f.state = pick2; f.t = 0; f.acts = [];
+        if (pick2 === 'roots') {
+          // rings of glowing letters: one under you, the others nearby
+          const spots = [{ x: P.x, z: P.z }];
+          for (let i = 0; i < 1 + phase; i++) { const a = Math.random() * TAU, d = 2 + Math.random() * 2.5; spots.push({ x: clamp(P.x + Math.cos(a) * d, f.room.x0 + 1, f.room.x1 - 1), z: clamp(P.z + Math.sin(a) * d, f.room.z0 + 1, f.room.z1 - 1) }); }
+          f.acts = spots.map((p) => { const g = buildGlyphRing(1.2); g.group.position.set(p.x, f.y + 0.02, p.z); scene.add(g.group); return { ...p, g }; });
+          sound.sfx('glyph');
+        } else if (pick2 === 'fruit') {
+          // fruit-worlds drop where their shadows show
+          const n = 3 + phase;
+          for (let i = 0; i < n; i++) {
+            const p = i === 0 ? { x: P.x, z: P.z } : { x: f.room.x0 + 1.5 + Math.random() * (f.room.x1 - f.room.x0 - 3), z: f.room.z0 + 1.5 + Math.random() * (f.room.z1 - f.room.z0 - 3) };
+            const sh = new THREE.Mesh(new THREE.CircleGeometry(0.75, 20), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.0, depthWrite: false }));
+            sh.rotation.x = -Math.PI / 2; sh.position.set(p.x, f.y + 0.04, p.z); scene.add(sh);
+            const kind = ['snow', 'sun', 'sea'][Math.floor(Math.random() * 3)];
+            const fr = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshBasicMaterial({ color: new THREE.Color(kind === 'snow' ? '#f4fbff' : kind === 'sun' ? '#ffd36b' : '#4fb2d4').multiplyScalar(1.6) }));
+            fr.position.set(p.x, f.y + 7, p.z); scene.add(fr);
+            f.acts.push({ ...p, sh, fr, kind, delay: i * 0.25 });
+          }
+          sound.sfx('rustle');
+        } else if (pick2 === 'sweep') {
+          // a glowing arc on the floor round the tree, then the branches sweep through it
+          const g = new THREE.Mesh(new THREE.RingGeometry(1.2, D.sweepR, 48, 1, 0, Math.PI * 1.2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff9a3c'), transparent: true, opacity: 0.0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+          g.rotation.x = -Math.PI / 2;
+          const start = Math.atan2(P.x - f.x, P.z - f.z) - Math.PI * 0.6;
+          g.rotation.z = -start + Math.PI / 2 - Math.PI * 1.2;
+          g.position.set(f.x, f.y + 0.05, f.z); scene.add(g);
+          f.acts = [{ g, start }];
+          sound.sfx('creak');
+        } else if (pick2 === 'weep') {
+          ring({ x: f.x, z: f.z, y: f.y - 1.3, D: { hover: 2.2, orbs: 14, orbSpeed: 3.0, orbLife: 3.6, orbR: 0.22, dmg: 1 } });
+          f.state = 'idle'; f.next = D.every[phase];
+        }
+      }
+    } else if (f.state === 'roots') {
+      const k = Math.min(1, f.t / 1.05);
+      for (const a of f.acts) { a.g.glyphs.forEach((gl, i) => { gl.visible = i / a.g.glyphs.length < k * 1.1; }); a.g.disc.material.opacity = 0.08 + k * 0.25; a.g.group.rotation.y = f.t * 0.7; }
+      if (f.t >= 1.05) {
+        ctx.shake(0.4); sound.sfx('burst');
+        for (const a of f.acts) {
+          scene.remove(a.g.group);
+          dirt(a.x, f.y, a.z, 10);
+          for (let i = 0; i < 10; i++) { const an = Math.random() * TAU; sparks.spawn({ x: a.x, y: f.y + 0.3, z: a.z, vx: Math.cos(an) * 2.5, vy: 3 + Math.random() * 2, vz: Math.sin(an) * 2.5, grav: 8, life: 0.5, size: 0.14, color: '#ffc46b', glow: 2.4 }); }
+          if (Math.hypot(P.x - a.x, P.z - a.z) < 1.45) ctx.hurtPlayer(D.dmg, a.x, a.z);
+          rootSpike(a.x, f.y, a.z);
+        }
+        f.acts = []; f.state = 'idle'; f.next = D.every[phase];
+      }
+    } else if (f.state === 'fruit') {
+      let done = true;
+      for (const a of f.acts) {
+        const t = f.t - a.delay;
+        if (a.landed) continue;
+        done = false;
+        const k = clamp(t / 1.0, 0, 1);
+        a.sh.material.opacity = 0.15 + k * 0.35;
+        a.sh.scale.setScalar(0.5 + k * 0.5);
+        a.fr.position.y = f.y + 7 - 7 * k * k;
+        a.fr.rotation.set(t * 4, t * 3, 0);
+        if (k >= 1) {
+          a.landed = true;
+          scene.remove(a.sh); scene.remove(a.fr);
+          sound.sfx('splat');
+          if (Math.hypot(P.x - a.x, P.z - a.z) < 0.95) ctx.hurtPlayer(1, a.x, a.z);
+          if (a.kind === 'snow') {
+            // a patch of frost that slows you for a few seconds
+            const pm = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), new THREE.MeshBasicMaterial({ color: '#dff4ff', transparent: true, opacity: 0.55, depthWrite: false }));
+            pm.rotation.x = -Math.PI / 2; pm.position.set(a.x, f.y + 0.03, a.z); scene.add(pm);
+            slows.push({ x: a.x, z: a.z, r: 1.4, t: 5, m: pm });
+            for (let i = 0; i < 14; i++) sparks.spawn({ x: a.x + (Math.random() - 0.5) * 2, y: f.y + 0.2, z: a.z + (Math.random() - 0.5) * 2, vy: 0.6, life: 0.8, size: 0.12, color: '#ffffff', glow: 1.6 });
+          } else if (a.kind === 'sun') {
+            ring({ x: a.x, z: a.z, y: f.y - 1.1, D: { hover: 1.2, orbs: 8, orbSpeed: 3.2, orbLife: 2.6, orbR: 0.2, dmg: 1 } });
+          } else {
+            // a splash of sea: pushes you away
+            for (let i = 0; i < 16; i++) { const an = Math.random() * TAU; sparks.spawn({ x: a.x, y: f.y + 0.2, z: a.z, vx: Math.cos(an) * 3, vy: 2 + Math.random() * 2, vz: Math.sin(an) * 3, grav: 9, life: 0.6, size: 0.14, color: '#7fd8f0', glow: 1.6 }); }
+            const dx = P.x - a.x, dz = P.z - a.z, d = Math.hypot(dx, dz);
+            if (d < 2.6 && d > 0.01) ctx.pullPlayer(dx / d * (2.6 - d) * 0.7, dz / d * (2.6 - d) * 0.7);
+          }
+        }
+      }
+      if (done && f.t > 0.5) { f.acts = []; f.state = 'idle'; f.next = D.every[phase]; }
+    } else if (f.state === 'sweep') {
+      const a = f.acts[0];
+      const tellT = 1.0, sweepT = 0.45;
+      if (f.t < tellT) a.g.material.opacity = 0.15 + (f.t / tellT) * 0.35 + Math.sin(f.t * 30) * 0.05;
+      else {
+        // the branches sweep across the arc
+        const k = Math.min(1, (f.t - tellT) / sweepT);
+        a.g.material.opacity = 0.5 * (1 - k);
+        m.crown.rotation.y += dt * 9;
+        const ang = a.start + k * Math.PI * 1.2;
+        const pa = Math.atan2(P.x - f.x, P.z - f.z), pd = Math.hypot(P.x - f.x, P.z - f.z);
+        if (!a.hit && pd < D.sweepR && pd > 1.0 && Math.abs(angTo(ang, pa)) < 0.35) { if (ctx.hurtPlayer(D.dmg, f.x, f.z)) a.hit = true; }
+        if (Math.random() < 0.8) sparks.spawn({ x: f.x + Math.sin(ang) * D.sweepR * 0.7, y: f.y + 0.8, z: f.z + Math.cos(ang) * D.sweepR * 0.7, life: 0.4, size: 0.3, color: '#7cc35e', glow: 1.4 });
+        if (k >= 1) { scene.remove(a.g); f.acts = []; f.state = 'idle'; f.next = D.every[phase]; }
+      }
+    } else if (f.state === 'stagger') {
+      if (f.t > 0.3) { f.state = 'idle'; f.t = 0; f.next = 0.8; }
+    }
+    ctx.bossBar(D.name, Math.max(0, frac));
+  }
+  // a root spike that stays up for a moment after a burst
+  function rootSpike(x, y, z) {
+    const b = new Batch(97);
+    for (let i = 0; i < 4; i++) b.box(0.16, 1.0 + Math.random() * 0.6, 0.16, i % 2 ? '#6b4a33' : '#7a5236', (Math.random() - 0.5) * 0.6, 0.5, (Math.random() - 0.5) * 0.6, { rotZ: (Math.random() - 0.5) * 0.6, rotX: (Math.random() - 0.5) * 0.6 });
+    const m = b.mesh(); m.matrixAutoUpdate = true; m.position.set(x, y, z); scene.add(m);
+    effects.push({ m, t: 0, life: 1.4, sink: true });
+  }
+  function updateEffects(dt) {
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const e = effects[i];
+      e.t += dt;
+      if (e.sink && e.t > e.life * 0.6) e.m.position.y -= dt * 3;
+      if (e.t > e.life) { scene.remove(e.m); effects.splice(i, 1); }
+    }
+    for (let i = slows.length - 1; i >= 0; i--) {
+      const z = slows[i];
+      z.t -= dt;
+      z.m.material.opacity = Math.min(0.55, z.t * 0.4);
+      if (z.t <= 0) { scene.remove(z.m); slows.splice(i, 1); }
+    }
+    flood.k += (flood.to - flood.k) * Math.min(1, dt * 0.8);
+  }
+  // how fast you can move here: frost patches and the flood slow you
+  function slowAt(x, z) {
+    let k = 1;
+    for (const s2 of slows) if (Math.hypot(x - s2.x, z - s2.z) < s2.r) k = Math.min(k, 0.55);
+    return k * (1 - flood.k * 0.22);
+  }
+
+  // ---------------------------------------------------------------------------
   // Getting hit and falling
   // ---------------------------------------------------------------------------
   const tmp = new THREE.Vector3();
   function hit(f, nx, nz, dmg, heavy, knock) {
     if (!f.alive || !f.hittable) return false;
-    f.hp -= dmg;
+    // the Doorcrab's claws stop anything that comes from the front
+    if (f.kind === 'doorcrab' && f.state !== 'door' && f.state !== 'stagger') {
+      const from = Math.atan2(-nx, -nz);
+      if (Math.abs(angTo(f.face, from)) < f.D.guard * Math.PI / 180) {
+        sound.sfx('clank');
+        for (let i = 0; i < 8; i++) { const a = from + (Math.random() - 0.5) * 1.6; sparks.spawn({ x: f.x + Math.sin(f.face) * 0.6, y: f.y + 0.5, z: f.z + Math.cos(f.face) * 0.6, vx: Math.sin(a) * 3, vy: Math.random() * 2.5, vz: Math.cos(a) * 3, drag: 3, life: 0.35, size: 0.12, color: '#ffe9a8', glow: 2.6 }); }
+        f.kx += nx * knock * 0.4; f.kz += nz * knock * 0.4;
+        f.m.claws.forEach((c) => { c.c.rotation.x = -0.5; });
+        ctx.number('Blocked', f.x, f.y + 1.2, f.z, false);
+        return true;
+      }
+    }
+    // the guardian has its own bar at the top of the screen
+    if (f.kind === 'gardener') { dmg = Math.round(dmg); }
+    f.hp -= dmg * (f.kind === 'doorcrab' && f.state === 'door' ? 1.5 : 1);
     f.flashT = 1;
     f.kx += nx * knock * f.D.knockTaken * (heavy ? 1.8 : 1) * 2.2;
     f.kz += nz * knock * f.D.knockTaken * (heavy ? 1.8 : 1) * 2.2;
@@ -313,8 +584,15 @@ export function createFoes(ctx) {
       bits.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * sp + nx * 2, vy: 2 + Math.random() * 3.5, vz: Math.sin(a) * sp + nz * 2, life: 1.3, size: 0.09 + Math.random() * 0.1, color: cols[i % 3], floor: f.y });
     }
     for (let i = 0; i < 22; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * 3.5, vy: Math.random() * 4, vz: Math.sin(a) * 3.5, drag: 3, grav: 3, life: 0.6, size: 0.18, color: i % 2 ? '#ffffff' : '#9ff3ff', glow: 3 }); }
-    sound.sfx('pop');
-    ctx.hitStop(0.09);
+    sound.sfx(f.kind === 'gardener' ? 'impact' : 'pop');
+    ctx.hitStop(f.kind === 'gardener' ? 0.4 : 0.09);
+    if (f.kind === 'gardener') {
+      ctx.bossBar(null);
+      flood.to = 0;
+      for (const a of f.acts || []) { if (a.g && a.g.group) scene.remove(a.g.group); else if (a.g) scene.remove(a.g); if (a.sh) scene.remove(a.sh); if (a.fr) scene.remove(a.fr); }
+      for (let i = 0; i < 40; i++) { const a = Math.random() * TAU, sp = 2 + Math.random() * 5; bits.spawn({ x: f.x, y: f.y + 2 + Math.random() * 3, z: f.z, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 4, vz: Math.sin(a) * sp, life: 2, size: 0.12 + Math.random() * 0.18, color: ['#4e3a30', '#3f7a5a', '#4a8a66'][i % 3], floor: f.y }); }
+      if (ctx.onGuardianDown) ctx.onGuardianDown(f);
+    }
     ctx.shake(0.3);
     scene.remove(f.m.root); scene.remove(f.bar.group);
     if (f.glyph) { scene.remove(f.glyph.group); f.glyph = null; }
@@ -382,12 +660,14 @@ export function createFoes(ctx) {
   // ---------------------------------------------------------------------------
   // The Seep: step into the clearing and the shard seals it, then the waves come
   // ---------------------------------------------------------------------------
-  const barrier = buildBarrier(S.r);
-  barrier.group.position.set(S.x, S.h - 3, S.z);
-  barrier.group.visible = false;
-  scene.add(barrier.group);
+  const barrier = S ? buildBarrier(S.r) : null;
   const ringSolids = [];
-  for (let k = 0, n = Math.ceil(TAU * S.r / 0.55); k < n; k++) { const a = (k / n) * TAU; ringSolids.push({ x: S.x + Math.cos(a) * S.r, z: S.z + Math.sin(a) * S.r, r: 0.35 }); }
+  if (S) {
+    barrier.group.position.set(S.x, S.h - 3, S.z);
+    barrier.group.visible = false;
+    scene.add(barrier.group);
+    for (let k = 0, n = Math.ceil(TAU * S.r / 0.55); k < n; k++) { const a = (k / n) * TAU; ringSolids.push({ x: S.x + Math.cos(a) * S.r, z: S.z + Math.sin(a) * S.r, r: 0.35 }); }
+  }
   const seep = { state: 'idle', t: 0, wave: -1, queue: [], sealed: false, rise: 0 };
   function seal() {
     seep.state = 'rising'; seep.t = 0; seep.sealed = true; seep.wave = -1;
@@ -421,6 +701,7 @@ export function createFoes(ctx) {
     return { x: S.x + 2, z: S.z };
   }
   function updateSeep(dt) {
+    if (!S) return;
     seep.t += dt;
     const inside = Math.hypot(P.x - S.x, P.z - S.z);
     if (seep.state === 'idle') {
@@ -473,6 +754,15 @@ export function createFoes(ctx) {
     updateSeep(dt);
     for (const f of foes) {
       if (!f.alive) continue;
+      if (f.state === 'emerge' && f.kind === 'gardener') {
+        // the guardian lowers itself out of the dark above
+        f.t += dt;
+        const k = Math.min(1, f.t / 2.4);
+        f.m.root.visible = true;
+        f.m.root.position.set(f.x, f.y + (1 - smooth(k)) * 9, f.z);
+        if (k >= 1) { f.state = 'up'; f.t = 0; f.hittable = true; ctx.shake(0.5); sound.sfx('roar'); }
+        continue;
+      }
       if (f.state === 'emerge') {
         // climbing out of the crack
         f.t += dt;
@@ -498,7 +788,11 @@ export function createFoes(ctx) {
       }
       if (f.kind === 'mirrorpuddle') puddle(f, dt);
       else if (f.kind === 'bellfish') bellfish(f, dt);
-      else rootscript(f, dt);
+      else if (f.kind === 'rootscript') rootscript(f, dt);
+      else if (f.kind === 'doorcrab') doorcrab(f, dt);
+      else if (f.kind === 'lullabypod') pod(f, dt);
+      else if (f.kind === 'gardener') gardener(f, dt);
+      if (!f.alive) continue;
       // knockback from your hits, sliding out
       if (Math.abs(f.kx) + Math.abs(f.kz) > 0.01) { moveFoe(f, f.kx * dt, f.kz * dt); const k = Math.exp(-9 * dt); f.kx *= k; f.kz *= k; }
       separate(f, dt);
@@ -510,8 +804,8 @@ export function createFoes(ctx) {
       // the hit flash, plus the puddle's warning glow
       f.flashT = Math.max(0, f.flashT - dt * 7);
       f.m.flash(Math.max(f.flashT, (f.tellGlow || 0) * (0.35 + 0.25 * Math.sin(performance.now() / 40))));
-      // health bar: floats above, fades a little at full health
-      const showBar = f.m.root.visible && f.state !== 'under';
+      // health bar: floats above, fades a little at full health (the guardian's is at the top of the screen)
+      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener';
       f.bar.group.visible = showBar;
       if (showBar) {
         f.bar.group.position.set(f.x, f.y + (f.barY || 1.2), f.z);
@@ -523,6 +817,7 @@ export function createFoes(ctx) {
     for (let i = foes.length - 1; i >= 0; i--) if (!foes[i].alive) { if (foes[i].crack) scene.remove(foes[i].crack); foes.splice(i, 1); }
     updateOrbs(dt);
     updateDrops(dt);
+    updateEffects(dt);
   }
 
   // you fell: everything in the Seep goes quiet again, nothing is lost
@@ -531,6 +826,10 @@ export function createFoes(ctx) {
     foes.length = 0;
     for (const o of orbs) scene.remove(o.m);
     orbs.length = 0;
+    for (const z of slows) scene.remove(z.m);
+    slows.length = 0;
+    flood.k = 0; flood.to = 0;
+    if (!S) return;
     if (seep.sealed) unseal(true);
     seep.state = 'idle'; seep.wave = -1; seep.rise = 0; seep.queue = [];
     barrier.group.visible = false;
@@ -539,5 +838,12 @@ export function createFoes(ctx) {
 
   // targets for your swings and sling drops
   function targets() { return foes.filter((f) => f.alive && f.hittable); }
-  return { update, hit, targets, reset, spawn, list: foes, seep, dropHeart, dropSliver };
+  // the Seep goes quiet (after its fight, or when you come back from the Rift)
+  function rest() {
+    if (!S) return;
+    if (seep.sealed) unseal(true);
+    seep.state = 'spent'; seep.t = 0; seep.rise = 0; seep.wave = -1;
+    barrier.group.visible = false;
+  }
+  return { update, hit, targets, reset, rest, spawn, list: foes, seep, dropHeart, dropSliver, slowAt, flood, alive: () => foes.some((f) => f.alive) };
 }

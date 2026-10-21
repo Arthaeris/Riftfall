@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -115,6 +115,37 @@ export const FOES = {
     knockTaken: 0.2,
     drops: [3, 4],
   },
+  doorcrab: {
+    name: 'Doorcrab',
+    desc: 'A crab wearing an old front door as its shell. Behind it, the door swings open onto nothing.',
+    hp: 44, r: 0.62, dmg: 1, speed: 1.1,
+    turn: 1.7,             // how fast it turns to face you (radians per second): get round the side
+    guard: 75,             // its claws block hits from this many degrees either side of straight ahead
+    reach: 1.7, tell: 0.55, snap: 0.18, rest: 0.8,
+    doorReach: 2.6,        // stand this close behind it and the door opens
+    pull: 2.2, doorOpen: 1.3, doorCd: 2.6,
+    knockTaken: 0.35,
+    drops: [3, 4],
+  },
+  lullabypod: {
+    name: 'Lullaby Pod',
+    desc: 'A cocoon that hums in a voice you almost recognise. Leave it alone and it hatches.',
+    hp: 20, r: 0.5, dmg: 0, speed: 0,
+    hatch: 7.5,            // seconds until it hatches
+    brood: ['mirrorpuddle', 'mirrorpuddle'],
+    knockTaken: 0,
+    drops: [2, 3],
+  },
+  gardener: {
+    name: 'The Weeping Gardener',
+    desc: 'A great tree hanging upside down from a crack in the Rift. Its tears fall upward; the fruit on its branches are tiny worlds.',
+    hp: 360, r: 1.3, dmg: 2, speed: 0,
+    phases: [0.66, 0.33],  // health left where it changes how it fights
+    every: [2.6, 2.0, 1.6], // seconds between attacks, by phase
+    sweepR: 4.6,           // the branch sweep's reach (phase 2 and 3)
+    knockTaken: 0,
+    drops: [20, 24],
+  },
 };
 
 // ----- the Seep: the clearing where the fallen shard leaks creatures into Lanternhold -----
@@ -128,6 +159,31 @@ export const SEEP = {
   ],
   recharge: 25,          // seconds before the shard stirs again after you clear it
   heartChance: 0.18,     // chance a creature leaves a heart behind (more likely when you're hurt)
+};
+
+// ----- the Rift: the Drowned Orchard. A floor of rooms on a grid; the doors seal until a room is cleared. -----
+export const RIFT = {
+  name: 'The Drowned Orchard',
+  line: 'Fruit trees under the sea, and a sky made of water.',
+  rooms: 7,              // rooms before the guardian's (the tutorial floor is short)
+  roomW: 16, roomD: 12,  // inside size of a normal room
+  // what a combat room can hold. The game picks from these as you go deeper (index = how far from the start).
+  waves: [
+    [['mirrorpuddle', 'mirrorpuddle', 'lullabypod']],
+    [['doorcrab', 'mirrorpuddle']],
+    [['bellfish', 'mirrorpuddle', 'mirrorpuddle'], ['lullabypod', 'doorcrab']],
+    [['doorcrab', 'bellfish'], ['rootscript', 'mirrorpuddle', 'mirrorpuddle']],
+    [['lullabypod', 'lullabypod', 'bellfish'], ['doorcrab', 'doorcrab']],
+  ],
+  // layouts for room furniture: trees (t), coral (c), rocks (r), kelp (k), pools (p). Coordinates from the room centre.
+  layouts: [
+    [['t', -4.5, -2.5], ['t', 4.5, 2.5], ['c', -5.5, 3], ['c', 5.5, -3], ['k', 0, -4], ['k', -1, 4]],
+    [['t', -5, 0], ['t', 5, 0], ['r', 0, -2.5], ['r', 0, 2.5], ['k', -3, -4], ['k', 3, 4]],
+    [['p', 0, 0], ['c', -4, -3], ['c', 4, 3], ['t', -5.5, 3.5], ['k', 5, -4]],
+    [['t', -3, -3], ['t', 3, 3], ['t', 3, -3], ['c', -3, 3], ['k', -6, 0], ['k', 6, 0]],
+    [['r', -4, 0], ['r', 4, 0], ['c', 0, -4], ['c', 0, 4], ['k', -6, -4], ['k', 6, 4]],
+  ],
+  treasure: { slivers: 12, heart: true },
 };
 
 // ----- the people of Lanternhold -----
@@ -149,7 +205,12 @@ export const STORY = {
     toShard: 'Go to the stone circle where the shard fell',
     seep: 'Survive the Seep',
     reportSeep: 'Return to Maren',
-    rest: 'Rest. The Rift can wait for morning.',
+    enterRift: 'The shard has become a door. Step through it.',
+    rift: 'Find the heart of the Drowned Orchard',
+    guardian: 'Defeat the Weeping Gardener',
+    heartGlass: 'Touch the heart-glass to go home',
+    reportRift: 'Tell Maren what you found',
+    rest: 'Rest. Tomorrow, the Prologue ends.',
   },
   maren: {
     findMaren: [
@@ -172,8 +233,16 @@ export const STORY = {
     reportSeep: [
       'You\u2019re still in one piece. Good.',
       'I\u2019ve kept this lamp a long time, and the sky has never cracked. Not in living memory.',
-      'That shard is only the first. Tomorrow we\u2019ll see where it leads.',
-      'Keep the slivers you gathered, apprentice. We\u2019ll need every one.',
+      'But look at the shard. It isn\u2019t done. It\u2019s opening, like a door someone forgot to close.',
+      'Those things came from somewhere. Go through and see where. Find whatever holds that place together, and break it.',
+      'I\u2019ll be here. Behind the lamp. Where keepers belong.',
+    ],
+    enterRift: ['The shard, apprentice. Don\u2019t make me push you.'],
+    reportRift: [
+      'You came back. And you\u2019re carrying its heart. Let me see that.',
+      'An orchard under the sea, and a tree that weeps upward. Hm.',
+      'That was somebody\u2019s world once. A small one. Now it\u2019s a splinter in ours.',
+      'Keep the heart-glass safe. Tomorrow we take it up the lighthouse and see what the lamp makes of it.',
     ],
     rest: ['Go on, rest. I\u2019ll keep watch.'],
   },
@@ -199,7 +268,13 @@ export const STORY = {
       after: ['I\u2019m not scared. I\u2019m just standing very close to the well.', 'Did you fight them? What did they look like? Were they slimy? I bet they were slimy.'],
     },
   },
-  roundEnd: 'End of round 3: the Tutorial Rift opens in round 4',
+  roundEnd: 'End of round 4: the Prologue ends in round 5',
+  riftLines: {
+    enter: [{ who: '', text: 'Cold water, and no water at all. You can breathe. Fruit trees sway in a current you can\u2019t feel.' }],
+    treasure: 'A Seaglass Heart: your health grows by one heart',
+    guardian: [{ who: '', text: 'Something hangs from the dark above, upside down, weeping. Its tears rise.' }],
+    cleared: [{ who: '', text: 'The orchard goes still. Where the Gardener hung, a heart of glass is left, glowing.' }],
+  },
 };
 
 // ----- the light at evening and at night (game.js blends between them) -----

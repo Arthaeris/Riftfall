@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 
 export const CONFIG = {
   // ----- the player -----
@@ -17,12 +17,11 @@ export const CONFIG = {
   },
   // the dodge: a classic roll with invincibility frames
   roll: {
-    duration: 0.5,         // seconds from start to end of the roll
-    distance: 2.7,         // how far one roll carries you
-    iStart: 0.04,          // invincible from ...
-    iEnd: 0.36,            // ... to (seconds into the roll)
-    recover: 0.12,         // the short crouch as you come up out of it
-    cooldown: 0.2,         // pause after a roll before the next one
+    duration: 0.62,        // seconds from start to end of the roll
+    distance: 3.0,         // how far one roll carries you
+    iStart: 0.05,          // invincible from ...
+    iEnd: 0.42,            // ... to (seconds into the roll)
+    cooldown: 0.25,        // pause after a roll before the next one
     buffer: 0.2,           // a roll pressed this long before you're free still happens
   },
   camera: {
@@ -87,7 +86,7 @@ export const PALETTE = {
   skyGlow: '#ffd29a',
   fog: '#8f7aa8',
   sun: '#ffc48a',
-  hemiSky: '#b9b0ff',
+  hemiSky: '#aab4e4',
   hemiGround: '#6b5a48',
   crack: '#9ff3ff',
   sea: '#2a6f8f',
@@ -110,7 +109,7 @@ export const PALETTE = {
 
 // short lines shown when things happen (kept here so wording is easy to change)
 export const TEXT = {
-  hintMove: 'Drag to move',
+  hintMove: 'Drag to move \u00b7 tap to walk there \u00b7 pinch to zoom',
   hintAttack: 'Hold to keep swinging · drag the button to aim',
   hintRoll: 'Roll through attacks',
   dummy: ['Thwack!', 'Oof.', 'Driftwood holds.', 'Again!'],

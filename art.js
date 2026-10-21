@@ -915,3 +915,214 @@ export function slashMesh(radius, arcDeg, color, glow = 2.2) {
   m.frustumCulled = false;
   return m;
 }
+
+// ---------------------------------------------------------------------------
+// Creatures from the Rifts. Each returns its moving parts so foes.js can animate them,
+// and a flash(k) for hit flashes. All face +z.
+// ---------------------------------------------------------------------------
+export function buildFoe(kind) {
+  const K = kit();
+  const root = new THREE.Group();
+  const body = pivot(root);
+  const out = { root, body, flash: K.flash, kind };
+  if (kind === 'mirrorpuddle') {
+    // a walking puddle; its surface shows somebody else's sunset
+    const water = ['#3f9fc4', '#4fb2d4', '#62c3e0'];
+    K.box(body, 0.98, 0.16, 0.86, water[0], 0, 0.08, 0);
+    K.box(body, 0.84, 0.14, 1.0, water[0], 0, 0.08, 0);
+    K.box(body, 0.78, 0.14, 0.7, water[1], 0, 0.22, 0);
+    K.box(body, 0.56, 0.1, 0.5, water[2], 0, 0.33, 0.02);
+    // the other sky, glowing faintly on its back
+    K.box(body, 0.46, 0.02, 0.38, '#ff9f7a', 0, 0.385, 0.0, 1.5);
+    K.box(body, 0.3, 0.021, 0.18, '#ffd29a', 0, 0.386, -0.08, 1.8);
+    K.box(body, 0.04, 0.022, 0.04, '#ffffff', 0.12, 0.387, 0.1, 3);
+    K.box(body, 0.03, 0.022, 0.03, '#ffffff', -0.15, 0.387, 0.05, 3);
+    // eyes
+    for (const x of [-1, 1]) {
+      K.box(body, 0.14, 0.16, 0.06, '#f4fbff', x * 0.16, 0.3, 0.36);
+      K.box(body, 0.07, 0.09, 0.03, '#152036', x * 0.16 + x * 0.015, 0.29, 0.395);
+    }
+    // little droplets around the rim
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU + 0.3; K.box(body, 0.1, 0.1, 0.1, water[2], Math.cos(a) * 0.52, 0.06, Math.sin(a) * 0.48); }
+    root.add(blob(1.1, 1.0));
+  } else if (kind === 'bellfish') {
+    // a jellyfish with a tiny drowned room inside: you can see its lit window
+    const float = pivot(body, 0, 1.5, 0);
+    out.float = float;
+    const bell = pivot(float);
+    out.bell = bell;
+    K.box(bell, 1.0, 0.32, 1.0, '#e2a5d8', 0, 0, 0);
+    K.box(bell, 1.12, 0.08, 1.12, '#c98bc3', 0, -0.18, 0);
+    K.box(bell, 0.82, 0.24, 0.82, '#eab7e0', 0, 0.26, 0);
+    K.box(bell, 0.52, 0.18, 0.52, '#f2c8e9', 0, 0.45, 0);
+    K.box(bell, 0.2, 0.1, 0.2, '#f8dcf2', 0, 0.58, 0);
+    // the room inside: a lit window, a door, a roof line
+    K.box(bell, 0.3, 0.2, 0.02, '#ffd27a', -0.12, 0.02, 0.51, 2.2);
+    K.box(bell, 0.03, 0.2, 0.025, '#5d3d26', -0.12, 0.02, 0.515);
+    K.box(bell, 0.3, 0.03, 0.025, '#5d3d26', -0.12, 0.02, 0.515);
+    K.box(bell, 0.14, 0.24, 0.02, '#6b4a33', 0.2, -0.01, 0.51);
+    for (const x of [-1, 1]) K.box(bell, 0.07, 0.07, 0.02, '#2a1830', x * 0.14, 0.3, 0.42);
+    out.lamp = K.box(float, 0.16, 0.16, 0.16, '#ffd98a', 0, -0.12, 0, 3);
+    // tentacles: three segments each, they sway
+    out.tentacles = [];
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * TAU;
+      const t = pivot(float, Math.cos(a) * 0.32, -0.2, Math.sin(a) * 0.32);
+      let p = t;
+      const segs = [];
+      for (let k = 0; k < 3; k++) {
+        K.box(p, 0.06, 0.26, 0.06, k === 2 ? '#f2c8e9' : '#d996cf', 0, -0.13, 0);
+        const n = pivot(p, 0, -0.26, 0);
+        segs.push(p); p = n;
+      }
+      out.tentacles.push({ segs, ph: i * 0.9 });
+    }
+    root.add(blob(0.9, 0.9));
+  } else if (kind === 'rootscript') {
+    // a hand of roots; letters glow on its knuckles
+    const hand = pivot(body);
+    out.hand = hand;
+    const bark = ['#6b4a33', '#7a5236', '#5d3d26'];
+    K.box(hand, 0.38, 0.7, 0.36, bark[0], 0, 0.2, 0);
+    K.box(hand, 0.62, 0.36, 0.42, bark[1], 0, 0.66, 0);
+    K.box(hand, 0.08, 0.08, 0.02, '#ffc46b', -0.12, 0.66, 0.22, 2.4);
+    K.box(hand, 0.06, 0.12, 0.02, '#ffc46b', 0.06, 0.7, 0.22, 2.4);
+    K.box(hand, 0.1, 0.04, 0.02, '#ffc46b', 0.18, 0.62, 0.22, 2.4);
+    out.fingers = [];
+    for (let i = 0; i < 4; i++) {
+      const f = pivot(hand, -0.22 + i * 0.15, 0.84, 0.05);
+      let p = f;
+      for (let k = 0; k < 3; k++) {
+        K.box(p, 0.11 - k * 0.02, 0.22, 0.11 - k * 0.02, bark[(i + k) % 3], 0, 0.11, 0);
+        if (k === 1 && i % 2 === 0) K.box(p, 0.04, 0.06, 0.02, '#ffc46b', 0, 0.11, 0.06, 2.2);
+        const n = pivot(p, 0, 0.22, 0); p = n;
+      }
+      out.fingers.push(f);
+    }
+    const thumb = pivot(hand, 0.34, 0.6, 0.06); thumb.rotation.z = -0.7;
+    K.box(thumb, 0.12, 0.3, 0.12, bark[2], 0, 0.15, 0);
+    out.fingers.push(thumb);
+    // roots spreading over the ground
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; K.box(body, 0.6, 0.08, 0.12, bark[i % 3], Math.cos(a) * 0.35, 0.04, Math.sin(a) * 0.35).rotation.y = -a; }
+    root.add(blob(0.9, 0.9));
+  }
+  root.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.castShadow = true; });
+  return out;
+}
+
+// A floating health bar: a dark frame, a white "chip" that trails behind, and the fill.
+// Sprites always face the camera; their anchor points keep the bars left-aligned.
+export function buildBar(width = 1.0) {
+  const g = new THREE.Group();
+  const mk = (color, op, h, order) => {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ color, transparent: true, opacity: op, depthTest: false, depthWrite: false, fog: false }));
+    s.scale.set(width, h, 1);
+    s.renderOrder = 990 + order;
+    g.add(s);
+    return s;
+  };
+  const frame = mk('#120a22', 0.78, 0.15, 0);
+  frame.scale.x = width + 0.06;
+  const chip = mk('#fff3e0', 0.9, 0.09, 1);
+  const fill = mk('#ff4d5e', 1, 0.09, 2);
+  const shine = mk('#ffb3ba', 0.9, 0.025, 3);
+  const setW = (s, w) => { w = Math.max(0.0005, w); s.scale.x = w; s.center.x = (width / 2) / w; };
+  shine.center.y = -1.0;
+  const bar = {
+    group: g, value: 1, chipV: 1,
+    set(v) { bar.value = v; setW(fill, width * v); setW(shine, width * v); },
+    update(dt) { bar.chipV = Math.max(bar.value, bar.chipV - dt * 0.8); setW(chip, width * bar.chipV); },
+    opacity(a) { frame.material.opacity = 0.78 * a; chip.material.opacity = 0.9 * a; fill.material.opacity = a; shine.material.opacity = 0.9 * a; },
+  };
+  bar.set(1); bar.update(0);
+  return bar;
+}
+
+// Pickups: a Skyglass sliver and a voxel heart
+const sliverGeo = (() => { const b = new Batch(90); b.box(0.12, 0.3, 0.12, '#9ff3ff', 0, 0, 0, { glow: 1.8, jitter: 0 }); b.box(0.07, 0.18, 0.07, '#ffffff', 0.05, 0.05, 0.02, { glow: 2.6, jitter: 0, rotZ: 0.3 }); return b.geometry(); })();
+export function buildSliver() { const m = new THREE.Mesh(sliverGeo, MAT.glow); m.castShadow = false; return m; }
+const heartGeo = (() => {
+  const b = new Batch(91);
+  ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'].forEach((row, y) => [...row].forEach((ch, x) => {
+    if (ch === 'X') b.box(0.09, 0.09, 0.12, y < 2 && x < 3 ? '#ff8a96' : '#ff4d5e', (x - 3) * 0.09, (5 - y) * 0.09 - 0.22, 0, { glow: 1.25, jitter: 0, ao: 0.8 });
+  }));
+  return b.geometry();
+})();
+export function buildHeartPickup() { const m = new THREE.Mesh(heartGeo, MAT.glow); return m; }
+
+// The Seep's wall: a ring of Skyglass crystals that rises out of the ground, with a faint shimmering curtain
+export function buildBarrier(radius, n = 22) {
+  const g = new THREE.Group();
+  const b = new Batch(70), gl = new Batch(71), r = rng(71);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU, x = Math.cos(a) * radius, z = Math.sin(a) * radius;
+    b.box(0.7, 0.4, 0.7, '#6f6a80', x, 0.15, z, { rotY: a });
+    const h = 1.3 + r() * 1.0;
+    gl.box(0.34, h, 0.34, '#7fe8ff', x, h / 2 + 0.2, z, { glow: 1.25, rotY: a + 0.4, rotZ: (r() - 0.5) * 0.3, jitter: 0.2 });
+    gl.box(0.22, h * 0.6, 0.22, '#c6f8ff', x + Math.cos(a + 1.6) * 0.22, h * 0.3 + 0.2, z + Math.sin(a + 1.6) * 0.22, { glow: 1.6, rotZ: (r() - 0.5) * 0.6, jitter: 0.2 });
+  }
+  g.add(b.mesh());
+  const gm = gl.mesh(MAT.glow); gm.castShadow = false; g.add(gm);
+  const curtain = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 2.6, 64, 1, true), new THREE.ShaderMaterial({
+    uniforms: { uTime: SKY_UNIFORMS.uTime, uA: { value: 1 } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float uTime; uniform float uA; varying vec2 vUv;
+      void main() {
+        float lines = 0.5 + 0.5 * sin(vUv.x * 160.0 + uTime * 2.0) * sin(vUv.y * 9.0 - uTime * 1.5);
+        float a = (1.0 - vUv.y) * (0.18 + 0.1 * lines) * uA;
+        gl_FragColor = vec4(vec3(0.5, 0.95, 1.0) * a * 1.4, a);
+      }`,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  }));
+  curtain.position.y = 1.3;
+  g.add(curtain);
+  return { group: g, curtain };
+}
+
+// A crack of light in the ground: where a creature crawls out
+export function buildRiftCrack() {
+  const g = new Batch(72), r = rng(72);
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * TAU + r() * 0.4, len = 0.5 + r() * 0.5;
+    g.box(len, 0.02, 0.06, '#c6f8ff', Math.cos(a) * len / 2, 0.02, Math.sin(a) * len / 2, { rotY: -a, glow: 2.4, jitter: 0, ao: 1 });
+  }
+  g.box(0.3, 0.02, 0.3, '#ffffff', 0, 0.02, 0, { glow: 3, jitter: 0, ao: 1, rotY: 0.6 });
+  const m = g.mesh(MAT.glowAdd); m.castShadow = false; m.receiveShadow = false; m.matrixAutoUpdate = true;
+  return m;
+}
+
+// Rootscript's warning: glowing letters written into the ground, one by one, in a ring
+const glyphMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffc46b').multiplyScalar(2.4), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+const discMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff9a3c'), transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending });
+export function buildGlyphRing(radius) {
+  const group = new THREE.Group();
+  const glyphs = [];
+  const n = 12;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU;
+    const gb = new Batch(80 + i);
+    // each letter is a few strokes
+    const shapes = [[[0.16, 0.04, 0], [0.04, 0.16, 0.06]], [[0.04, 0.16, 0], [0.12, 0.04, 0.06], [0.12, 0.04, -0.06]], [[0.16, 0.04, 0.06], [0.16, 0.04, -0.06], [0.04, 0.12, 0]]][i % 3];
+    for (const [w, d, oz] of shapes) gb.box(w, 0.02, d, '#ffffff', 0, 0, oz, { jitter: 0, ao: 1 });
+    const m = new THREE.Mesh(gb.geometry(), glyphMat);
+    m.position.set(Math.cos(a) * radius, 0.04, Math.sin(a) * radius);
+    m.rotation.y = -a;
+    m.visible = false;
+    group.add(m); glyphs.push(m);
+  }
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(radius, 32), discMat.clone());
+  disc.rotation.x = -Math.PI / 2; disc.position.y = 0.03;
+  group.add(disc);
+  return { group, glyphs, disc };
+}
+
+// Bellfish orbs
+const orbGeo = new THREE.BoxGeometry(1, 1, 1);
+const orbMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff8fd0').multiplyScalar(2.2) });
+const orbCore = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffffff').multiplyScalar(2.6) });
+export function buildOrb(r) {
+  const g = new THREE.Group();
+  const a = new THREE.Mesh(orbGeo, orbMat); a.scale.setScalar(r * 1.6); g.add(a);
+  const b = new THREE.Mesh(orbGeo, orbCore); b.scale.setScalar(r * 0.8); g.add(b);
+  return g;
+}

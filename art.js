@@ -477,23 +477,26 @@ export const PROPS = {
     return { lampY: y + topY + 0.75 };
   },
   // Maren's cottage: stone footing, timber walls, a deep blue roof and a crooked chimney
-  cottage(b, g, x, y, z, rot = 0) {
+  // o: { wall, roof, beam, chimney (true/false), lit (windows glow) }
+  cottage(b, g, x, y, z, rot = 0, o = {}) {
+    const wall = o.wall || '#efe3c8', beam = o.beam || '#6b4a33', roof = o.roof || '#3f5a8a';
     b.push(x, y, z, rot);
     b.box(4.4, 0.4, 3.6, '#8e8c99', 0, 0.2, 0, { top: '#9c9aa6' });
-    b.box(4.0, 2.0, 3.2, '#efe3c8', 0, 1.4, 0);
-    for (const px of [-1.95, 1.95]) for (const pz of [-1.55, 1.55]) b.box(0.22, 2.1, 0.22, '#6b4a33', px, 1.45, pz);
-    b.box(4.1, 0.2, 3.3, '#6b4a33', 0, 2.45, 0);
-    b.box(0.2, 2.0, 3.3, '#6b4a33', 0, 1.4, 0, { skip: 0 });
+    b.box(4.0, 2.0, 3.2, wall, 0, 1.4, 0);
+    for (const px of [-1.95, 1.95]) for (const pz of [-1.55, 1.55]) b.box(0.22, 2.1, 0.22, beam, px, 1.45, pz);
+    b.box(4.1, 0.2, 3.3, beam, 0, 2.45, 0);
+    b.box(0.2, 2.0, 3.3, beam, 0, 1.4, 0, { skip: 0 });
     // roof in steps
-    const roof = '#3f5a8a';
     for (let i = 0; i < 6; i++) {
       const w = 4.8 - i * 0.0, d = 4.0 - i * 0.66;
       b.box(w, 0.3, Math.max(0.4, d), shade(roof, 1 - i * 0.03), 0, 2.7 + i * 0.3, 0, { top: shade(roof, 1.12) });
     }
-    b.box(5.0, 0.12, 0.3, '#2f4468', 0, 4.45, 0);
+    b.box(5.0, 0.12, 0.3, shade(roof, 0.75), 0, 4.45, 0);
     // chimney
-    b.box(0.6, 1.6, 0.6, '#9a8f86', 1.3, 3.9, -0.6, { top: '#7a706a' });
-    b.box(0.7, 0.15, 0.7, '#7a706a', 1.3, 4.75, -0.6);
+    if (o.chimney !== false) {
+      b.box(0.6, 1.6, 0.6, '#9a8f86', 1.3, 3.9, -0.6, { top: '#7a706a' });
+      b.box(0.7, 0.15, 0.7, '#7a706a', 1.3, 4.75, -0.6);
+    }
     // door, step, windows with flower boxes
     b.box(0.8, 1.4, 0.1, '#7a4a2e', -0.6, 1.1, 1.62);
     b.box(0.1, 0.1, 0.06, '#d9b55a', -0.32, 1.1, 1.68);
@@ -502,11 +505,12 @@ export const PROPS = {
       b.box(0.9, 0.12, 0.3, '#6b4a33', wx, 1.0, 1.72);
       for (let i = 0; i < 4; i++) b.box(0.14, 0.14, 0.14, pick(['#ff8fb1', '#ffd54f', '#f4f0ff'], b.r), wx - 0.3 + i * 0.2, 1.12, 1.74);
     }
-    b.box(0.12, 0.85, 0.85, '#6b4a33', -2.04, 1.5, 0);
+    b.box(0.12, 0.85, 0.85, beam, -2.04, 1.5, 0);
     b.pop();
     g.push(x, y, z, rot);
-    g.box(0.8, 0.7, 0.04, '#ffcf7a', 0.9, 1.55, 1.62, { glow: 2.2, jitter: 0 });
-    g.box(0.04, 0.6, 0.6, '#ffcf7a', -2.1, 1.5, 0, { glow: 2.0, jitter: 0 });
+    const lit = o.lit === undefined ? 1 : o.lit;
+    g.box(0.8, 0.7, 0.04, lit ? '#ffcf7a' : '#2e3a5a', 0.9, 1.55, 1.62, { glow: lit ? 2.2 : 1, jitter: 0 });
+    g.box(0.04, 0.6, 0.6, lit ? '#ffcf7a' : '#2e3a5a', -2.1, 1.5, 0, { glow: lit ? 2.0 : 1, jitter: 0 });
     g.pop();
     b.push(x, y, z, rot);
     // window crosses (dark frames over the glow)
@@ -558,12 +562,16 @@ export const SKY_UNIFORMS = {
   uSunDir: { value: new V3(-0.75, 0.16, -0.64).normalize() },
   uCrackDir: { value: new V3(0.25, 0.62, -0.75).normalize() },
   uCrack: { value: col(PALETTE.crack).clone() },
-  uCrackPower: { value: 1 },
+  uCrackPower: { value: 0 },     // 0 until the first Riftfall
+  uCrackGrow: { value: 1 },      // 0 -> 1: the crack spreading out from its first point
+  uNight: { value: 0 },          // 0 = evening, 1 = night
+  uMoonDir: { value: new V3(0.55, 0.5, -0.67).normalize() },
 };
 export const SKY_GLSL = /* glsl */`
 uniform float uTime;
 uniform vec3 uZenith, uMid, uHorizon, uGlow, uSunDir, uCrackDir, uCrack;
-uniform float uCrackPower;
+uniform float uCrackPower, uCrackGrow, uNight;
+uniform vec3 uMoonDir;
 float h21(vec2 p) { p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
 vec2 h22(vec2 p) { float n = h21(p); return vec2(n, h21(p + n)); }
 // voronoi edges: small values along the borders between cells, which read as cracks
@@ -593,11 +601,14 @@ vec3 skyColor(vec3 dir) {
   float st = h21(sc);
   float sd = length(fract(sp) - 0.5 - (h22(sc) - 0.5) * 0.6);
   float tw = 0.55 + 0.45 * sin(uTime * (1.5 + st * 3.0) + st * 50.0);
-  c += vec3(0.9, 0.95, 1.0) * step(0.982, st) * smoothstep(0.16, 0.0, sd) * smoothstep(0.22, 0.65, y) * tw * 1.4;
+  c += vec3(0.9, 0.95, 1.0) * step(0.982, st) * smoothstep(0.16, 0.0, sd) * smoothstep(0.22, 0.65, y) * tw * (0.6 + uNight * 1.6);
+  // the moon, at night
+  float md = dot(dir, uMoonDir);
+  c += vec3(0.92, 0.95, 1.0) * (smoothstep(0.99935, 0.99965, md) * 2.2 + pow(max(md, 0.0), 120.0) * 0.35 + pow(max(md, 0.0), 8.0) * 0.06) * uNight;
   // the crack in the Firmament: an impact point, cracks running out from it like broken glass,
   // broken rings around it, and a few pieces missing, where another sky shows through
   float cd = dot(dir, uCrackDir);
-  if (cd > 0.55) {
+  if (cd > 0.55 && uCrackPower > 0.001) {
     vec3 side = normalize(cross(uCrackDir, vec3(0.0, 1.0, 0.0)));
     vec3 up2 = cross(side, uCrackDir);
     vec2 q = vec2(dot(dir, side), dot(dir, up2)) / max(cd, 0.1) * 1.7;
@@ -625,8 +636,13 @@ vec3 skyColor(vec3 dir) {
     // through the missing pieces: a shifting, many-coloured sky from somewhere else
     vec3 beyond = mix(vec3(0.98, 0.55, 0.92), vec3(0.35, 0.95, 1.0), 0.5 + 0.5 * sin(ang * 2.0 + uTime * 0.35 + r * 9.0));
     beyond = mix(beyond, vec3(1.0, 0.85, 0.5), 0.5 + 0.5 * sin(q.x * 30.0 - uTime * 0.6) * sin(q.y * 26.0));
-    c = mix(c, beyond * 1.3, hole * uCrackPower);
-    c += uCrack * (ray * 2.4 + ring * 1.8 + core * 2.2 + halo * 0.12) * pulse * uCrackPower;
+    // while it's spreading, only the part inside its reach shows, with a bright front running outward
+    float reach = uCrackGrow * 1.05;
+    float gm = 1.0 - smoothstep(reach - 0.06, reach, r);
+    float front = exp(-abs(r - reach) * 28.0) * step(uCrackGrow, 0.999);
+    c = mix(c, beyond * 1.3, hole * uCrackPower * gm);
+    c += uCrack * (ray * 2.4 + ring * 1.8 + core * 2.2 + halo * 0.12) * pulse * uCrackPower * gm;
+    c += uCrack * front * (ray * 7.0 + ring * 5.0 + 0.25) * uCrackPower;
   }
   return c;
 }`;
@@ -701,6 +717,7 @@ export function buildSea(shoreTex, rect) {
         vec3 body = mix(uShallow, uSea, smoothstep(0.05, 1.2, depth));
         body = mix(body, uDeep, smoothstep(1.0, 3.5, depth));
         body = mix(uSand * 0.95, body, smoothstep(0.0, 0.35, depth));
+        body *= mix(1.0, 0.3, uNight);
         vec3 col = mix(body, sky, fres * 0.75);
         // foam: a band along the shore that breathes with the waves
         float wave = sin(depth * 14.0 - t * 2.2 + a * 3.0);
@@ -708,7 +725,7 @@ export function buildSea(shoreTex, rect) {
         foam += smoothstep(0.12, 0.0, depth) * 0.6;
         foam *= smoothstep(0.35, 0.65, n2(p * 2.5 + t * 0.3) + 0.3);
         foam = clamp(foam * inside, 0.0, 1.0);
-        col = mix(col, uFoam * 1.15, foam);
+        col = mix(col, uFoam * mix(1.15, 0.45, uNight), foam);
         // sparkles where the low sun catches the water
         float spec = pow(max(dot(R, uSunDir), 0.0), 120.0);
         col += vec3(1.0, 0.8, 0.55) * spec * 2.5;
@@ -1125,4 +1142,52 @@ export function buildOrb(r) {
   const a = new THREE.Mesh(orbGeo, orbMat); a.scale.setScalar(r * 1.6); g.add(a);
   const b = new THREE.Mesh(orbGeo, orbCore); b.scale.setScalar(r * 0.8); g.add(b);
   return g;
+}
+
+// ---------------------------------------------------------------------------
+// The people of Lanternhold: built on the apprentice's body with their own colours and a few extras
+// ---------------------------------------------------------------------------
+const NPC_LOOKS = {
+  maren: { body: 'b', hair: 3, skin: '#e3b896', hairColor: '#d9d4cf', tunic: '#2b3d5e', trim: '#c9a24a', scarf: '#7a2f45', pants: '#22304a', boots: '#2a1e18' },
+  tobin: { body: 'a', hair: 0, skin: '#d4a07c', hairColor: '#8a6a4a', tunic: '#e0b23a', trim: '#c79a28', scarf: '#3f6f8f', pants: '#3a3a48', boots: '#2f3a44' },
+  wenna: { body: 'b', hair: 1, skin: '#f1c8a0', hairColor: '#a0522d', tunic: '#c46a4a', trim: '#f4ead2', scarf: '#f4ead2', pants: '#5a4a6a', boots: '#4a3020' },
+  pip: { body: 'a', hair: 2, skin: '#f5d2b0', hairColor: '#e0a040', tunic: '#5fa8d6', trim: '#ffffff', scarf: '#e0573f', pants: '#4a5a8a', boots: '#5d3d26' },
+};
+export function buildNpc(kind) {
+  const m = buildPlayer(NPC_LOOKS[kind]);
+  const { box } = m.K;
+  const L = NPC_LOOKS[kind];
+  if (kind === 'maren') {
+    // the Keeper: a long coat to the knees, a shawl, and her lamp, always lit
+    box(m.body, 0.46, 0.36, 0.3, L.tunic, 0, 0.36, 0);
+    box(m.body, 0.48, 0.05, 0.31, L.trim, 0, 0.2, 0);
+    box(m.torso, 0.5, 0.14, 0.32, L.scarf, 0, 0.17, 0);
+    const lamp = pivot(m.handL, 0, -0.05, 0.08);
+    box(lamp, 0.03, 0.14, 0.03, '#3a3a44', 0, -0.06, 0);
+    box(lamp, 0.16, 0.03, 0.16, '#3a3a44', 0, -0.14, 0);
+    box(lamp, 0.12, 0.14, 0.12, '#ffe9a8', 0, -0.23, 0, 3.2);
+    box(lamp, 0.16, 0.03, 0.16, '#3a3a44', 0, -0.31, 0);
+    m.lamp = lamp;
+  } else if (kind === 'tobin') {
+    // the fisherman: a sou'wester hat and a grey beard
+    box(m.head, 0.46, 0.08, 0.5, L.tunic, 0, 0.43, -0.02);
+    box(m.head, 0.36, 0.12, 0.36, L.tunic, 0, 0.5, -0.02);
+    box(m.head, 0.3, 0.14, 0.06, '#b8b0a8', 0, 0.06, 0.18);
+    box(m.head, 0.2, 0.08, 0.06, '#b8b0a8', 0, -0.02, 0.18);
+  } else if (kind === 'wenna') {
+    // the baker: an apron dusted with flour, and a scarf tied over her hair
+    box(m.torso, 0.3, 0.42, 0.02, '#f4ead2', 0, -0.1, 0.135);
+    box(m.body, 0.4, 0.3, 0.29, '#f4ead2', 0, 0.36, 0.01);
+    for (const [x, y] of [[-0.06, 0.05], [0.08, -0.12], [-0.1, -0.2]]) box(m.torso, 0.04, 0.04, 0.025, '#ffffff', x, y, 0.15);
+    box(m.head, 0.42, 0.1, 0.42, '#e0573f', 0, 0.42, -0.01);
+  } else if (kind === 'pip') {
+    // a kid with a wooden sword, just like yours
+    m.root.scale.setScalar(0.78);
+    const sw = pivot(m.handR, 0, 0, 0.02);
+    sw.rotation.x = Math.PI * 0.5 - 0.3;
+    box(sw, 0.05, 0.05, 0.16, '#6b4a33', 0, 0, 0);
+    box(sw, 0.18, 0.04, 0.04, '#6b4a33', 0, 0, 0.09);
+    box(sw, 0.06, 0.03, 0.5, '#c8a77a', 0, 0, 0.36);
+  }
+  return m;
 }

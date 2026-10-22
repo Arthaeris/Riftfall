@@ -558,11 +558,12 @@ export const SKY_UNIFORMS = {
   uNight: { value: 0 },          // 0 = evening, 1 = night
   uBlur: { value: 0 },           // 0 -> 1: the Blur pressing against the crack from the other side
   uMoonDir: { value: new V3(0.55, 0.5, -0.67).normalize() },
+  uHole: { value: 0 },           // 0 -> 1: a glimpse of the first world, where the sun is still only a hole
 };
 export const SKY_GLSL = /* glsl */`
 uniform float uTime;
 uniform vec3 uZenith, uMid, uHorizon, uGlow, uSunDir, uCrackDir, uCrack;
-uniform float uCrackPower, uCrackGrow, uNight, uBlur;
+uniform float uCrackPower, uCrackGrow, uNight, uBlur, uHole;
 uniform vec3 uMoonDir;
 float h21(vec2 p) { p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
 vec2 h22(vec2 p) { float n = h21(p); return vec2(n, h21(p + n)); }
@@ -587,6 +588,14 @@ vec3 skyColor(vec3 dir) {
   // the low sun and its glow
   float s = max(dot(dir, uSunDir), 0.0);
   c += uGlow * (pow(s, 6.0) * 0.55 + pow(s, 60.0) * 1.2) + vec3(1.0, 0.85, 0.6) * pow(s, 900.0) * 6.0;
+  // in a glimpse of the Draft the sun isn't made yet: a black hole with a bright pencilled rim where it will go
+  if (uHole > 0.001) {
+    float hd = dot(dir, uSunDir);
+    float disc = smoothstep(0.9968, 0.9976, hd);
+    float rim = smoothstep(0.9956, 0.9966, hd) * (1.0 - smoothstep(0.9970, 0.9978, hd));
+    c = mix(c, vec3(0.02, 0.02, 0.03), disc * uHole);
+    c += vec3(1.0, 0.96, 0.88) * rim * 2.5 * uHole;
+  }
   // stars come out high up: tiny, twinkling points
   vec2 sp = dir.xz / (abs(y) + 0.35) * 140.0;
   vec2 sc = floor(sp);
@@ -1195,6 +1204,89 @@ export function buildFoe(kind) {
     // little mouths all over her lower shell
     for (let k = 0; k < 14; k++) { const a = Math.random() * TAU, h = 0.3 + Math.random() * 0.8; K.box(core, 0.22, 0.2, 0.22, shell[k % 5], Math.cos(a) * 1.5, h, Math.sin(a) * 1.5); }
     root.add(blob(4.2, 4.2));
+  } else if (kind === 'pendulum') {
+    // a market stall that learned to walk: a striped awning for a hat, a counter for a body, two eyes in the
+    // shadow under the awning, and a brass pendulum hanging from a hook on its front
+    const awn = ['#c94a3f', '#f2e6cc'];
+    K.box(body, 1.0, 0.8, 0.7, '#7a5236', 0, 0.75, 0); K.box(body, 1.06, 0.1, 0.76, '#5d3d26', 0, 1.18, 0);
+    for (const x of [-0.42, 0.42]) { K.box(body, 0.14, 0.4, 0.14, '#5d3d26', x, 0.2, -0.2); K.box(body, 0.14, 0.4, 0.14, '#5d3d26', x, 0.2, 0.2); }
+    out.legs = [-0.42, 0.42].map((x) => { const lg = pivot(body, x, 0.4, 0); K.box(lg, 0.14, 0.4, 0.14, '#4a3020', 0, -0.2, 0.1); return lg; });
+    for (const x of [-0.45, 0.45]) K.box(body, 0.08, 0.9, 0.08, '#5d3d26', x, 1.6, 0.3);
+    for (let k = 0; k < 5; k++) K.box(body, 0.24, 0.08, 1.0, awn[k % 2], -0.48 + k * 0.24, 2.1, 0.12).rotation.x = -0.15;
+    for (let k = 0; k < 5; k++) K.box(body, 0.22, 0.12, 0.04, awn[k % 2], -0.48 + k * 0.24, 1.98, 0.64);
+    for (const x of [-0.16, 0.16]) K.box(body, 0.1, 0.1, 0.04, '#ffd36b', x, 1.6, 0.18, 2.6);
+    for (let k = 0; k < 3; k++) K.box(body, 0.2, 0.2, 0.1, ['#c9a24a', '#8a6a4a', '#5a7a8a'][k], -0.3 + k * 0.3, 1.32, -0.05);
+    // the pendulum: a rod and a heavy brass bob with an edge
+    const pv = pivot(body, 0, 1.0, 0.42);
+    out.pend = pv;
+    K.box(pv, 0.06, 1.0, 0.06, '#8a6a3a', 0, -0.5, 0);
+    K.box(pv, 0.5, 0.5, 0.14, '#e0b85a', 0, -1.05, 0, 0); K.box(pv, 0.6, 0.08, 0.16, '#f0d27a', 0, -1.33, 0);
+    root.add(blob(1.1, 0.9));
+  } else if (kind === 'hourglass') {
+    // two bulbs of glass in a wooden frame, on thin legs, the sand running upward; it turns over to throw
+    const hg = pivot(body, 0, 0.7, 0);
+    out.glass = hg;
+    for (const y of [-0.42, 0.42]) K.box(hg, 0.6, 0.08, 0.6, '#7a5236', 0, y, 0);
+    for (const [x, z] of [[-0.26, -0.26], [0.26, -0.26], [-0.26, 0.26], [0.26, 0.26]]) K.box(hg, 0.06, 0.84, 0.06, '#5d3d26', x, 0, z);
+    K.box(hg, 0.42, 0.3, 0.42, '#cfe8f0', 0, 0.22, 0); K.box(hg, 0.42, 0.3, 0.42, '#cfe8f0', 0, -0.22, 0); K.box(hg, 0.12, 0.14, 0.12, '#cfe8f0', 0, 0, 0);
+    out.sandTop = K.box(hg, 0.34, 0.24, 0.34, '#e8c070', 0, 0.22, 0, 1.2);
+    out.sandBot = K.box(hg, 0.34, 0.08, 0.34, '#e8c070', 0, -0.32, 0, 1.2);
+    for (const x of [-0.08, 0.08]) K.box(hg, 0.06, 0.06, 0.03, '#2a1a10', x, 0.26, 0.22);
+    out.legs = [-0.14, 0.14].map((x) => { const lg = pivot(body, x, 0.28, 0); K.box(lg, 0.06, 0.3, 0.06, '#3a2a20', 0, -0.14, 0); K.box(lg, 0.12, 0.05, 0.16, '#3a2a20', 0, -0.28, 0.04); return lg; });
+    root.add(blob(0.6, 0.6));
+  } else if (kind === 'cuckoo') {
+    // a carved clock on a post, a little roof with fretwork, a door under the face, and a wooden bird inside
+    K.box(body, 0.2, 1.2, 0.2, '#3a2a20', 0, 0.6, 0);
+    K.box(body, 0.9, 1.0, 0.6, '#6b4228', 0, 1.6, 0);
+    for (let k = 0; k < 3; k++) { K.box(body, 1.1 - k * 0.3, 0.16, 0.7, '#4a2a1a', 0, 2.18 + k * 0.14, 0); }
+    K.box(body, 0.3, 0.1, 0.04, '#e0b85a', 0, 2.48, 0.3);
+    K.box(body, 0.6, 0.6, 0.04, '#f2e6cc', 0, 1.7, 0.31); K.box(body, 0.04, 0.24, 0.03, '#2a1a10', 0, 1.78, 0.34); K.box(body, 0.18, 0.04, 0.03, '#2a1a10', 0.07, 1.7, 0.34);
+    for (const x of [-0.3, 0.3]) K.box(body, 0.06, 0.4, 0.06, '#c9a24a', x, 0.95, 0.26);   // weights on chains
+    const door = pivot(body, -0.15, 2.05, 0.31);
+    out.door = door;
+    K.box(door, 0.3, 0.22, 0.03, '#4a2a1a', 0.15, 0, 0.01);
+    const bird = pivot(body, 0, 2.05, 0.1);
+    out.bird = bird;
+    K.box(bird, 0.18, 0.16, 0.26, '#e8c070', 0, 0, 0); K.box(bird, 0.06, 0.04, 0.1, '#e0573f', 0, 0, 0.17); K.box(bird, 0.04, 0.04, 0.02, '#2a1a10', 0.06, 0.04, 0.12);
+    out.glowFace = K.box(body, 0.5, 0.5, 0.02, '#ffd29a', 0, 1.7, 0.335, 0);
+    root.add(blob(0.8, 0.8));
+  } else if (kind === 'broker') {
+    // the Hour Broker: tall and thin in a long coat, a clock face for a head, scales in one hand and a fan of
+    // coins in the other; in its chest a clock behind glass that opens only when time stands still
+    const coat = ['#2a1e3a', '#3a2a4a', '#1e1630'];
+    K.box(body, 1.4, 1.8, 1.0, coat[0], 0, 1.4, 0); K.box(body, 1.6, 0.6, 1.2, coat[2], 0, 0.3, 0);
+    for (let k = 0; k < 6; k++) K.box(body, 0.26, 0.5, 0.2, coat[k % 2], -0.65 + k * 0.26, 0.1, 0.5);   // the coat's hem in tatters
+    K.box(body, 1.5, 0.3, 1.1, '#c9a24a', 0, 2.35, 0);
+    // the chest clock and its glass
+    K.box(body, 0.9, 0.9, 0.1, '#5a3a2a', 0, 1.6, 0.52);
+    out.chestFace = K.box(body, 0.72, 0.72, 0.04, '#fff2d6', 0, 1.6, 0.58, 1.0);
+    out.chestHand = pivot(body, 0, 1.6, 0.61);
+    K.box(out.chestHand, 0.05, 0.32, 0.02, '#2a1a10', 0, 0.14, 0);
+    const gm = new THREE.MeshBasicMaterial({ color: new THREE.Color('#bff6ff').multiplyScalar(1.2), transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending });
+    out.glass = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.84, 0.06), gm); out.glass.position.set(0, 1.6, 0.66); body.add(out.glass);
+    // the head: a clock face on a long neck, two hands for a mouth
+    out.head = pivot(body, 0, 2.6, 0);
+    K.box(out.head, 0.16, 0.5, 0.16, coat[1], 0, 0.25, 0);
+    K.box(out.head, 1.1, 1.1, 0.24, '#c9a24a', 0, 1.0, 0); K.box(out.head, 0.94, 0.94, 0.04, '#fff2d6', 0, 1.0, 0.13, 0.85);
+    for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; K.box(out.head, 0.05, 0.12, 0.02, '#2a1a10', Math.cos(a) * 0.38, 1.0 + Math.sin(a) * 0.38, 0.16).rotation.z = a + Math.PI / 2; }
+    for (const x of [-0.18, 0.18]) K.box(out.head, 0.12, 0.12, 0.02, '#e0573f', x, 1.12, 0.16, 2.4);
+    out.headHand = pivot(out.head, 0, 1.0, 0.17);
+    K.box(out.headHand, 0.04, 0.4, 0.02, '#2a1a10', 0, 0.18, 0);
+    K.box(out.head, 0.3, 0.3, 0.3, '#2a1e3a', 0, 1.7, 0); K.box(out.head, 0.5, 0.06, 0.5, '#2a1e3a', 0, 1.56, 0);   // a little top hat
+    // arms: scales on the left, coins on the right
+    out.arms = [-1, 1].map((sd) => {
+      const sh = pivot(body, sd * 0.85, 2.2, 0);
+      K.box(sh, 0.3, 1.1, 0.3, coat[1], 0, -0.55, 0);
+      const el = pivot(sh, 0, -1.1, 0);
+      K.box(el, 0.26, 0.9, 0.26, coat[0], 0, -0.45, 0.1);
+      K.box(el, 0.3, 0.2, 0.3, '#d8e0e4', 0, -0.95, 0.1);
+      return { sh, el };
+    });
+    const sc = pivot(out.arms[0].el, 0, -1.05, 0.1);
+    K.box(sc, 0.06, 0.5, 0.06, '#c9a24a', 0, -0.25, 0); K.box(sc, 0.9, 0.06, 0.06, '#c9a24a', 0, -0.5, 0);
+    for (const x of [-0.42, 0.42]) K.box(sc, 0.3, 0.06, 0.3, '#e0b85a', x, -0.75, 0);
+    for (let k = 0; k < 5; k++) K.box(out.arms[1].el, 0.2, 0.04, 0.2, '#f0d27a', (k - 2) * 0.12, -1.1, 0.2 + Math.abs(k - 2) * -0.04).rotation.z = (k - 2) * 0.3;
+    root.add(blob(2.2, 1.8));
   } else if (kind === 'bubblebishop') {
     // a drowned priest: a pale robe that fades into tatters, a tall mitre of shell, a lantern of trapped air,
     // and a bubble around it all that turns a blade
@@ -1675,6 +1767,64 @@ export const ORCHARD = {
     g.box(0.5, 0.3, 0.5, c, x, y, z, { glow: 1.4, jitter: 0 });
     g.box(0.34, 0.18, 0.34, '#ffffff', x, y + 0.2, z, { glow: 1.6, jitter: 0 });
     for (let k = 0; k < 4; k++) g.box(0.04, 0.6, 0.04, c, x + (k - 1.5) * 0.12, y - 0.42, z, { glow: 0.9, jitter: 0 });
+  },
+};
+
+// ---------------------------------------------------------------------------
+// The Clocktide Market's furniture: stalls under striped awnings, crates of odd goods, clocks on posts,
+// paper lanterns on strings, coin piles, the clock fountain and the Broker's floor-clock
+// ---------------------------------------------------------------------------
+export const MARKET_PROPS = {
+  stall(b, g, x, y, z, r) {
+    const rot = Math.floor(r() * 4) * Math.PI / 2, awn = pick([['#c94a3f', '#f2e6cc'], ['#2f6a8a', '#f2e6cc'], ['#d8a23f', '#5a3a6a'], ['#3f8a6a', '#f2e6cc']], r);
+    b.push(x, y, z, rot);
+    b.box(2.2, 0.9, 1.0, '#7a5236', 0, 0.45, 0, { top: '#9a6e48' });                 // the counter
+    for (const sx of [-1.0, 1.0]) for (const sz of [-0.45, 0.45]) b.box(0.12, 2.2, 0.12, '#5d3d26', sx, 1.1, sz);
+    for (let k = 0; k < 6; k++) b.box(0.4, 0.08, 1.4, awn[k % 2], -1.0 + k * 0.4, 2.25 - Math.abs(k - 2.5) * 0.04, 0.15, { rotX: -0.18 });
+    for (let k = 0; k < 6; k++) b.box(0.38, 0.14, 0.04, awn[k % 2], -1.0 + k * 0.4, 2.05, 0.86);   // the scalloped edge
+    // goods on the counter: little clocks, jars of something glowing, a scale
+    for (let k = 0; k < 3; k++) b.box(0.3, 0.3, 0.12, pick(['#c9a24a', '#8a6a4a', '#5a7a8a'], r), -0.7 + k * 0.7, 1.05, -0.1);
+    for (let k = 0; k < 3; k++) g.box(0.12, 0.12, 0.02, '#fff4dc', -0.7 + k * 0.7, 1.05, -0.03, { glow: 1.3, jitter: 0 });
+    b.box(0.5, 0.06, 0.06, '#c9a24a', 0.3, 1.35, 0.25); b.box(0.04, 0.4, 0.04, '#c9a24a', 0.3, 1.15, 0.25);
+    b.pop();
+    g.push(x, y, z, rot); g.box(0.16, 0.22, 0.16, pick(['#ffd29a', '#ff9fe0', '#9ff3ff'], r), 0.9, 1.8, 0.8, { glow: 2.4, jitter: 0 }); g.pop();
+  },
+  crate(b, g, x, y, z, r) {
+    b.push(x, y, z, r() * 0.6);
+    b.box(0.9, 0.7, 0.9, '#8f6440', 0, 0.35, 0, { top: '#a77a4f' });
+    b.box(0.94, 0.08, 0.94, '#5d3d26', 0, 0.68, 0); b.box(0.94, 0.08, 0.94, '#5d3d26', 0, 0.04, 0);
+    for (let k = 0; k < 3; k++) b.box(0.2, 0.2, 0.2, pick(['#c9a24a', '#e8e0d0', '#7a5a8a', '#3f8a8a'], r), -0.25 + k * 0.25, 0.8, (r() - 0.5) * 0.4);
+    b.pop();
+  },
+  clockPost(b, g, x, y, z) {
+    b.box(0.22, 2.6, 0.22, '#3a2a20', x, y + 1.3, z);
+    b.box(0.9, 0.9, 0.2, '#5a3a2a', x, y + 2.75, z, { top: '#7a5236' });
+    b.box(1.0, 0.1, 0.24, '#c9a24a', x, y + 3.25, z); b.box(1.0, 0.1, 0.24, '#c9a24a', x, y + 2.25, z);
+    g.box(0.72, 0.72, 0.04, '#fff2d6', x, y + 2.75, z + 0.11, { glow: 1.3, jitter: 0 });
+    for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; b.box(0.04, 0.08, 0.03, '#3a2a20', x + Math.cos(a) * 0.3, y + 2.75 + Math.sin(a) * 0.3, z + 0.14, { rotZ: a, jitter: 0 }); }
+    b.box(0.03, 0.26, 0.03, '#2a1a10', x + 0.04, y + 2.85, z + 0.15, { rotZ: -0.5, jitter: 0 }); b.box(0.03, 0.18, 0.03, '#2a1a10', x - 0.05, y + 2.78, z + 0.15, { rotZ: 1.1, jitter: 0 });
+  },
+  lantern(g, b, x, y, z, r) {
+    // a string of paper lanterns between two hooks
+    const c = pick(['#ff9a5a', '#ffd29a', '#ff8fb0', '#9ff3ff'], r);
+    for (let k = 0; k < 4; k++) { const px = x - 1.2 + k * 0.8, py = y - Math.sin((k / 3) * Math.PI) * 0.35; g.box(0.3, 0.38, 0.3, k % 2 ? c : '#ffe6b0', px, py, z, { glow: 1.9, jitter: 0 }); b.box(0.34, 0.06, 0.34, '#3a2a20', px, py + 0.22, z); }
+    b.box(2.8, 0.03, 0.03, '#2a2020', x, y + 0.24, z);
+  },
+  coins(b, g, x, y, z, r) {
+    for (let k = 0; k < 9; k++) b.box(0.24, 0.06, 0.24, pick(['#e0b85a', '#c9a24a', '#f0d27a'], r), x + (r() - 0.5) * 0.9, y + 0.03 + Math.floor(k / 4) * 0.06, z + (r() - 0.5) * 0.9, { rotY: r() * 3 });
+    g.box(0.1, 0.1, 0.1, '#fff4dc', x, y + 0.25, z, { glow: 2.2, jitter: 0 });
+  },
+  // the start room: a fountain with a clock in the middle, water running the wrong way up
+  fountain(b, g, x, y, z) {
+    b.box(3.2, 0.5, 3.2, '#8a7a6a', x, y + 0.25, z, { top: '#2f6a7a' }); b.box(3.4, 0.1, 3.4, '#a89888', x, y + 0.52, z);
+    b.box(0.6, 2.2, 0.6, '#8a7a6a', x, y + 1.6, z);
+    b.box(1.3, 1.3, 0.3, '#5a3a2a', x, y + 3.2, z, { top: '#7a5236' }); g.box(1.06, 1.06, 0.04, '#fff2d6', x, y + 3.2, z + 0.17, { glow: 1.4, jitter: 0 });
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; g.box(0.08, 0.5, 0.08, '#9ff3ff', x + Math.cos(a) * 1.1, y + 0.8 + (k % 3) * 0.2, z + Math.sin(a) * 1.1, { glow: 1.2, jitter: 0 }); }
+  },
+  // the Broker's floor: a great clock face set into it, twelve brass marks round the edge
+  floorClock(g, b, x, y, z, rad) {
+    for (let k = 0; k < 48; k++) { const a = (k / 48) * TAU; b.box(0.5, 0.04, 0.22, '#3a2a30', x + Math.cos(a) * rad, y + 0.02, z + Math.sin(a) * rad, { rotY: -a + Math.PI / 2, jitter: 0, ao: 1 }); }
+    for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; g.box(k % 3 ? 0.18 : 0.3, 0.04, k % 3 ? 0.5 : 0.9, '#e0b85a', x + Math.cos(a) * (rad - 0.6), y + 0.03, z + Math.sin(a) * (rad - 0.6), { rotY: -a + Math.PI / 2, glow: 1.1, jitter: 0, ao: 1 }); }
   },
 };
 

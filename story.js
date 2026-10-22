@@ -47,7 +47,7 @@ export function createStory(ctx) {
     scene.add(m);
     return m;
   })();
-  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil', 'reportMaren2'].includes(S.step);
+  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil', 'reportMaren2', 'reportMaren3'].includes(S.step);
   // whoever the story wants you to talk to next wears the marker
   const newsWho = () => (S.step === 'findTobin' ? 'tobin' : ['brinemoor', 'reportHale'].includes(S.step) ? 'hale' : hasNews() ? 'maren' : null);
   const O = STORY.order, past = (step) => O.indexOf(S.step) >= O.indexOf(step);
@@ -195,7 +195,8 @@ export function createStory(ctx) {
     else if (S.step === 'morning') ending();
     else if (S.step === 'free') openGate();
     else if (S.step === 'reportOil') setStep('boathouse');
-    else if (S.step === 'reportMaren2') { setStep('act1Sea'); ui.toast(STORY.roundEnd); }
+    else if (S.step === 'reportMaren2') setStep('act1Sea');
+    else if (S.step === 'reportMaren3') { setStep('act1Cinder'); ui.toast(STORY.roundEnd); }
   }
   // Act 1 begins: Maren hands over the key, the keepers' gate opens, and the clock starts to run
   async function openGate() {
@@ -616,6 +617,7 @@ export function createStory(ctx) {
     if (step === 'ending') step = 'morning';
     if (step === 'act1End') step = 'findTobin';           // saves from before the sea arrived
     if (['belfryIn', 'belfryBoss'].includes(step)) step = 'belfry';
+    if (['market', 'marketBoss'].includes(step)) step = 'act1Sea';    // the Market regrows: a journey saved inside it resumes at sea
     if (at(step) < 0) step = 'findMaren';
     S.riftIn = undefined; S.cine = null; S.hits = hits;
     if (at(step) > at('beacon')) world.beacon.light();
@@ -670,7 +672,7 @@ export function createStory(ctx) {
     S.nearDoor = S.step === 'rest' && !S.busy && P.state === 'move' && Math.hypot(P.x - door.x, P.z - door.z) < 1.7;
     // Act 1: the waystones, the cave mouth, keepsakes lying about, and the memory they make
     S.nearStone = null; S.nearMouth = false; S.nearRemember = false; S.nearBoat = false;
-    S.nearTide = S.nearBelfry = S.nearPier = false;
+    S.nearTide = S.nearBelfry = S.nearPier = S.nearBell = false;
     if (!S.busy && P.state === 'move' && past('free')) {
       for (const w of world.waystones) if (!w.lit && Math.hypot(P.x - w.x, P.z - w.z) < 1.8) S.nearStone = w;
       S.nearMouth = past('gullcliff') && Math.hypot(P.x - world.mouth.x, P.z - world.mouth.z) < 2.2;
@@ -700,6 +702,7 @@ export function createStory(ctx) {
     if (S.nearBoat && !S.busy) { ctx.travel('sea'); return true; }
     if (S.nearTide && !S.busy) { ctx.waitTide(); return true; }
     if (S.nearBelfry && !S.busy) { if (['brinemoor', 'belfry'].includes(S.step)) setStep('belfryIn'); ctx.travel('belfry'); return true; }
+    if (S.nearBell && !S.busy) { ctx.ringBell(); return true; }
     if (S.nearPier && !S.busy) { ctx.travel('sea'); return true; }
     return false;
   }
@@ -715,11 +718,13 @@ export function createStory(ctx) {
     const free = !S.busy && P.state === 'move';
     const n = free ? nearestTalker() : null;
     const sp = w.spots;
-    S.nearTide = free && Math.hypot(P.x - sp.tidePost.x, P.z - sp.tidePost.z) < 1.8;
+    S.nearTide = free && !!sp.tidePost && Math.hypot(P.x - sp.tidePost.x, P.z - sp.tidePost.z) < 1.8;
     // the Belfry's door is only above water at low tide
-    S.nearBelfry = free && w.level < 0.0 && Math.hypot(P.x - sp.door.x, P.z - sp.door.z) < 1.8;
+    S.nearBelfry = free && !!sp.door && w.level < 0.0 && Math.hypot(P.x - sp.door.x, P.z - sp.door.z) < 1.8;
     S.nearPier = free && Math.hypot(P.x - sp.pier.x, P.z - sp.pier.z) < 2.0;
-    ui.setContext(n ? 'talk' : S.nearBelfry ? 'enter' : S.nearTide ? 'wait' : S.nearPier ? 'sail' : null);
+    // Bell Rock's bell
+    S.nearBell = free && !!sp.bell && Math.hypot(P.x - sp.bell.x, P.z - sp.bell.z) < 2.0;
+    ui.setContext(n ? 'talk' : S.nearBelfry ? 'enter' : S.nearBell ? 'ring' : S.nearTide ? 'wait' : S.nearPier ? 'sail' : null);
     S.near = n;
   }
   function begin() { setStep('findMaren'); }

@@ -190,6 +190,8 @@ export function createFoes(ctx) {
     for (let i = orbs.length - 1; i >= 0; i--) {
       const o = orbs[i];
       o.t += dt; o.life -= dt;
+      // a homing orb (the cuckoo's bird) bends its path toward you a little
+      if (o.homing) { const dx = P.x - o.x, dz = P.z - o.z, d = Math.hypot(dx, dz) || 1, sp = Math.hypot(o.vx, o.vz); o.vx += (dx / d * sp - o.vx) * Math.min(1, dt * o.homing); o.vz += (dz / d * sp - o.vz) * Math.min(1, dt * o.homing); }
       o.x += o.vx * dt; o.z += o.vz * dt;
       // they sink from the bell down to chest height, then glide on
       const gy = world.groundAt(o.x, o.z);
@@ -411,6 +413,10 @@ export function createFoes(ctx) {
       return { reel: false };
     }
     if (f.kind === 'bubblebishop') { popBubble(f); return { reel: true }; }
+    if (f.kind === 'pendulum') { f.state = 'stun'; f.t = 0; sound.sfx('clank'); ctx.number('Caught!', f.x, f.y + 2.6, f.z, true); return { reel: false }; }
+    if (f.kind === 'hourglass') { f.state = 'stun'; f.t = 0; return { reel: true }; }
+    if (f.kind === 'cuckoo') { if (f.state === 'idle' || f.state === 'tell') { f.state = 'open'; f.t = 0; sound.sfx('snap'); ctx.number('Door yanked open!', f.x, f.y + 2.8, f.z, true); } return { reel: false }; }
+    if (f.kind === 'broker') { sound.sfx('clank'); return { reel: false }; }
     if (f.kind === 'mudmimic' || f.kind === 'bellringer') { sound.sfx('clank'); return { reel: false }; }
     // small creatures are reeled in and dazed
     if (['shardmite', 'mirrorpuddle', 'bellfish', 'lullabypod'].includes(f.kind)) {
@@ -681,6 +687,210 @@ export function createFoes(ctx) {
     }
     return out;
   }
+
+  // ---------------------------------------------------------------------------
+  // The Clocktide Market's creatures. Its rule: when the great clock strikes, time stands still for a moment
+  // for everything here but you (world.frozen()); that's when the Broker's glass opens.
+  // ---------------------------------------------------------------------------
+  // Pendulum Hawker: walks up, draws its pendulum back (the warning), then swings it through an arc in front
+  function hawker(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    let walk = 0;
+    if (f.state === 'up' || f.state === 'chase') {
+      f.state = 'chase';
+      turnTo(f, Math.atan2(tp.x, tp.z), 3.5, dt);
+      if (tp.d > D.reach * 0.75) { moveFoe(f, tp.x * D.speed * dt, tp.z * D.speed * dt); walk = 1; }
+      f.cd -= dt;
+      if (tp.d < D.reach && f.cd <= 0) { f.state = 'tell'; f.t = 0; sound.sfx('creak'); }
+      m.pend.rotation.z = Math.sin(now * 3) * 0.15;
+    } else if (f.state === 'tell') {
+      const k = Math.min(1, f.t / D.tell);
+      m.pend.rotation.z = smooth(k) * 1.4;
+      turnTo(f, Math.atan2(tp.x, tp.z), 2, dt);
+      f.tellGlow = k * 0.7;
+      if (f.t >= D.tell) { f.state = 'swing'; f.t = 0; f.hitDone = false; f.tellGlow = 0; sound.sfx('swish'); }
+    } else if (f.state === 'swing') {
+      const k = Math.min(1, f.t / D.swing);
+      m.pend.rotation.z = 1.4 - smooth(k) * 2.8;
+      // anything in front, within reach, while the bob passes through the middle
+      if (!f.hitDone && k > 0.25 && k < 0.8 && tp.d < D.reach + 0.3 && Math.cos(angTo(f.face, Math.atan2(tp.x, tp.z))) > 0.1) { if (ctx.hurtPlayer(D.dmg, f.x, f.z)) f.hitDone = true; }
+      if (f.t >= D.swing) { f.state = 'rest'; f.t = 0; }
+    } else if (f.state === 'rest') {
+      m.pend.rotation.z = lerp(m.pend.rotation.z, 0, Math.min(1, dt * 4));
+      if (f.t >= D.rest) { f.state = 'chase'; f.t = 0; f.cd = rnd(0.4, 1.0); }
+    } else if (f.state === 'stagger' || f.state === 'stun') {
+      m.pend.rotation.z = Math.sin(now * 20) * 0.2;
+      if (f.t > (f.state === 'stun' ? 1.4 : 0.4)) { f.state = 'chase'; f.t = 0; f.cd = 0.5; }
+    }
+    const ph = now * 9;
+    m.legs[0].rotation.x = Math.sin(ph) * 0.6 * walk; m.legs[1].rotation.x = -Math.sin(ph) * 0.6 * walk;
+    m.body.position.y = Math.abs(Math.sin(ph)) * 0.05 * walk;
+    f.barY = 2.5;
+  }
+  // Hourglass Imp: blinks about, then turns itself over (the warning) and throws a patch of slow sand at you
+  function imp(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    if (f.state === 'up' || f.state === 'chase') {
+      f.state = 'chase';
+      turnTo(f, Math.atan2(tp.x, tp.z), 6, dt);
+      f.cd -= dt;
+      if (f.next === undefined) f.next = rnd(...D.blink);
+      f.next -= dt;
+      if (f.next <= 0) {
+        // a blink: gone in a puff of sand, back a few steps off to one side of you
+        for (let k = 0; k < 12; k++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x, y: f.y + 0.6, z: f.z, vx: Math.cos(a) * 2, vy: Math.random() * 2, vz: Math.sin(a) * 2, grav: 6, life: 0.5, size: 0.12, color: '#e8c070', glow: 1.2 }); }
+        for (let k = 0; k < 10; k++) {
+          const a = Math.random() * TAU, d = 3 + Math.random() * 2.5, x = P.x + Math.cos(a) * d, z = P.z + Math.sin(a) * d;
+          if (world.walkable(x, z, world.groundAt(x, z), 0.4) && (!world.contain || world.contain(x, z))) { f.x = x; f.z = z; break; }
+        }
+        sound.sfx('blur');
+        f.next = rnd(...D.blink);
+        if (f.cd <= 0) { f.state = 'tell'; f.t = 0; }
+      }
+    } else if (f.state === 'tell') {
+      const k = Math.min(1, f.t / D.tell);
+      m.glass.rotation.z = smooth(k) * Math.PI;
+      f.tellGlow = k * 0.6;
+      if (f.t >= D.tell) {
+        // the sand lands where you are standing
+        const pm = buildSand(1.3);
+        pm.position.set(P.x, world.groundAt(P.x, P.z) + 0.02, P.z); scene.add(pm);
+        slows.push({ x: P.x, z: P.z, r: 1.3, t: D.sand, life: D.sand, m: pm });
+        sound.sfx('rustle');
+        for (let i = 0; i < 14; i++) sparks.spawn({ x: P.x + (Math.random() - 0.5) * 2, y: P.y + 1.5, z: P.z + (Math.random() - 0.5) * 2, vy: -2, life: 0.6, size: 0.1, color: '#f0d080', glow: 1.4 });
+        f.state = 'chase'; f.t = 0; f.cd = 3; f.tellGlow = 0; m.glass.rotation.z = 0;
+      }
+    } else if (f.state === 'stagger' || f.state === 'stun') { if (f.t > 0.4) { f.state = 'chase'; f.t = 0; } }
+    // sand running the wrong way: the bottom empties into the top
+    const run = (now * 0.2 + f.x) % 1;
+    m.sandTop.scale.y = 0.4 + run * 0.6; m.sandBot.scale.y = 1 - run * 0.7;
+    m.legs[0].rotation.x = Math.sin(now * 12) * 0.3; m.legs[1].rotation.x = -Math.sin(now * 12) * 0.3;
+    f.barY = 1.5;
+  }
+  function buildSand(r) {
+    const g = new THREE.Group();
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 24), new THREE.MeshBasicMaterial({ color: '#e8c070', transparent: true, opacity: 0.55, depthWrite: false }));
+    disc.rotation.x = -Math.PI / 2; g.add(disc);
+    const b = new Batch(99);
+    for (let i = 0; i < 10; i++) { const a = Math.random() * TAU, d = Math.random() * r * 0.85; b.box(0.3, 0.1, 0.3, i % 2 ? '#f0d080' : '#d8b060', Math.cos(a) * d, 0.05, Math.sin(a) * d); }
+    const spikes = b.mesh(); spikes.matrixAutoUpdate = true; g.add(spikes);
+    g.userData = { disc, spikes };
+    return g;
+  }
+  // Cuckoo Clock: rattles its door (the warning), the door bangs open and the bird flies at you. It's only soft
+  // while the door is open
+  function cuckoo(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    f.t += dt;
+    f.face = Math.atan2(tp.x, tp.z);
+    if (f.state === 'up' || f.state === 'idle') {
+      f.state = 'idle';
+      if (f.next === undefined) f.next = rnd(...D.every) * 0.6;
+      f.next -= dt;
+      m.door.rotation.y = 0; m.bird.position.z = 0.1; m.glowFace.material.color.setScalar(0.6);
+      if (f.next <= 0 && tp.d < 11) { f.state = 'tell'; f.t = 0; sound.sfx('tick'); }
+    } else if (f.state === 'tell') {
+      m.door.rotation.y = Math.sin(f.t * 40) * 0.15;
+      f.tellGlow = Math.min(1, f.t / D.tell) * 0.6;
+      if (f.t >= D.tell) {
+        f.state = 'open'; f.t = 0; f.tellGlow = 0;
+        sound.sfx('crabTell');
+        // the bird: a slow orb that bends toward you a little
+        const a = Math.atan2(tp.x, tp.z);
+        const o = buildOrb(0.22);
+        o.traverse((c) => { if (c.material) { c.material = c.material.clone(); c.material.color && c.material.color.set('#f0c060'); } });
+        o.position.set(f.x, f.y + 2.05, f.z); scene.add(o);
+        orbs.push({ m: o, x: f.x + Math.sin(a) * 0.5, y: f.y + 2.05, z: f.z + Math.cos(a) * 0.5, vx: Math.sin(a) * D.bird, vz: Math.cos(a) * D.bird, life: D.birdLife, r: 0.26, dmg: D.dmg, t: 0, homing: 1.4, keepY: true });
+      }
+    } else if (f.state === 'open') {
+      m.door.rotation.y = -1.6; m.bird.position.z = 0.35 + Math.sin(f.t * 12) * 0.05;
+      if (f.t >= D.open) { f.state = 'idle'; f.t = 0; f.next = rnd(...D.every); sound.sfx('doorSlam'); }
+    } else if (f.state === 'stagger') { if (f.t > 0.3) { f.state = 'open'; f.t = D.open * 0.6; } }
+    f.barY = 2.7;
+  }
+  const shut = (f) => f.kind === 'cuckoo' && f.state !== 'open' && f.state !== 'stagger';
+  // The Hour Broker. It sweeps the floor with a minute hand (a line of light marks where it starts: roll over it
+  // or keep out of its reach), throws fans of coins, and keeps its heart behind glass. When the great clock
+  // strikes and time stands still, the glass opens.
+  let brokerHand = null;
+  function broker(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    const phase = f.hp / D.hp > 0.5 ? 0 : 1;
+    if (phase !== f.phase) { f.phase = phase; if (phase === 1) { sound.sfx('roar'); ctx.shake(0.6); ctx.toast('The Broker winds itself faster'); } }
+    m.head.rotation.y = clamp(angTo(f.face, Math.atan2(tp.x, tp.z)), -0.6, 0.6);
+    m.headHand.rotation.z = -now * 2; m.chestHand.rotation.z = -now * 0.8;
+    m.arms[0].sh.rotation.z = 0.2 + Math.sin(now * 1.3) * 0.08; m.arms[1].sh.rotation.z = -0.2 - Math.sin(now * 1.1) * 0.08;
+    m.glass.material.opacity = 0.35; m.chestFace.material.color.set('#fff2d6');
+    turnTo(f, Math.atan2(tp.x, tp.z), 1.2, dt);
+    ctx.bossBar(D.name, Math.max(0, f.hp / D.hp));
+    f.barY = 0;
+    if (ctx.bossHold && ctx.bossHold()) return;
+    if (!brokerHand) {
+      const g2 = new THREE.Group();
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd29a').multiplyScalar(2.2) }));
+      bar.geometry.translate(0, 0, 0.5); g2.add(bar);
+      const warn = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff8a5a').multiplyScalar(1.6), transparent: true, opacity: 0.8, depthWrite: false }));
+      warn.geometry.translate(0, 0, 0.5); g2.add(warn);
+      g2.userData = { bar, warn }; g2.visible = false; scene.add(g2);
+      brokerHand = g2;
+    }
+    const H = brokerHand;
+    if (f.state === 'up') { f.state = 'idle'; f.t = 0; f.next = 1.5; }
+    if (f.state === 'idle') {
+      // it drifts round the middle of its clock
+      if (f.room) { const cx = (f.room.x0 + f.room.x1) / 2, cz = (f.room.z0 + f.room.z1) / 2 - 1.5; moveFoe(f, (cx + Math.sin(now * 0.4) * 2 - f.x) * dt, (cz + Math.cos(now * 0.5) * 1.2 - f.z) * dt); }
+      f.next -= dt;
+      if (f.next <= 0) {
+        const opts = ['sweep', 'coins', phase ? 'sweep' : 'coins'];
+        let pk = opts[Math.floor(Math.random() * opts.length)];
+        if (pk === f.last && Math.random() < 0.6) pk = pk === 'sweep' ? 'coins' : 'sweep';
+        f.last = pk; f.state = pk; f.t = 0; f.fired = 0;
+        if (pk === 'sweep') { f.sweepA = Math.atan2(tp.x, tp.z) + Math.PI * 0.6 * (Math.random() < 0.5 ? 1 : -1); f.sweepDir = Math.sign(angTo(f.sweepA, Math.atan2(tp.x, tp.z))) || 1; sound.sfx('tick'); }
+      }
+    } else if (f.state === 'sweep') {
+      // the warning: a thin line where the hand will start; then the hand comes round, once (twice in phase 2)
+      const len = D.sweep, tell = 0.9, dur = phase ? 2.6 : 1.8, turns = phase ? 1.6 : 1.1;
+      H.visible = true; H.position.set(f.x, f.y + 0.25, f.z);
+      H.userData.bar.scale.z = len; H.userData.warn.scale.z = len;
+      if (f.t < tell) { H.rotation.y = f.sweepA; H.userData.bar.visible = false; H.userData.warn.visible = Math.sin(f.t * 30) > -0.3; }
+      else {
+        const k = Math.min(1, (f.t - tell) / dur);
+        const prevA = H.rotation.y;
+        H.rotation.y = f.sweepA + f.sweepDir * smooth(k) * turns * Math.PI;
+        H.userData.bar.visible = true; H.userData.warn.visible = false;
+        // did the hand pass over you?
+        const pa = Math.atan2(tp.x, tp.z);
+        const a0 = angTo(prevA, pa), a1 = angTo(H.rotation.y, pa);
+        if (tp.d < len + 0.3 && tp.d > f.D.r * 0.5 && Math.sign(a0) !== Math.sign(a1) && Math.abs(a0) < 1 && P.y < f.y + 0.9) ctx.hurtPlayer(D.dmg, P.x - tp.x, P.z - tp.z);
+        if (Math.random() < 0.6) sparks.spawn({ x: f.x + Math.sin(H.rotation.y) * len * Math.random(), y: f.y + 0.3, z: f.z + Math.cos(H.rotation.y) * len * Math.random(), vy: 1, life: 0.4, size: 0.12, color: '#ffd29a', glow: 2 });
+        if (k >= 1) { H.visible = false; f.state = 'idle'; f.t = 0; f.next = D.every[phase]; }
+      }
+    } else if (f.state === 'coins') {
+      // the hand of coins goes back (the warning), then a fan of coins, twice
+      m.arms[1].sh.rotation.x = -Math.min(1, f.t / 0.5) * 1.2;
+      if (f.t > 0.55 + f.fired * 0.6 && f.fired < 2) {
+        const a0 = Math.atan2(tp.x, tp.z), n = D.coins[phase];
+        for (let i = 0; i < n; i++) { const a = a0 + (i - (n - 1) / 2) * 0.2 + (f.fired % 2) * 0.1; coin(f.x + Math.sin(a) * 1.4, f.y + 1.6, f.z + Math.cos(a) * 1.4, Math.sin(a), Math.cos(a)); }
+        f.fired++; sound.sfx('chime');
+      }
+      if (f.fired >= 2 && f.t > 1.9) { m.arms[1].sh.rotation.x = 0; f.state = 'idle'; f.t = 0; f.next = D.every[phase]; }
+    } else if (f.state === 'stagger') { f.state = 'idle'; f.t = 0; f.next = 0.6; }
+  }
+  // a coin from the Broker's hand: like a pebble, but golden
+  function coin(x, y, z, dx, dz) {
+    const o = buildOrb(0.18);
+    o.traverse((c) => { if (c.material) { c.material = c.material.clone(); c.material.color && c.material.color.set('#f0d27a'); } });
+    o.position.set(x, y, z); scene.add(o);
+    orbs.push({ m: o, x, y, z, vx: dx * 6, vz: dz * 6, life: 2.4, r: 0.2, dmg: 1, t: 0, pebble: true });
+  }
+  // is time standing still here? (only the Market's clock does this)
+  const frozen = () => !!(world.frozen && world.frozen());
 
   // ---------------------------------------------------------------------------
   // Rootscript: above ground it can be hit; it sinks, travels toward you under the earth,
@@ -1077,6 +1287,10 @@ export function createFoes(ctx) {
     }
     // a mud mimic in hiding: the blade just sinks into mud
     if (hidden(f)) { sound.sfx('squelch'); ctx.number('Only mud…?', f.x, f.y + 1, f.z, false); return true; }
+    // the Cuckoo Clock: its case turns a blade until the door's open
+    if (shut(f)) { sound.sfx('wood'); ctx.number('Blocked', f.x, f.y + 2.4, f.z, false); return true; }
+    // the Hour Broker: its heart is behind glass that only opens when time stands still
+    if (f.kind === 'broker' && !frozen()) { sound.sfx('clank'); ctx.number('Glass', f.x, f.y + 3, f.z, false); return true; }
     // the Bellringer: under her bell, nothing gets through
     if (f.kind === 'bellringer' && f.state !== 'exposed') { sound.sfx('clank'); sound.sfx('bellHit'); ctx.number('Clang', f.x, f.y + 4, f.z, false); return true; }
     // the Doorcrab's claws stop anything that comes from the front
@@ -1123,7 +1337,7 @@ export function createFoes(ctx) {
     ctx.number(String(dmg), f.x, hy + 0.7, f.z, heavy);
     // a heavy hit (or any hit on a creature mid-warning, for the puddle) knocks it out of what it was doing
     // (the guardian has poise: it flinches, but never drops what it's doing, so its warnings always play out)
-    if ((f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer') && f.hp > 0) { f.flinch = 1; }
+    if ((f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker') && f.hp > 0) { f.flinch = 1; }
     else if (f.hp > 0 && (heavy || (f.kind === 'mirrorpuddle' && f.state === 'tell'))) {
       if (f.state !== 'under' && f.state !== 'tell' || f.kind === 'mirrorpuddle') { f.state = 'stagger'; f.t = 0; f.m.body.position.x = 0; f.tellGlow = 0; }
     }
@@ -1140,7 +1354,13 @@ export function createFoes(ctx) {
       bits.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * sp + nx * 2, vy: 2 + Math.random() * 3.5, vz: Math.sin(a) * sp + nz * 2, life: 1.3, size: 0.09 + Math.random() * 0.1, color: cols[i % 3], floor: f.y });
     }
     for (let i = 0; i < 22; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * 3.5, vy: Math.random() * 4, vz: Math.sin(a) * 3.5, drag: 3, grav: 3, life: 0.6, size: 0.18, color: i % 2 ? '#ffffff' : '#9ff3ff', glow: 3 }); }
-    const big = f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer';
+    const big = f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker';
+    if (f.kind === 'broker') {
+      ctx.bossBar(null);
+      if (brokerHand) brokerHand.visible = false;
+      for (let i = 0; i < 60; i++) { const a = Math.random() * TAU, sp = 2 + Math.random() * 5; bits.spawn({ x: f.x, y: f.y + 1 + Math.random() * 3, z: f.z, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 4, vz: Math.sin(a) * sp, life: 2, size: 0.1 + Math.random() * 0.16, color: ['#c9a24a', '#f0d27a', '#2a1e3a', '#fff2d6'][i % 4], floor: f.y }); }
+      if (ctx.onGuardianDown) ctx.onGuardianDown(f);
+    }
     if (f.kind === 'bellringer') {
       ctx.bossBar(null);
       for (const w of waves) scene.remove(w.g);
@@ -1326,6 +1546,20 @@ export function createFoes(ctx) {
   const camDir = new THREE.Vector3();
   function update(dt, camera) {
     updateSeep(dt);
+    // time standing still: nothing moves but you (hits still land, and the Broker's glass is open)
+    const still = frozen();
+    if (still) {
+      for (const f of foes) {
+        if (!f.alive) continue;
+        f.flashT = Math.max(0, f.flashT - dt * 7);
+        f.m.flash(Math.max(f.flashT, 0.25), '#ffe2a0');
+        if (f.kind === 'broker') { f.m.glass.material.opacity = 0; f.m.chestFace.material.color.set('#ffffff').multiplyScalar(2.2); }
+        if (f.bar.group.visible) f.bar.update(dt);
+      }
+      for (let i = foes.length - 1; i >= 0; i--) if (!foes[i].alive) { if (foes[i].crack) scene.remove(foes[i].crack); foes.splice(i, 1); }
+      updateDrops(dt);
+      return;
+    }
     for (const f of foes) {
       if (!f.alive) continue;
       // a placed creature dozes until you come near (or it's hit)
@@ -1388,6 +1622,10 @@ export function createFoes(ctx) {
       else if (f.kind === 'rustgill') rustgill(f, dt);
       else if (f.kind === 'mudmimic') mimic(f, dt);
       else if (f.kind === 'bellringer') ringer(f, dt);
+      else if (f.kind === 'pendulum') hawker(f, dt);
+      else if (f.kind === 'hourglass') imp(f, dt);
+      else if (f.kind === 'cuckoo') cuckoo(f, dt);
+      else if (f.kind === 'broker') broker(f, dt);
       if (!f.alive) continue;
       // knockback from your hits, sliding out
       if (Math.abs(f.kx) + Math.abs(f.kz) > 0.01) { moveFoe(f, f.kx * dt, f.kz * dt); const k = Math.exp(-9 * dt); f.kx *= k; f.kz *= k; }
@@ -1401,7 +1639,7 @@ export function createFoes(ctx) {
       f.flashT = Math.max(0, f.flashT - dt * 7);
       f.m.flash(Math.max(f.flashT, (f.tellGlow || 0) * (0.35 + 0.25 * Math.sin(performance.now() / 40))));
       // health bar: floats above, fades a little at full health (the guardian's is at the top of the screen)
-      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener' && f.kind !== 'barnaclemother' && f.kind !== 'bellringer' && !hidden(f) && !f.asleep;
+      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener' && f.kind !== 'barnaclemother' && f.kind !== 'bellringer' && f.kind !== 'broker' && !hidden(f) && !f.asleep;
       f.bar.group.visible = showBar;
       if (showBar) {
         f.bar.group.position.set(f.x, f.y + (f.barY || 1.2), f.z);
@@ -1430,6 +1668,7 @@ export function createFoes(ctx) {
     waves.length = 0;
     for (const b of falling) { scene.remove(b.sh); scene.remove(b.bl); }
     falling.length = 0;
+    if (brokerHand) brokerHand.visible = false;
     for (const e of effects) scene.remove(e.m);
     effects.length = 0;
     flood.k = 0; flood.to = 0;

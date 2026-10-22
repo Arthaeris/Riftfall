@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.8.1';
+export const VERSION = '0.9.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -211,6 +211,42 @@ export const FOES = {
     wave: 9,
     knockTaken: 0,
     drops: [18, 22],
+  },
+  pendulum: {
+    name: 'Pendulum Hawker',
+    desc: 'A market stall that learned to walk. It swings its pendulum at anyone who won\u2019t buy.',
+    hp: 40, r: 0.6, dmg: 1, speed: 1.6,
+    reach: 2.3, tell: 0.7, swing: 0.45, rest: 0.8,  // it draws its pendulum back (the warning), then swings it through an arc
+    knockTaken: 0.5,
+    drops: [3, 5],
+  },
+  hourglass: {
+    name: 'Hourglass Imp',
+    desc: 'Two bulbs of glass with legs, and sand that runs the wrong way. It blinks about and throws slow-time at you.',
+    hp: 22, r: 0.45, dmg: 1, speed: 2.2,
+    blink: [2.0, 3.2],     // seconds between little teleports
+    tell: 0.6, sand: 2.6,  // it turns itself over (the warning), then throws a patch of sand that slows you for this long
+    knockTaken: 0.9,
+    drops: [2, 3],
+  },
+  cuckoo: {
+    name: 'Cuckoo Clock',
+    desc: 'A clock on a post that keeps the wrong time. Its door bangs open and a wooden bird comes for you.',
+    hp: 30, r: 0.55, dmg: 1, speed: 0,
+    every: [2.4, 3.4], tell: 0.55, open: 1.6,   // the door rattles (the warning), opens, the bird flies; it's soft while open
+    bird: 5.5, birdLife: 3.0,
+    knockTaken: 0,
+    drops: [3, 4],
+  },
+  broker: {
+    name: 'The Hour Broker',
+    desc: 'It buys hours and sells minutes. Its chest is a clock under glass, and the glass only opens when time stops.',
+    hp: 360, r: 1.4, dmg: 1, speed: 1.2,
+    every: [2.2, 1.6],     // seconds between attacks, by phase
+    sweep: 7.5,            // how long the minute hand that sweeps the floor is
+    coins: [5, 7],         // coins in a volley
+    knockTaken: 0,
+    drops: [20, 24],
   },
   gardener: {
     name: 'The Weeping Gardener',
@@ -454,6 +490,7 @@ export const SEA = {
   islands: [
     { id: 'lanternhold', name: 'Lanternhold', x: 0, z: 0, dock: { x: 6.6, z: 14 }, open: true },
     { id: 'brinemoor', name: 'Brinemoor', x: -130, z: 150, dock: { x: -129.5, z: 134 }, open: true },
+    { id: 'bellrock', name: 'Bell Rock', x: 72, z: 128, dock: { x: 72.5, z: 111 }, risen: true },
     { id: 'cinderglass', name: 'Cinderglass Atoll', x: 150, z: 96, r: 16, locked: 'A ring of boiling water keeps you off. Not yet.' },
     { id: 'saltglass', name: 'Saltglass Flats', x: -190, z: -40, r: 22, locked: 'The shallows are full of rocks you can\u2019t see. Not yet.' },
     { id: 'choir', name: 'The Hushed Choir', x: 40, z: -180, r: 14, locked: 'A wall of fog that hums. Your sail goes slack. Not yet.' },
@@ -465,6 +502,49 @@ export const SEA = {
     { x0: -120, z0: 30, x1: -160, z1: -40, w: 10, speed: 5 },
   ],
   speed: 7.5, turn: 1.6, hop: 0.6,
+};
+
+// ----- Bell Rock: a rock that wasn't there, risen when the Clocktide Market closed. A great bell hangs on top.
+//   ~ sea   , sand   m g 4 5 6 the rock, in half-block steps up   # cliff   D pier   P where the boat ties up
+//   K the bell under its arch   r rocks
+export const BELLROCK = {
+  key: 'bellrock',
+  name: 'Bell Rock',
+  region: 'The Glass Sea',
+  line: 'It rose out of warm water, already old.',
+  heights: { D: 1.35, P: 1.35, m: 1.35, g: 1.85, 4: 2.35, 5: 2.85, 6: 3.35, K: 3.35, r: 0.85 },
+  map: [
+    '~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~DPD~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~,,DDD~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~,,,,,,,,~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~,,m,mmmm,,r,~~~~~~~~~~',
+    '~~~~~~~~~,,,,mmmmmmmmmm,,~~~~~~~~~',
+    '~~~~~~~~,,,mmmmmggggmmmm,,,~~~~~~~',
+    '~~~~~~~,,,mmgggggggggggmmr,,~~~~~~',
+    '~~~~~~~,,,mgggg4444ggggmmm,,~~~~~~',
+    '~~~~~~,,,rmggg4454444ggmmmm,~~~~~~',
+    '~~~~~~,,,mggg445555554gggm,,,~~~~~',
+    '~~~~~~,,mmggg455666654gggm,,,~~~~~',
+    '~~~~~~,,mmgg44556K66544ggm,,,~~~~~',
+    '~~~~~~~,mmgg44555665444ggmm,,~~~~~',
+    '~~~~~~~,mmmg4445555544ggmmm,,~~~~~',
+    '~~~~~~~,,mmgg44455544gggmmm,,~~~~~',
+    '~~~~~~~,,,mmggg44444gggmmm,,~~~~~~',
+    '~~~~~~~,,,mmrmggggggg####,,~~~~~~~',
+    '~~~~~~~~~,mmmmmggg######,,,~~~~~~~',
+    '~~~~~~~~~,,,,mmmm#####,,,,~~~~~~~~',
+    '~~~~~~~~~~,,,,mmm,##,,,,,~~~~~~~~~',
+    '~~~~~~~~~~~~~,,,,,,,,~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~,,,~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  ],
 };
 
 // ----- the Seep: the clearing where the fallen shard leaks creatures into Lanternhold -----
@@ -503,6 +583,34 @@ export const RIFT = {
     [['r', -4, 0], ['r', 4, 0], ['c', 0, -4], ['c', 0, 4], ['k', -6, -4], ['k', 6, 4]],
   ],
   treasure: { slivers: 12, heart: true },
+};
+
+// ----- the Clocktide Market: the Rift in the warm water by Bell Rock. A night market where time is the coin.
+// Its rule: the great clock strikes every few seconds, and for a moment time stops for everyone but you.
+export const MARKET = {
+  name: 'The Clocktide Market',
+  line: 'Lanterns, awnings, and a clock in every window. All of them are wrong.',
+  theme: 'market',
+  rooms: 8,
+  roomW: 16, roomD: 12,
+  strike: { every: 8.5, stop: 1.7, warn: 2.2 },   // the clock strikes this often; time stands still this long; it ticks loud before
+  guardian: 'broker',
+  waves: [
+    [['hourglass', 'mirrorpuddle', 'mirrorpuddle']],
+    [['pendulum', 'hourglass']],
+    [['cuckoo', 'shardmite', 'shardmite'], ['hourglass', 'hourglass']],
+    [['pendulum', 'cuckoo'], ['hourglass', 'shardmite', 'shardmite']],
+    [['pendulum', 'pendulum', 'hourglass'], ['cuckoo', 'cuckoo']],
+  ],
+  // furniture: stalls (s), crates (c), clock posts (k), hanging lanterns (l), coin piles (p). Coordinates from the room centre.
+  layouts: [
+    [['s', -4.5, -2.5], ['s', 4.5, 2.5], ['c', -5.5, 3], ['c', 5.5, -3], ['l', 0, -4], ['l', -1, 4]],
+    [['s', -5, 0], ['s', 5, 0], ['k', 0, -2.5], ['p', 0, 2.5], ['l', -3, -4], ['l', 3, 4]],
+    [['p', 0, 0], ['c', -4, -3], ['c', 4, 3], ['s', -5.5, 3.5], ['k', 5, -4]],
+    [['s', -3, -3], ['s', 3, 3], ['k', 3, -3], ['c', -3, 3], ['l', -6, 0], ['l', 6, 0]],
+    [['k', -4, 0], ['k', 4, 0], ['c', 0, -4], ['c', 0, 4], ['l', -6, -4], ['l', 6, 4]],
+  ],
+  treasure: { slivers: 14, keepsake: 'watch' },
 };
 
 // ----- the people of Lanternhold -----
@@ -550,7 +658,12 @@ export const STORY = {
     belfryBoss: 'Something rings the bell. Stop it',
     reportHale: 'Tell Hale the bell is silent',
     reportMaren2: 'Sail home and show Maren the page',
-    act1Sea: 'Something stirs out by Bell Rock. (The next part of Act 1 arrives in the next build.)',
+    act1Sea: 'Sail south-east of Lanternhold, to the warm water where the sea glows',
+    market: 'Find the heart of the Clocktide Market',
+    marketBoss: 'The Hour Broker keeps the market. Strike when time stands still',
+    bellRock: 'Land on Bell Rock and ring its bell',
+    reportMaren3: 'Sail home and tell Maren about Bell Rock',
+    act1Cinder: 'The water round Cinderglass has stopped boiling. (Cinderglass arrives in the next build.)',
   },
   // the Prologue in chapters, for the journal in the pause menu (each lists the steps it covers)
   chapters: [
@@ -562,10 +675,11 @@ export const STORY = {
     { name: 'Act 1 \u00b7 Gullcliff', steps: ['free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil'] },
     { name: 'Act 1 \u00b7 The Boathouse', steps: ['boathouse', 'findTobin', 'setSail'] },
     { name: 'Act 1 \u00b7 Brinemoor', steps: ['brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2'] },
-    { name: 'Act 1 \u00b7 Bell Rock', steps: ['act1Sea'] },
+    { name: 'Act 1 \u00b7 Bell Rock', steps: ['act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3'] },
+    { name: 'Act 1 \u00b7 Cinderglass', steps: ['act1Cinder'] },
   ],
   // every step in order (saving and the journal use this)
-  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea'],
+  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3', 'act1Cinder'],
   maren: {
     findMaren: [
       'There you are. I thought the tide had taken you.',
@@ -635,7 +749,18 @@ export const STORY = {
       'A Weaver. Old keepers\u2019 stories, apprentice. Nothing more.',
       'Go and get some sleep. And keep the page. I don\u2019t want it in the house.',
     ],
-    act1Sea: ['Bell Rock. Tobin says the water there has been warm since the Belfry went quiet. I don\u2019t like warm water.'],
+    act1Sea: ['Bell Rock. Tobin says the water out there has been warm since the Belfry went quiet. South-east of here. I don\u2019t like warm water.'],
+    market: ['Warm water and a light under it. Go carefully.'],
+    marketBoss: ['Warm water and a light under it. Go carefully.'],
+    bellRock: ['A rock that wasn\u2019t there yesterday. I heard its bell from the gallery. Go and see.'],
+    reportMaren3: [
+      'I heard it from here. One stroke, and every lamp in the village flickered.',
+      'Bell Rock. My mother used to say it sank before she was born. Rocks don\u2019t sink, apprentice. And they don\u2019t come back.',
+      'You saw something, didn\u2019t you. When the bell rang. Paper. Words where colours should be.',
+      '\u2026I\u2019ve dreamed that. Long ago. Don\u2019t tell anyone.',
+      'Tobin says the water round Cinderglass stopped boiling the moment it rang. The glassblowers will want to meet you. When they\u2019re ready.',
+    ],
+    act1Cinder: ['Cinderglass. The glassblowers keep to themselves. Odda most of all.'],
   },
   // after the beacon is lit: night falls, then the first Riftfall
   riftfallAfter: [
@@ -757,6 +882,34 @@ export const STORY = {
     heart: { name: 'Bell-bronze Heart', line: 'Your health grows by one heart.' },
     page: { name: 'A page in Maren\u2019s hand', line: '\u201cEvery bell I hung was a lock, and every lock a lie I told the sky. The Weaver will come for what I took. Let them listen to the bells, and not to the lamp.\u201d' },
   },
+  // Act 1: the Clocktide Market, Bell Rock rising, and the first glimpse of the Draft
+  marketLines: {
+    portal: 'Warm water, and a light under it',
+    enter: [{ who: '', text: 'Awnings, lanterns and stalls, under a sky full of clock faces. Every one of them shows a different time.' },
+      { who: '', text: 'Somewhere a great clock is winding up to strike.' }],
+    strike: 'The clock strikes: time stands still for everyone but you',
+    guardianCard: { name: 'The Hour Broker', region: 'Guardian of the Clocktide Market', line: 'It sells the minutes it has stolen.' },
+    guardian: [{ who: '', text: 'At the end of the market, a tall thing with a clock for a heart counts coins it took from somewhere else.' },
+      { who: '', text: 'Its glass only opens when the great clock strikes.' }],
+    cleared: [{ who: '', text: 'The clocks stop, all at once, on the same minute. A bell-shaped glass is left where the Broker stood, ringing very softly.' }],
+    treasure: 'Fourteen slivers, and a stopped watch',
+  },
+  rising: [
+    { who: '', text: 'The warm water heaves. Something under it remembers which way is up.' },
+  ],
+  risenCard: { name: 'Bell Rock', region: 'The Glass Sea', line: 'It rose out of warm water, already old.' },
+  bellRockLines: {
+    arrive: [{ who: '', text: 'Wet stone, warm under your feet. At the top, a bell older than the lighthouse hangs in an arch of rock.' }],
+    bell: [{ who: '', text: 'One stroke. The sound goes out over the sea and does not come back.' },
+      { who: '', text: 'For a breath the world is paper. Words lie where colours should be. Where the sun should be, there is only a hole, waiting.' }],
+    after: [{ who: '', text: 'Far to the east, a ring of steam round Cinderglass thins and falls still.' }],
+    again: 'The bell hums under your hand. It has said what it had to say.',
+  },
+  // the first world, seen for a moment: words where colours should be (each label sits at a spot in the scene)
+  glimpses: {
+    rising: ['ROCK (old)', 'sea, warm', 'a bell goes here', 'up?'],
+    bell: ['SKY (blue, not decided)', 'grass', 'stone', 'a sun goes here', 'you'],
+  },
   // a second memory: a rainy day
   // going to sleep in Maren's cottage
   // keepsakes: odd little things only the apprentice notices
@@ -766,6 +919,7 @@ export const STORY = {
     cup: { name: 'A chipped cup', line: 'Blue-rimmed, chipped on one side. You know exactly where your thumb goes.' },
     boat: { name: 'A paper boat', line: 'Folded from a page of nothing. It has never been wet, and it isn\u2019t now.' },
     button: { name: 'A yellow button', line: 'From a raincoat you\u2019ve never owned. You can almost feel the hood.' },
+    watch: { name: 'A stopped watch', line: 'Brass, warm, stopped at ten to four. The hour you were always late for something.' },
     puddle: { name: 'A puddle in a jar', line: 'Someone kept a puddle. Rain on a street that never was, still rippling.' },
   },
   memories: {

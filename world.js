@@ -3,7 +3,7 @@
    Lanternhold's Keeper's Cove, the first Rift, Gullcliff Caves and the Sunken Belfry (both from buildCaves), Brinemoor, and the Glass Sea. */
 import * as THREE from 'three';
 import { PALETTE, RIFT } from '@rf/data';
-import { Batch, MAT, PROPS, ORCHARD, rng, fbm, noise, col, shade, pick, clamp, lerp, TAU, buildSea, buildSky, buildGrass, buildBoat, buildDummy, buildFish, buildChest, buildHeartGlass, buildKeepsake, buildKitchen, buildSails, buildGate, buildSailboat, buildBelfryTower, buildMiniIsland, causticMaterial, CAUSTICS, WIND, SKY_UNIFORMS } from '@rf/art';
+import { Batch, MAT, PROPS, ORCHARD, rng, fbm, noise, col, shade, pick, clamp, lerp, TAU, buildSea, buildSky, buildGrass, buildBoat, buildDummy, buildFish, buildChest, buildHeartGlass, buildKeepsake, buildKitchen, buildSails, buildGate, MARKET_PROPS, buildSailboat, buildBelfryTower, buildMiniIsland, causticMaterial, CAUSTICS, WIND, SKY_UNIFORMS } from '@rf/art';
 
 const V3 = THREE.Vector3;
 const N = 140;                // Lanternhold is N x N cells of 1 x 1
@@ -1237,9 +1237,10 @@ function hashJ(i, j) { const h = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; r
 // The Rift: a floor of rooms on a grid, Isaac-style. Each room is RW x RD inside, with a wall between rooms
 // and a doorway wherever two rooms meet. Doors seal while a room still has creatures in it.
 // ===========================================================================
-export function buildRift(root, seed = 7) {
+export function buildRift(root, seed = 7, R = RIFT) {
   const r = rng(seed);
-  const RW = RIFT.roomW, RD = RIFT.roomD, G = 7, PX = RW + 1, PZ = RD + 1;
+  const MK = R.theme === 'market';   // the Clocktide Market: a night market of stalls and clocks (else the Drowned Orchard)
+  const RW = R.roomW, RD = R.roomD, G = 7, PX = RW + 1, PZ = RD + 1;
   // ----- the layout: start in the middle, grow rooms that touch exactly one existing room -----
   const key = (i, j) => i + ',' + j;
   const rooms = new Map();
@@ -1248,7 +1249,7 @@ export function buildRift(root, seed = 7) {
   const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const count = (i, j) => N4.filter(([a, b]) => rooms.has(key(i + a, j + b))).length;
   let guard = 0;
-  while (rooms.size < RIFT.rooms && guard++ < 500) {
+  while (rooms.size < R.rooms && guard++ < 500) {
     const list = [...rooms.values()];
     const from = list[Math.floor(r() * list.length)];
     const [a, b] = N4[Math.floor(r() * 4)];
@@ -1313,7 +1314,7 @@ export function buildRift(root, seed = 7) {
 
   // ----- building it -----
   const floor = new Batch(21), walls = new Batch(22), glow = new Batch(23), props = new Batch(24);
-  const sandCols = ['#c9c2a4', '#beb79a', '#d2cbae', '#b8b398'];
+  const sandCols = MK ? ['#4e4038', '#6a5846'] : ['#c9c2a4', '#beb79a', '#d2cbae', '#b8b398'];
   const tmpC = new THREE.Color();
   for (let iz = 0; iz < D; iz++) for (let ix = 0; ix < W; ix++) {
     const c = at(ix, iz);
@@ -1322,8 +1323,11 @@ export function buildRift(root, seed = 7) {
     if (c === 1 || c === 3 || c === 4) {
       // seabed, a little darker next to walls
       const nearWall = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => at(ix + a, iz + b) === 2);
-      tmpC.set(pick(sandCols, r)).multiplyScalar((nearWall ? 0.82 : 1) * (0.95 + r() * 0.1));
-      if (r() < 0.12) tmpC.set('#7fa89a').multiplyScalar(0.95 + r() * 0.1);   // a patch of sea-grass
+      if (MK) tmpC.set(sandCols[(ix + iz) % 2]).multiplyScalar((nearWall ? 0.8 : 1) * (0.93 + r() * 0.1));   // a checkered market floor
+      else {
+        tmpC.set(pick(sandCols, r)).multiplyScalar((nearWall ? 0.82 : 1) * (0.95 + r() * 0.1));
+        if (r() < 0.12) tmpC.set('#7fa89a').multiplyScalar(0.95 + r() * 0.1);   // a patch of sea-grass
+      }
       floor.quad([x0, 0, z1], [x1, 0, z1], [x1, 0, z0], [x0, 0, z0], [0, 1, 0], tmpC);
     } else if (c === 2) {
       // walls: old stone overgrown with weed. Outer walls to the north and west stand tall; everything else is low,
@@ -1331,6 +1335,15 @@ export function buildRift(root, seed = 7) {
       const outerN = at(ix, iz - 1) === 0, outerW = at(ix - 1, iz) === 0;
       const tall = outerN || outerW;
       const h = tall ? 2.8 : 0.9;
+      if (MK) {
+        // shopfronts: dark wood with brass trim; the tall ones have lit windows, the low ones are railings
+        const wood = pick(['#4a2e2a', '#3f2a30', '#56342c'], r);
+        walls.box(1, h, 1, wood, x0 + 0.5, h / 2, z0 + 0.5, { top: tall ? '#2a1c1e' : '#6a4a38' });
+        if (!tall && (ix + iz) % 3 === 0) walls.box(0.14, 0.2, 0.14, '#c9a24a', x0 + 0.5, h + 0.1, z0 + 0.5);
+        if (tall && r() < 0.4) glow.box(0.5, 0.6, 0.06, pick(['#ffd29a', '#ffb070', '#fff2d6'], r), x0 + 0.5, 1.7, z0 + (outerN ? 1.04 : 0.5), { glow: 1.5, jitter: 0 });
+        else if (tall) walls.box(0.9, 0.12, 1.04, '#c9a24a', x0 + 0.5, 2.3, z0 + 0.5);
+        continue;
+      }
       const stone = pick(['#5f6f78', '#56656e', '#687882'], r);
       walls.box(1, h, 1, stone, x0 + 0.5, h / 2, z0 + 0.5, { top: r() < 0.5 ? '#4a7a5a' : shade(stone, 1.15) });
       if (r() < 0.25) walls.box(0.3, 0.5 + r() * 0.6, 0.3, '#3f7a3a', x0 + 0.5 + (r() - 0.5) * 0.4, h + 0.3, z0 + 0.5 + (r() - 0.5) * 0.4, { jitter: 0.15 });
@@ -1338,7 +1351,8 @@ export function buildRift(root, seed = 7) {
   }
   // pillars where walls meet, with a glowing jelly lantern on some
   for (const rm of rooms.values()) for (const [x, z] of [[rm.x0, rm.z0], [rm.x1, rm.z0], [rm.x0, rm.z1], [rm.x1, rm.z1]]) {
-    walls.box(1.3, 1.6, 1.3, '#4f5d66', x, 0.8, z, { top: '#5f7d6a' });
+    if (MK) { walls.box(1.3, 1.6, 1.3, '#3a2a30', x, 0.8, z, { top: '#c9a24a' }); glow.box(0.3, 0.36, 0.3, '#ffd29a', x, 1.85, z, { glow: 2.4, jitter: 0 }); }
+    else walls.box(1.3, 1.6, 1.3, '#4f5d66', x, 0.8, z, { top: '#5f7d6a' });
   }
   const solids = [], targets = [], decor = [];
   for (const rm of rooms.values()) for (const [x, z] of [[rm.x0, rm.z0], [rm.x1, rm.z0], [rm.x0, rm.z1], [rm.x1, rm.z1]]) solids.push({ x, z, r: 0.75, h: 1.6 });
@@ -1346,7 +1360,40 @@ export function buildRift(root, seed = 7) {
   const place = (x, z) => take.add(Math.floor(x + CX) + ',' + Math.floor(z + CZ));
   const free = (x, z) => !take.has(Math.floor(x + CX) + ',' + Math.floor(z + CZ));
   // furniture from the layouts; keep the cross through the doorways clear
+  const clocks = [];   // the great clock over each room: its hands creep round toward the strike
   for (const rm of rooms.values()) {
+    if (MK) {
+      if (rm.type === 'start') MARKET_PROPS.fountain(props, glow, rm.cx, 0, rm.cz - 1.5), solids.push({ x: rm.cx, z: rm.cz - 1.5, r: 1.7, h: 3 });
+      else if (rm.type === 'treasure') { for (const [dx, dz] of [[-3, -2], [3, -2], [-3, 2], [3, 2]]) { MARKET_PROPS.crate(props, glow, rm.cx + dx, 0, rm.cz + dz, r); solids.push({ x: rm.cx + dx, z: rm.cz + dz, r: 0.6, h: 1 }); } MARKET_PROPS.coins(props, glow, rm.cx + 1.4, 0, rm.cz + 0.6, r); }
+      else if (rm.type === 'guardian') MARKET_PROPS.floorClock(glow, props, rm.cx, 0, rm.cz - 0.5, 5.2);
+      else {
+        const lay = R.layouts[Math.floor(r() * R.layouts.length)];
+        const flip = r() < 0.5 ? -1 : 1;
+        for (const [t, dx0, dz] of lay) {
+          const dx = dx0 * flip, x = rm.cx + dx, z = rm.cz + dz;
+          if (Math.abs(dx) < 1.6 || Math.abs(dz) < 1.4) { if (t !== 'p' && t !== 'l') continue; }
+          if (t === 's') { MARKET_PROPS.stall(props, glow, x, 0, z, r); solids.push({ x, z, r: 1.1, h: 2.3 }); }
+          else if (t === 'c') { MARKET_PROPS.crate(props, glow, x, 0, z, r); solids.push({ x, z, r: 0.6, h: 1 }); }
+          else if (t === 'k') { MARKET_PROPS.clockPost(props, glow, x, 0, z); solids.push({ x, z, r: 0.3, h: 3.3 }); }
+          else if (t === 'l') MARKET_PROPS.lantern(glow, props, x, 3.2, z, r);
+          else if (t === 'p') MARKET_PROPS.coins(props, glow, x, 0, z, r);
+          place(x, z);
+        }
+      }
+      // a great clock face on the room's north wall where it's a tall outer wall, and a sky of small faces far above
+      const outerNorth = at(rm.ox + PX / 2, rm.oz - 1) === 0;
+      for (let k = 0; k < 5; k++) glow.box(0.8, 0.8, 0.06, '#fff2d6', rm.cx + (r() - 0.5) * RW, 7 + r() * 3, rm.cz + (r() - 0.5) * RD, { glow: 0.7, rotZ: r(), rotY: (r() - 0.5) * 0.6, jitter: 0 });
+      if (!outerNorth) continue;
+      const cb = new Batch(80 + clocks.length);
+      cb.box(2.0, 2.0, 0.3, '#3a2a30', 0, 0, 0, { top: '#c9a24a' }); cb.box(2.2, 0.12, 0.34, '#c9a24a', 0, 1.06, 0); cb.box(2.2, 0.12, 0.34, '#c9a24a', 0, -1.06, 0);
+      const cy = 3.3, cz = rm.z0 - 0.75;
+      const cm = cb.mesh(); cm.position.set(rm.cx, cy, cz); root.add(cm);
+      glow.box(1.7, 1.7, 0.04, '#fff2d6', rm.cx, cy, cz + 0.17, { glow: 1.2, jitter: 0 });
+      for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; props.box(0.07, 0.18, 0.04, '#3a2a30', rm.cx + Math.cos(a) * 0.7, cy + Math.sin(a) * 0.7, cz + 0.21, { rotZ: a + Math.PI / 2, jitter: 0 }); }
+      const hand = (len, w, c) => { const hb = new THREE.Mesh(new THREE.BoxGeometry(w, len, 0.04), new THREE.MeshBasicMaterial({ color: c })); hb.geometry.translate(0, len / 2 - 0.08, 0); hb.position.set(rm.cx, cy, cz + 0.23); root.add(hb); return hb; };
+      clocks.push({ min: hand(0.8, 0.07, '#2a1a10'), hour: hand(0.5, 0.1, '#2a1a10'), off: r() * TAU });
+      continue;
+    }
     if (rm.type === 'start') {
       // a quiet room: a ring of coral round a pool, light falling from above
       ORCHARD.pool(props, glow, rm.cx, 0, rm.cz - 1.5);
@@ -1359,7 +1406,7 @@ export function buildRift(root, seed = 7) {
       for (let k = 0; k < 9; k++) { const a = (k / 9) * TAU; glow.box(1.6, 0.03, 0.08, '#9ff3ff', rm.cx + Math.cos(a) * 0.9, 0.02, rm.cz - 1.5 + Math.sin(a) * 0.9, { rotY: -a, glow: 1.6, jitter: 0, ao: 1 }); }
       for (const [dx, dz] of [[-6.5, -4.5], [6.5, -4.5], [-6.5, 4.5], [6.5, 4.5]]) ORCHARD.kelp(props, rm.cx + dx, 0, rm.cz + dz, r);
     } else {
-      const lay = RIFT.layouts[Math.floor(r() * RIFT.layouts.length)];
+      const lay = R.layouts[Math.floor(r() * R.layouts.length)];
       const flip = r() < 0.5 ? -1 : 1;
       for (const [t, dx0, dz] of lay) {
         const dx = dx0 * flip, x = rm.cx + dx, z = rm.cz + dz;
@@ -1373,7 +1420,7 @@ export function buildRift(root, seed = 7) {
       }
     }
     // jellyfish lanterns float over every room (but not the guardian's: it needs the space, and its own light)
-    const calm = rm.type !== 'guardian';
+    const calm = rm.type !== 'guardian' && !MK;
     for (let k = 0; k < 3; k++) { const jx = rm.cx + (r() - 0.5) * (RW - 4), jy = 3.4 + r() * 1.2, jz = rm.cz + (r() - 0.5) * (RD - 4); if (calm) ORCHARD.jelly(glow, jx, jy, jz, r); }
     // fish swimming circles
     for (let k = 0; k < (calm ? 3 : 0); k++) {
@@ -1382,7 +1429,16 @@ export function buildRift(root, seed = 7) {
       decor.push({ m: f, cx: rm.cx + (r() - 0.5) * 6, cz: rm.cz + (r() - 0.5) * 4, rad: 1.5 + r() * 3, y: 1.8 + r() * 1.8, sp: (0.4 + r() * 0.5) * (r() < 0.5 ? -1 : 1), ph: r() * TAU });
     }
   }
-  const floorMesh = floor.mesh(causticMaterial()); floorMesh.castShadow = false;
+  // the market's turning gears, drifting high over every room
+  if (MK) for (const rm of rooms.values()) for (let k = 0; k < 2; k++) {
+    const gb = new Batch(120 + decor.length);
+    const rad = 0.5 + r() * 0.5, n = 10;
+    for (let q = 0; q < n; q++) { const a = (q / n) * TAU; gb.box(0.2, 0.22, 0.12, '#c9a24a', Math.cos(a) * rad, Math.sin(a) * rad, 0, { rotZ: a, jitter: 0 }); }
+    gb.box(rad * 1.5, rad * 1.5, 0.08, '#a8823a', 0, 0, 0); gb.box(0.2, 0.2, 0.2, '#5a3a2a', 0, 0, 0);
+    const gm2 = gb.mesh(); gm2.castShadow = false; root.add(gm2);
+    decor.push({ m: gm2, gear: true, cx: rm.cx + (r() - 0.5) * 10, cz: rm.cz + (r() - 0.5) * 6, y: 4.6 + r() * 1.8, sp: (0.3 + r() * 0.5) * (r() < 0.5 ? -1 : 1), ph: r() * TAU, tilt: (r() - 0.5) * 1.2 });
+  }
+  const floorMesh = MK ? floor.mesh() : floor.mesh(causticMaterial()); floorMesh.castShadow = false; floorMesh.receiveShadow = true;
   root.add(floorMesh, walls.mesh(), props.mesh());
   const gm = glow.mesh(MAT.glow); gm.castShadow = false; root.add(gm);
   // shafts of light from the surface far above
@@ -1392,7 +1448,7 @@ export function buildRift(root, seed = 7) {
     fragmentShader: 'uniform float uTime; varying vec2 vUv; void main() { float a = smoothstep(0.0, 0.25, vUv.x) * smoothstep(1.0, 0.75, vUv.x) * vUv.y * (0.11 + 0.04 * sin(uTime * 0.8 + vUv.x * 6.0)); gl_FragColor = vec4(vec3(0.6, 0.95, 1.0) * a, a); }',
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
   });
-  for (const rm of rooms.values()) for (let k = 0; k < 2; k++) {
+  for (const rm of rooms.values()) for (let k = 0; k < (MK ? 0 : 2); k++) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6 + r() * 1.2, 9), shaftMat);
     m.position.set(rm.cx + (r() - 0.5) * 9, 4.3, rm.cz + (r() - 0.5) * 6);
     m.rotation.set(0.25, r() * TAU, 0.3);
@@ -1405,8 +1461,8 @@ export function buildRift(root, seed = 7) {
     for (let k = 0; k < 5; k++) {
       const off = -0.8 + k * 0.4, h = 1.6 + (k % 2) * 0.4;
       const x = d.horiz ? d.x : d.x + off, z = d.horiz ? d.z + off : d.z;
-      b.box(0.22, h, 0.22, '#d4583f', x, h / 2, z, { top: '#ff8a6a' });
-      g.box(0.1, h * 0.8, 0.1, '#9ff3ff', x + 0.05, h * 0.45, z + 0.05, { glow: 1.6, jitter: 0 });
+      b.box(0.22, h, 0.22, MK ? '#c9a24a' : '#d4583f', x, h / 2, z, { top: MK ? '#f0d27a' : '#ff8a6a' });
+      g.box(0.1, h * 0.8, 0.1, MK ? '#ffd29a' : '#9ff3ff', x + 0.05, h * 0.45, z + 0.05, { glow: 1.6, jitter: 0 });
     }
     const grp = new THREE.Group();
     grp.add(b.mesh());
@@ -1498,6 +1554,7 @@ export function buildRift(root, seed = 7) {
 
   // ----- rooms coming alive: seal, fight, open -----
   let hooks = null, current = start, sealed = null;
+  const S = R.strike || null, strike = { t: 0, stop: 0 };
   const pending = [];   // waves still to come in the sealed room
   function attach(h) { hooks = h; }
   function setDoor(d, open) {
@@ -1534,7 +1591,7 @@ export function buildRift(root, seed = 7) {
     if (!rm.visited) {
       rm.visited = true;
       if (rm.type === 'combat') {
-        const sets = RIFT.waves[Math.min(RIFT.waves.length - 1, Math.max(0, rm.depth - 1))];
+        const sets = R.waves[Math.min(R.waves.length - 1, Math.max(0, rm.depth - 1))];
         pending.length = 0;
         pending.push(...sets.map((w) => w.slice()));
         seal(rm);
@@ -1544,7 +1601,7 @@ export function buildRift(root, seed = 7) {
         hooks.onEvent('guardian', rm);
         rm.wait = 1.4;
         pending.length = 0;
-        pending.push(['gardener']);
+        pending.push([R.guardian || 'gardener']);
       } else if (rm.type === 'treasure') hooks.onEvent('treasureRoom', rm);
     }
     for (const d of rm.doors) for (const nb of d.rooms) nb.seen = true;
@@ -1552,6 +1609,19 @@ export function buildRift(root, seed = 7) {
   }
   function update(dt, t, P) {
     CAUSTICS.uTime.value = t;
+    // the Market's great clock: it creeps toward the strike, ticks loud near it, and then time stands still
+    if (S) {
+      if (strike.stop > 0) { strike.stop -= dt; if (strike.stop <= 0) hooks.onEvent('strikeEnd'); }
+      else {
+        const before = strike.t;
+        strike.t += dt;
+        const warnAt = S.every - S.warn;
+        if (strike.t > warnAt && Math.floor((strike.t - warnAt) * 2) !== Math.floor((before - warnAt) * 2)) hooks.onEvent('tick', (strike.t - warnAt) / S.warn);
+        if (strike.t >= S.every) { strike.t = 0; strike.stop = S.stop; hooks.onEvent('strike'); }
+      }
+      const k = strike.t / S.every;
+      for (const c of clocks) { c.min.rotation.z = -k * TAU; c.hour.rotation.z = -c.off - k * TAU / 12; }
+    }
     // which room are you in?
     const rm = roomAt(P.x, P.z);
     if (rm && rm !== current && !sealed) enterRoom(rm);
@@ -1561,8 +1631,8 @@ export function buildRift(root, seed = 7) {
       else if (pending.length && !hooks.foes.alive()) {
         const wave = pending.shift();
         for (const kind of wave) {
-          if (kind === 'gardener') {
-            const f = hooks.foes.spawn('gardener', sealed.cx, sealed.cz - 1.5);
+          if (kind === (R.guardian || 'gardener')) {
+            const f = hooks.foes.spawn(kind, sealed.cx, sealed.cz - 1.5);
             f.room = { x0: sealed.x0, x1: sealed.x1, z0: sealed.z0, z1: sealed.z1 };
           } else { const p = spawnSpot(sealed); hooks.foes.spawn(kind, p.x, p.z); }
         }
@@ -1598,6 +1668,7 @@ export function buildRift(root, seed = 7) {
     }
     // fish swim, bubbles rise in the room you're in
     for (const f of decor) {
+      if (f.gear) { if (!strike.stop) f.m.rotation.z += dt * f.sp; f.m.position.set(f.cx, f.y + Math.sin(t * 0.7 + f.ph) * 0.2, f.cz); f.m.rotation.x = f.tilt; continue; }
       const a = t * f.sp + f.ph;
       f.m.position.set(f.cx + Math.cos(a) * f.rad, f.y + Math.sin(t * 1.3 + f.ph) * 0.3, f.cz + Math.sin(a) * f.rad);
       f.m.rotation.y = -a + (f.sp > 0 ? 0 : Math.PI);
@@ -1628,13 +1699,14 @@ export function buildRift(root, seed = 7) {
   }
   const fx = { sparks: null };
   return {
-    name: 'rift', root, groundAt, walkable, terrainOk, solidAt, shotBlocked, targetAt, targets, findPath, clearLine, update, fx,
+    name: MK ? 'market' : 'rift', R, root, frozen: () => strike.stop > 0, strikeK: () => (S ? strike.t / S.every : 0), groundAt, walkable, terrainOk, solidAt, shotBlocked, targetAt, targets, findPath, clearLine, update, fx,
     dummies: [], solids, seep: null, shardOn: () => false, setSeepPower() {}, setNight() {},
     contain: (x, z) => !sealed || (x > sealed.x0 + 0.5 && x < sealed.x1 - 0.5 && z > sealed.z0 + 0.5 && z < sealed.z1 - 0.5),
     spawn: { x: start.cx, z: start.cz + 3.5, y: 0 },
     sunDir: new V3(0.25, 1, 0.35).normalize(),
     attach, guardianDown, onFell, mapState, rooms, chest, heartGlass, sealed: () => sealed,
-    light: { hemiSky: '#6fc0cc', hemiGround: '#1d3240', hemiI: 1.55, sun: '#c8f0ff', sunI: 1.6, fog: '#14404c', fogNear: 12, fogFar: 46, grade: [0.94, 1.02, 1.05], exposure: 1.05 },
+    light: MK ? { hemiSky: '#ffcf9a', hemiGround: '#3a2440', hemiI: 1.45, sun: '#ffe2b8', sunI: 1.5, fog: '#2a1830', fogNear: 12, fogFar: 46, grade: [1.05, 0.99, 0.95], exposure: 1.08 }
+      : { hemiSky: '#6fc0cc', hemiGround: '#1d3240', hemiI: 1.55, sun: '#c8f0ff', sunI: 1.6, fog: '#14404c', fogNear: 12, fogFar: 46, grade: [0.94, 1.02, 1.05], exposure: 1.05 },
   };
 }
 
@@ -2254,12 +2326,15 @@ export function buildTown(root, D) {
   const cellOf = (x, z) => [Math.floor(x - X0), Math.floor(z - Z0)];
   const ch = (i, j) => (i < 0 || j < 0 || i >= Wd || j >= Hd ? '~' : rows[j][i]);
   const H = new Float32Array(Wd * Hd), KD = new Array(Wd * Hd), block = new Uint8Array(Wd * Hd);
-  const kindOf = (c) => (c === '~' ? 'sea' : c === ',' ? 'sand' : c === 'g' || c === 'L' ? 'grass' : c === '#' ? 'rock' : '.JMmfBRZ123'.includes(c) ? 'street' : 'deck');
+  // a map can set its own heights (Bell Rock's terraces); everything else is Brinemoor's
+  const TH = Object.assign({}, TOWN_H, D.heights || {});
+  const rocky = !!D.heights;
+  const kindOf = (c) => (c === '~' ? 'sea' : c === ',' || c === 'r' ? 'sand' : c === 'g' || c === 'L' || (rocky && 'm456K'.includes(c)) ? 'grass' : c === '#' ? 'rock' : '.JMmfBRZ123'.includes(c) ? 'street' : 'deck');
   for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) {
     const c = ch(i, j), k = j * Wd + i;
-    H[k] = TOWN_H[c] !== undefined ? TOWN_H[c] : 1.5;
+    H[k] = TH[c] !== undefined ? TH[c] : 1.5;
     KD[k] = kindOf(c);
-    if ('HRZL#'.includes(c)) block[k] = 1;
+    if ('HRZL#Kr'.includes(c)) block[k] = 1;
   }
   const find = (c) => { const out = []; for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) if (rows[j][i] === c) out.push({ i, j, x: wx(i), z: wz(j), y: H[j * Wd + i] }); return out; };
   const hAt = (i, j) => (i < 0 || j < 0 || i >= Wd || j >= Hd ? -2.4 : H[j * Wd + i]);
@@ -2375,7 +2450,7 @@ export function buildTown(root, D) {
   }
   // the Belfry's tower in the middle of the square
   const tw = rects('Z')[0];
-  {
+  if (tw) {
     const tb2 = new Batch(1130);
     buildBelfryTower(tb2, g, tw.x, -0.4, tw.z);
     const tm = tb2.mesh(); root.add(tm);
@@ -2392,7 +2467,7 @@ export function buildTown(root, D) {
   for (const l of lampSpots) { PROPS.lanternPost(b, g, l.x, l.y, l.z, r() * TAU); solids.push({ x: l.x, z: l.z, r: 0.18, h: 2 }); }
   // the tide post: a tall striped post with tide marks, a brass hand, and a bench to wait on
   const tp = find('T')[0];
-  {
+  if (tp) {
     b.push(tp.x, tp.y, tp.z);
     b.box(0.3, 3.4, 0.3, '#e8e0d0', 0, 1.7, 0);
     for (let k = 0; k < 6; k++) b.box(0.32, 0.12, 0.32, k % 2 ? '#2f5a7a' : '#c94a3f', 0, 0.4 + k * 0.5, 0);
@@ -2401,11 +2476,29 @@ export function buildTown(root, D) {
     b.pop();
     solids.push({ x: tp.x, z: tp.z, r: 0.25, h: 3.4 }, { x: tp.x + 1.3, z: tp.z + 0.2, r: 0.4, h: 0.6 });
   }
-  const tideHand = (() => { const hb = new Batch(1104); hb.box(0.04, 0.2, 0.03, '#e0b85a', 0, 0.1, 0); const m = hb.mesh(); m.matrixAutoUpdate = true; m.position.set(tp.x, tp.y + 3.0, tp.z + 0.27); root.add(m); return m; })();
+  const tideHand = !tp ? null : (() => { const hb = new Batch(1104); hb.box(0.04, 0.2, 0.03, '#e0b85a', 0, 0.1, 0); const m = hb.mesh(); m.matrixAutoUpdate = true; m.position.set(tp.x, tp.y + 3.0, tp.z + 0.27); root.add(m); return m; })();
   // the old light on the hill: dark since the sky broke
   const ol = find('L')[0];
-  PROPS.lighthouse(b, g, ol.x, ol.y, ol.z);
-  solids.push({ x: ol.x, z: ol.z, r: 1.7, h: 9 });
+  if (ol) { PROPS.lighthouse(b, g, ol.x, ol.y, ol.z); solids.push({ x: ol.x, z: ol.z, r: 1.7, h: 9 }); }
+  // Bell Rock: the great bell in its arch of rock at the top, and boulders on the shore
+  const bellAt = find('K')[0];
+  if (bellAt) {
+    const x = bellAt.x, y = bellAt.y, z = bellAt.z;
+    for (const sx of [-1.3, 1.3]) for (let k = 0; k < 5; k++) b.box(0.9 - k * 0.06, 0.8, 0.9, ['#7f7b88', '#8a8694', '#747080'][k % 3], x + sx, y + 0.4 + k * 0.8, z, { top: '#5a7a5a' });
+    for (let k = 0; k < 5; k++) b.box(0.7, 0.6, 0.9, '#8a8694', x - 1.2 + k * 0.6, y + 4.2 + Math.sin((k / 4) * Math.PI) * 0.4, z, { top: '#6a8a5a' });
+    b.box(0.08, 0.6, 0.08, '#3a3a44', x, y + 3.75, z);
+    b.box(1.5, 1.2, 1.5, '#a06a32', x, y + 2.9, z, { top: '#b07a3a' }); b.box(1.8, 0.24, 1.8, '#8a5a2a', x, y + 2.25, z); b.box(1.0, 0.4, 1.0, '#b07a3a', x, y + 3.55, z);
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; b.box(0.3, 0.2, 0.12, k % 2 ? '#5aa08a' : '#d8d0c4', x + Math.cos(a) * 0.78, y + 2.6 + (k % 3) * 0.2, z + Math.sin(a) * 0.78, { rotY: -a }); }
+    b.box(0.22, 0.4, 0.22, '#3a3a44', x, y + 2.05, z);
+    g.box(0.5, 0.3, 0.06, '#9ff3ff', x, y + 2.8, z + 0.77, { glow: 1.2, jitter: 0 });
+    solids.push({ x: x - 1.3, z, r: 0.5, h: 5 }, { x: x + 1.3, z, r: 0.5, h: 5 });
+  }
+  for (const p of find('r')) { PROPS.rock(b, p.x, p.y, p.z, r, 1.1); solids.push({ x: p.x, z: p.z, r: 0.6, h: 1.5 }); }
+  // tufts over any grassy ground, more where it's high and windy
+  if (rocky) for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) {
+    if (KD[j * Wd + i] !== 'grass' || block[j * Wd + i] || r() > 0.5) continue;
+    for (let q = 0; q < 3; q++) b.box(0.06, 0.22 + r() * 0.22, 0.06, pick(GRASS, r), wx(i) + (r() - 0.5) * 0.7, H[j * Wd + i] + 0.12, wz(j) + (r() - 0.5) * 0.7, { rotZ: (r() - 0.5) * 0.5 });
+  }
   // the hill: grass tufts, rocks, a few crates of nets
   for (let k = 0; k < 60; k++) {
     const i = 13 + Math.floor(r() * 33), j = 38 + Math.floor(r() * 5);
@@ -2466,7 +2559,7 @@ export function buildTown(root, D) {
     // the clock's tide (-0.62 .. 0.42) mapped onto this town's: dry square at the bottom, a deep one at the top
     level = lerp(-0.75, 0.75, clamp((t + 0.62) / 1.04, 0, 1));
     sea.material.uniforms.uLevel.value = level;
-    tideHand.rotation.z = -clamp((t + 0.62) / 1.04, 0, 1) * Math.PI * 1.5 + Math.PI * 0.75;
+    if (tideHand) tideHand.rotation.z = -clamp((t + 0.62) / 1.04, 0, 1) * Math.PI * 1.5 + Math.PI * 0.75;
   }
 
   // ----- what the game asks this place -----
@@ -2575,31 +2668,34 @@ export function buildTown(root, D) {
     for (const k of keepsakes) if (!k.taken) k.m.rotation.y = t * 0.6;
     if (hooks) for (const k of keepsakes) if (!k.taken && Math.hypot(P.x - k.x, P.z - k.z) < 0.85 && Math.abs(P.y - k.y) < 1) { k.taken = true; k.m.visible = false; hooks.onEvent('keepsake', k); }
   }
-  const spot = (c, face = 0) => { const p = find(c)[0]; return { x: p.x, z: p.z, face }; };
+  const spot = (c, face = 0) => { const p = find(c)[0]; return p ? { x: p.x, z: p.z, face } : null; };
+  const pierCells = find('D');
+  const pierBox = pierCells.length ? { x0: Math.min(...pierCells.map((c) => c.x)) - 0.5, x1: Math.max(...pierCells.map((c) => c.x)) + 0.5, z0: Math.min(...pierCells.map((c) => c.z)) - 0.5, z1: Math.max(...pierCells.map((c) => c.z)) + 0.5 } : { x0: 0, x1: 0, z0: 0, z1: 0 };
   const n = Math.max(Wd, Hd);
   const mapInfo = {
     N: n, H0: X0,
     H: (() => { const a = new Float32Array(n * n).fill(-2.4); for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) a[j * n + i] = KD[j * Wd + i] === 'street' ? -0.3 : H[j * Wd + i]; return a; })(),
     K: (() => { const a = new Array(n * n).fill('sand'); for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) a[j * n + i] = KD[j * Wd + i] === 'deck' ? 'wood' : KD[j * Wd + i] === 'rock' ? 'stone' : KD[j * Wd + i]; return a; })(),
-    boxes: boxes.concat([{ x0: tw.x0, z0: tw.z0, x1: tw.x1, z1: tw.z1, tower: true }]),
-    places: [
+    boxes: boxes.concat(tw ? [{ x0: tw.x0, z0: tw.z0, x1: tw.x1, z1: tw.z1, tower: true }] : bellAt ? [{ x0: bellAt.x - 1.5, z0: bellAt.z - 0.5, x1: bellAt.x + 1.5, z1: bellAt.z + 0.5, tower: true }] : []),
+    places: tw ? [
       { name: 'The Drowned Square', x: wx(29), z: wz(25) },
       { name: 'The Belfry', x: tw.x, z: tw.z0 - 1 },
       { name: 'Tide post', x: tp.x, z: tp.z - 1 },
       { name: 'The Drowned Anchor', x: wx(37), z: wz(8) },
       { name: 'The old light', x: ol.x, z: ol.z },
-    ],
-    dock: { x0: X0 + 28, x1: X0 + 31, z0: Z0, z1: Z0 + 6 },
+    ] : bellAt ? [{ name: 'The bell', x: bellAt.x, z: bellAt.z - 1.5 }] : [],
+    dock: pierBox,
+    bellAt: bellAt ? { x: bellAt.x, z: bellAt.z } : null,
   };
   return {
-    name: 'brinemoor', D, root, groundAt, walkable, terrainOk, solidAt, shotBlocked, targetAt, targets: [], findPath, clearLine, update, fx: {},
+    name: D.key || 'brinemoor', D, root, groundAt, walkable, terrainOk, solidAt, shotBlocked, targetAt, targets: [], findPath, clearLine, update, fx: {},
     dummies: [], solids: dyn, seep: null, shardOn: () => false, setSeepPower() {}, setNight() {}, rings: [],
     deepAt, nearestDry, setTide, get level() { return level; }, sea, keepsakes, populate, mapInfo, windows,
     attach(h) { hooks = h; },
     takeKeepsake(id) { const k = keepsakes.find((v) => v.id === id); if (k && !k.taken) { k.taken = true; k.m.visible = false; } return k; },
     waterNear: (x, z, reach) => { const [ci, cj] = cellOf(x, z); for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) if (Math.hypot(di, dj) <= reach + 0.5 && level - hAt(ci + di, cj + dj) > 0.3) return true; return false; },
     spawn: { x: pierEnd.x, z: pierEnd.z + 1.5, y: 1.5 },
-    spots: { hale: spot('h', Math.PI), jun: spot('j', Math.PI / 2), peg: spot('q', Math.PI), tidePost: { x: tp.x + 1.0, z: tp.z + 0.9 }, door: { x: door.x, z: door.z }, pier: { x: pierEnd.x, z: pierEnd.z }, boat: { x: boat.position.x, z: boat.position.z } },
+    spots: { hale: spot('h', Math.PI), jun: spot('j', Math.PI / 2), peg: spot('q', Math.PI), tidePost: tp ? { x: tp.x + 1.0, z: tp.z + 0.9 } : null, door: door ? { x: door.x, z: door.z } : null, pier: { x: pierEnd.x, z: pierEnd.z }, boat: { x: boat.position.x, z: boat.position.z }, bell: bellAt ? { x: bellAt.x, z: bellAt.z + 1.6 } : null },
     boat,
     sunDir: new V3(-0.7, 0.56, -0.3).normalize(),
   };
@@ -2618,7 +2714,7 @@ export function buildSeaPlace(root, S, maps) {
   const key = (i, j) => i + ',' + j;
   const isl = [];
   const g = new Batch(1203);
-  function fromMap(info, cx, cz, n) {
+  function fromMap(info, cx, cz, n, occOut = occ) {
     // every other block of the island's own map becomes one block out here
     const cells = [];
     for (let j = 0; j < info.N; j += 2) for (let i = 0; i < info.N; i += 2) {
@@ -2627,7 +2723,7 @@ export function buildSeaPlace(root, S, maps) {
       const kind = k === 'wood' ? 'wood' : k === 'sand' || k === 'wet' ? 'sand' : k === 'stone' || k === 'rock' || k === 'cobble' ? 'stone' : k === 'path' ? 'path' : k === 'street' ? 'path' : 'grass';
       const x = cx + (info.H0 + i + 1) / 2, z = cz + (info.H0 + j + 1) / 2;
       cells.push({ x, z, h: Math.max(0.15, h * 0.55), kind });
-      occ.set(key(Math.floor(x / CELL), Math.floor(z / CELL)), Math.max(occ.get(key(Math.floor(x / CELL), Math.floor(z / CELL))) || 0, h));
+      occOut.set(key(Math.floor(x / CELL), Math.floor(z / CELL)), Math.max(occOut.get(key(Math.floor(x / CELL), Math.floor(z / CELL))) || 0, h));
     }
     // houses and towers rise as roofs
     for (const bx of info.boxes || []) {
@@ -2637,6 +2733,8 @@ export function buildSeaPlace(root, S, maps) {
     root.add(m);
     return m;
   }
+  // the warm water where the Clocktide Market's Rift glows, until Bell Rock rises there
+  let portal = null;
   for (const [n, I] of S.islands.entries()) {
     const o = { ...I, n };
     if (I.id === 'lanternhold' && maps.lanternhold) {
@@ -2648,6 +2746,25 @@ export function buildSeaPlace(root, S, maps) {
     } else if (I.id === 'brinemoor' && maps.brinemoor) {
       fromMap(maps.brinemoor, I.x, I.z, n);
       o.r = 17;
+    } else if (I.risen && maps[I.id]) {
+      // an island that isn't there yet: built, but under the sea, and not on the chart, until it rises
+      o.occ = new Map();
+      o.group = new THREE.Group(); root.add(o.group);
+      const m = fromMap(maps[I.id], I.x, I.z, n, o.occ); root.remove(m); o.group.add(m);
+      if (maps[I.id].bellAt) { const bb = new Batch(1215); bb.box(1.0, 1.0, 1.0, '#b07a3a', I.x + maps[I.id].bellAt.x / 2, 3.6, I.z + maps[I.id].bellAt.z / 2, { top: '#c88a43' }); for (const sx of [-0.8, 0.8]) bb.box(0.5, 3, 0.5, '#8a8694', I.x + maps[I.id].bellAt.x / 2 + sx, 3.2, I.z + maps[I.id].bellAt.z / 2); o.group.add(bb.mesh()); }
+      o.r = 12; o.open = false; o.up = false;
+      o.group.position.y = -12; o.group.visible = false;
+      // the Rift on the water above it: a ring of broken sky, steam, and a glow underneath
+      const pg = new THREE.Group();
+      const ring = new THREE.Mesh(new THREE.RingGeometry(3.2, 4.4, 48), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd29a').multiplyScalar(1.8), transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2; ring.position.y = 0.06; pg.add(ring);
+      const core = new THREE.Mesh(new THREE.CircleGeometry(3.2, 48), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff9fe0').multiplyScalar(1.2), transparent: true, opacity: 0.35, depthWrite: false }));
+      core.rotation.x = -Math.PI / 2; core.position.y = 0.05; pg.add(core);
+      const cb = new Batch(1216);
+      for (let k = 0; k < 14; k++) { const a = (k / 14) * TAU; cb.box(0.2, 0.06, 1.6 + (k % 3) * 0.5, k % 2 ? '#fff2d6' : '#9ff3ff', Math.cos(a) * 4.6, 0.08, Math.sin(a) * 4.6, { rotY: -a, glow: 2.2, jitter: 0 }); }
+      const cm = cb.mesh(MAT.glow); cm.castShadow = false; pg.add(cm);
+      pg.position.set(I.x, 0, I.z); root.add(pg);
+      portal = { g: pg, ring, core, x: I.x, z: I.z, island: o };
     } else {
       // islands that aren't open yet: what you can see of them from the water
       const b2 = new Batch(1220 + n);
@@ -2701,9 +2818,24 @@ export function buildSeaPlace(root, S, maps) {
   // ----- steering: where the boat can go -----
   function landAt(x, z) {
     if (Math.abs(x) > half || Math.abs(z) > half) return true;
-    for (const o of isl) if (Math.hypot(x - o.x, z - o.z) < o.r * 0.25) return true;
-    const h = occ.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
-    return h !== undefined && h > -0.2;
+    for (const o of isl) if ((!o.occ || o.up) && Math.hypot(x - o.x, z - o.z) < o.r * 0.25) return true;
+    const k2 = key(Math.floor(x / CELL), Math.floor(z / CELL));
+    const h = occ.get(k2);
+    if (h !== undefined && h > -0.2) return true;
+    for (const o of isl) if (o.occ && o.up) { const h2 = o.occ.get(k2); if (h2 !== undefined && h2 > -0.2) return true; }
+    return false;
+  }
+  // an island rises: it's land from now on, it's on the chart, and its dock takes you ashore
+  function raise(id, instant) {
+    const o = isl.find((v) => v.id === id);
+    if (!o || o.up) return o;
+    o.up = true; o.open = true; o.group.visible = true;
+    if (instant) o.group.position.y = 0;
+    for (const [k2, h] of o.occ) { const [i, j] = k2.split(',').map(Number); const ii = i + NC / 2, jj = j + NC / 2; if (ii >= 0 && jj >= 0 && ii < NC && jj < NC) { H[jj * NC + ii] = Math.max(0.5, h); K[jj * NC + ii] = 'grass'; } }
+    if (portal && portal.island === o) portal.g.visible = false;
+    for (const p of mapInfo.places) if (p.id === o.id) p.name = o.name;
+    mapInfo.version = (mapInfo.version || 0) + 1;
+    return o;
   }
   function currentAt(x, z) {
     let vx = 0, vz = 0;
@@ -2719,7 +2851,7 @@ export function buildSeaPlace(root, S, maps) {
   function islandNear(x, z, pad = 6) {
     for (const o of isl) {
       if (o.open && o.dock && Math.hypot(x - o.dock.x, z - o.dock.z) < pad) return { o, dock: true };
-      if (!o.open && Math.hypot(x - o.x, z - o.z) < o.r + 8) return { o, locked: true };
+      if (!o.open && !o.occ && Math.hypot(x - o.x, z - o.z) < o.r + 8) return { o, locked: true };
     }
     return null;
   }
@@ -2728,12 +2860,17 @@ export function buildSeaPlace(root, S, maps) {
   const H = new Float32Array(NC * NC).fill(-2.5), K = new Array(NC * NC).fill('sea');
   for (const [k2, h] of occ) { const [i, j] = k2.split(',').map(Number); const ii = i + NC / 2, jj = j + NC / 2; if (ii >= 0 && jj >= 0 && ii < NC && jj < NC) { H[jj * NC + ii] = Math.max(0.5, h); K[jj * NC + ii] = 'grass'; } }
   const seen = new Uint8Array(NC * NC);
-  const mapInfo = { N: NC, H0: -half / CELL, H, K, boxes: [], places: isl.map((o) => ({ name: o.name, x: o.x / CELL, z: o.z / CELL - o.r / CELL - 2 })), dock: { x0: 0, x1: 0, z0: 0, z1: 0 }, seen, seenW: NC, fog: true, scale: CELL };
+  const mapInfo = { N: NC, H0: -half / CELL, H, K, boxes: [], places: isl.map((o) => ({ name: o.occ ? 'Warm water' : o.name, x: o.x / CELL, z: o.z / CELL - o.r / CELL - 2, id: o.id })), dock: { x0: 0, x1: 0, z0: 0, z1: 0 }, seen, seenW: NC, fog: true, scale: CELL };
   let revealT = 0, hooks = null;
   function update(dt, t, P) {
     sea.position.set(P.x, 0, P.z);
     for (const b of barrels) if (!b.on) { b.m.position.y = Math.sin(t * 1.5 + b.ph) * 0.12; b.m.rotation.z = Math.sin(t * 1.1 + b.ph) * 0.15; }
     for (const o of isl) if (o.fog) o.fog.rotation.y = t * 0.05;
+    if (portal && portal.g.visible) {
+      portal.ring.rotation.z = t * 0.4; portal.ring.material.opacity = 0.55 + Math.sin(t * 3) * 0.15;
+      portal.core.material.opacity = 0.28 + Math.sin(t * 2.2) * 0.08;
+      if (hooks && hooks.sparks && Math.random() < dt * 14) { const a = Math.random() * TAU, d = Math.random() * 5; hooks.sparks.spawn({ x: portal.x + Math.cos(a) * d, y: 0.2, z: portal.z + Math.sin(a) * d, vy: 1.2 + Math.random(), drag: 0.6, life: 1.6, size: 0.3, color: '#f2f6f8', glow: 0.5 }); }
+    }
     foamM.position.set(Math.sin(t * 0.7) * 0.3, 0, Math.cos(t * 0.6) * 0.3);
     revealT -= dt;
     if (revealT <= 0) {
@@ -2743,7 +2880,7 @@ export function buildSeaPlace(root, S, maps) {
     }
   }
   return {
-    name: 'sea', root, sea: true, islands: isl, barrels, currentAt, islandNear, landAt, mapInfo,
+    name: 'sea', root, sea: true, islands: isl, barrels, currentAt, islandNear, landAt, mapInfo, raise, portal: () => portal,
     groundAt: () => 0, walkable: (x, z) => !landAt(x, z), terrainOk: (x, z) => !landAt(x, z), solidAt: () => null,
     shotBlocked: (x, y, z) => y < 0 || landAt(x, z), targetAt: (x, y, z, rad = 0.1) => barrels.find((b) => !b.on && Math.hypot(x - b.x, z - b.z) < b.r + rad) || null,
     targets: barrels, findPath: () => null, clearLine: () => true, update, fx: {}, dummies: [], solids: [], seep: null, shardOn: () => false, setSeepPower() {}, setNight() {}, rings: [],

@@ -432,3 +432,8 @@ body.lefty .act.ranged.multi::after { left: auto; right: 6px; }
 .igTap { font-size: 11px; font-weight: 800; letter-spacing: 0.24em; text-transform: uppercase; color: var(--accent); animation: tapPulse 2.2s ease-in-out infinite; }
 .mk.way { width: 10px; height: 10px; background: #bff6ff; transform: rotate(45deg) scaleX(0.7); box-shadow: 0 0 6px rgba(159, 243, 255, 0.9); }
 body.hasKeys .quest, body.hasKeys .shards:not(.hidden) ~ .quest { top: calc(var(--pad-t) + 100px); }
+
+/* ---------- a glimpse of the Draft: handwritten words in the world ---------- */
+.dLabels { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.dLabel { position: absolute; transform: translate(-50%, -50%) rotate(var(--tilt, -2deg)); white-space: nowrap; font-family: var(--serif); font-style: italic;
+  font-size: 17px; color: #2a2a4a; letter-spacing: 0.02em; padding: 0 4px; border-bottom: 1.5px solid rgba(42, 42, 74, 0.55); text-shadow: 0 0 6px rgba(246, 238, 216, 0.9); }

@@ -38,6 +38,7 @@ const ICON = {
   sail: '<svg viewBox="0 0 48 48"><path d="M24 6v28" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M27 8c7 6 10 14 9 22H27z" fill="currentColor"/><path d="M21 12c-5 5-7 11-7 18h7z" fill="currentColor" opacity=".7"/><path d="M8 35h32l-5 7H13z" fill="currentColor"/></svg>',
   dock: '<svg viewBox="0 0 48 48"><path d="M6 30h36M10 30v12M22 30v12M34 30v12" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/><path d="M24 6v16M17 15l7 7 7-7" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
   wait: '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="currentColor" stroke-width="3.5"/><path d="M24 14v10l7 5" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none"/><path d="M8 40c4-3 8-3 12 0s8 3 12 0 8-3 8-3" stroke="currentColor" stroke-width="3" fill="none"/></svg>',
+  ring: '<svg viewBox="0 0 48 48"><path d="M24 7c-7 0-11 6-11 13v8l-4 6h30l-4-6v-8c0-7-4-13-11-13z" fill="currentColor"/><circle cx="24" cy="39" r="3.5" fill="currentColor"/><path d="M6 16c-2 4-2 9 0 13M42 16c2 4 2 9 0 13" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/></svg>',
   remember: '<svg viewBox="0 0 48 48"><path d="M24 8l4 10 11 1-8 7 3 11-10-6-10 6 3-11-8-7 11-1z" fill="currentColor"/></svg>',
   key: '<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M11 11l8 8m-3-3l2-2m-4 0l2-2" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
   rest: '<svg viewBox="0 0 48 48"><path d="M24 6c3 7 11 11 11 21a11 11 0 0 1-22 0c0-5 3-8 5-11 1 4 3 5 5 5-2-6 0-11 1-15z" fill="currentColor"/><path d="M24 27c2 3 5 5 5 9a5 5 0 0 1-10 0c0-3 3-5 5-9z" fill="#1d1b4a" opacity=".55"/><path d="M10 42h28" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg>',
@@ -268,6 +269,21 @@ export function createUI(opts) {
     if (choose && wheelPick && wheelPick !== toolCur) opts.onTool && opts.onTool(wheelPick);
   }
   wheelBack.addEventListener('pointerdown', (e) => { e.preventDefault(); closeWheel(false); });
+  // ----- a glimpse of the Draft: words written into the world where colours and things should be -----
+  const draftEl = el('div', 'dLabels');
+  root.appendChild(draftEl);
+  const draftSpans = [];
+  function draftLabels(list, k) {
+    while (draftSpans.length < list.length) { const sp = el('span', 'dLabel'); sp.style.setProperty('--tilt', ((draftSpans.length * 37) % 11 - 5) + 'deg'); draftEl.appendChild(sp); draftSpans.push(sp); }
+    draftSpans.forEach((sp, i) => {
+      const L = list[i];
+      if (!L || L.off) { sp.style.display = 'none'; return; }
+      sp.style.display = 'block';
+      if (sp.textContent !== L.text) sp.textContent = L.text;
+      sp.style.left = L.x + 'px'; sp.style.top = L.y + 'px';
+      sp.style.opacity = String(Math.min(1, k * 1.4) * (L.o === undefined ? 1 : L.o));
+    });
+  }
   function setToolArt(art) { toolArt = art || {}; setTools(toolList.map(({ id, name }) => ({ id, name })), toolCur); }
   function setTools(list, cur) {
     toolList = list.map((t) => ({ ...t, icon: ICON[t.id] || ICON.spark })); toolCur = cur;
@@ -504,7 +520,7 @@ export function createUI(opts) {
     ctxKind = kind;
     bAttack.querySelector('.ic').innerHTML = ICON[kind] || ICON.sword;
     bAttack.classList.toggle('ctx', !!kind);
-    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep', rest: 'Rest', open: 'Open', light: 'Light', remember: 'Remember', sail: 'Sail', dock: 'Dock', wait: 'Wait for the tide' }[kind] || 'Attack');
+    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep', rest: 'Rest', open: 'Open', light: 'Light', remember: 'Remember', sail: 'Sail', dock: 'Dock', wait: 'Wait for the tide', ring: 'Ring' }[kind] || 'Attack');
   }
 
   // ----- the guardian's health, across the top of the screen -----
@@ -880,7 +896,7 @@ export function createUI(opts) {
         </div>
         <details class="group playtest">
           <summary class="gTitle">Playtest shortcuts</summary>
-          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button></div>
+          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button><button data-jump="market">The Market</button><button data-jump="bellrock">Bell Rock</button></div>
           <p class="sub">For testing only: these skip story steps.</p>
         </details>
       </section>
@@ -1075,7 +1091,7 @@ export function createUI(opts) {
   return {
     input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
     titleMenu, closeTitle, endCard, savedMark, fmtTime, buildMap, islandMap, closeMap, mapIsOpen: () => mapOpen,
-    setTools, setToolArt, openTools: () => openWheel(null), closeTools: () => closeWheel(false), setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
+    setTools, setToolArt, draftLabels, openTools: () => openWheel(null), closeTools: () => closeWheel(false), setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

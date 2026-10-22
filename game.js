@@ -1,7 +1,7 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, SEA } from '@rf/data';
+import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, MARKET, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, BELLROCK, SEA } from '@rf/data';
 import { buildPlayer, buildSkyblade, buildToolModel, renderToolArt, buildSailboat, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
 import { createStory } from '@rf/story';
 import { buildCove, buildRift, buildCaves, buildTown, buildSeaPlace } from '@rf/world';
@@ -80,22 +80,43 @@ const post = (() => {
       c += texture2D(tSrc, vUv + vec2(-px.x, -px.y)).rgb + texture2D(tSrc, vUv + vec2(px.x, -px.y)).rgb + texture2D(tSrc, vUv + vec2(-px.x, px.y)).rgb + texture2D(tSrc, vUv + vec2(px.x, px.y)).rgb;
       gl_FragColor = vec4(c / 12.0 + texture2D(tBase, vUv).rgb * mixK, 1.0); }`, { tSrc: { value: null }, tBase: { value: null }, px: { value: new THREE.Vector2() }, mixK: { value: 1 } });
   const final = fsMat(`uniform sampler2D tColor; uniform sampler2D tDepth; uniform sampler2D tBloom;
-    uniform vec2 texel; uniform float cnear, cfar, ink, bloomK, vig, edges, aspect, seed, flash; uniform vec3 grade; uniform float sat; uniform vec3 flashCol;
+    uniform vec2 texel; uniform float cnear, cfar, ink, bloomK, vig, edges, aspect, seed, flash, draft, dtime; uniform vec3 grade; uniform float sat; uniform vec3 flashCol;
     varying vec2 vUv;
     float lin(vec2 uv) { float z = texture2D(tDepth, uv).x * 2.0 - 1.0; return 2.0 * cnear * cfar / (cfar + cnear - z * (cfar - cnear)); }
     void main() {
+      // in a glimpse of the Draft the page crinkles a little as it turns
+      vec2 uv0 = vUv;
+      vec2 vUv = uv0 + draft * (1.0 - draft) * 0.012 * vec2(sin(uv0.y * 40.0 + dtime * 3.0), cos(uv0.x * 36.0 - dtime * 2.0));
       vec3 col = texture2D(tColor, vUv).rgb;
-      if (edges > 0.5) {
+      float e = 0.0;
+      if (edges > 0.5 || draft > 0.001) {
         float d0 = lin(vUv);
         float dl = lin(vUv - vec2(texel.x, 0.0)), dr = lin(vUv + vec2(texel.x, 0.0));
         float dd = lin(vUv - vec2(0.0, texel.y)), du = lin(vUv + vec2(0.0, texel.y));
         float far = max(max(dl, dr), max(dd, du)) - d0;
         float sil = smoothstep(0.03, 0.07, far / d0);
         float crease = smoothstep(0.004, 0.012, (abs(dl + dr - 2.0 * d0) + abs(dd + du - 2.0 * d0)) / d0);
-        float e = max(sil, crease * 0.55);
+        e = max(sil, crease * 0.55);
         if (d0 > cfar * 0.9) e = 0.0;
         e *= 1.0 - smoothstep(30.0, 70.0, d0);
-        col *= 1.0 - ink * e;
+        if (edges > 0.5) col *= 1.0 - ink * e;
+      }
+      // a glimpse of the Draft: the world as the Weaver first drew it. Cream paper, ink lines, a faint drafting grid,
+      // pencil hatching where the shadows will go, and only a wash of real colour leaking through
+      if (draft > 0.001) {
+        float l = clamp(dot(col, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.5);
+        vec3 paper = vec3(0.96, 0.93, 0.85) * (0.82 + 0.18 * smoothstep(0.0, 0.6, l));
+        vec2 fc = gl_FragCoord.xy;
+        float hatch = step(0.62, fract((fc.x + fc.y) / 7.0)) * (1.0 - smoothstep(0.06, 0.32, l));
+        hatch += step(0.7, fract((fc.x - fc.y) / 7.0)) * (1.0 - smoothstep(0.02, 0.14, l));
+        paper -= vec3(0.32, 0.3, 0.26) * min(hatch, 1.0) * 0.6;
+        vec2 gq = abs(fract(fc / 48.0) - 0.5);
+        float grid = 1.0 - smoothstep(0.0, 0.012, min(gq.x, gq.y));
+        paper = mix(paper, vec3(0.55, 0.68, 0.86), grid * 0.35);
+        float wash = smoothstep(0.55, 0.85, fract(sin(dot(floor(fc / 90.0), vec2(12.9898, 78.233))) * 43758.5453));
+        paper = mix(paper, paper * mix(vec3(1.0), col / max(l, 0.05) * 0.9, 0.5), wash * 0.45);
+        paper *= 1.0 - e * 0.85;
+        col = mix(col, paper, draft);
       }
       col += texture2D(tBloom, vUv).rgb * bloomK;
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -111,7 +132,7 @@ const post = (() => {
     }`, {
     tColor: { value: null }, tDepth: { value: null }, tBloom: { value: null }, texel: { value: new THREE.Vector2() },
     cnear: { value: 0.4 }, cfar: { value: 600 }, ink: { value: 0.55 }, bloomK: { value: 0.75 }, vig: { value: 0.42 }, edges: { value: 1 },
-    aspect: { value: 1 }, seed: { value: 0 }, grade: { value: new THREE.Vector3(1.04, 0.99, 0.97) }, sat: { value: 1.08 }, flash: { value: 0 }, flashCol: { value: new THREE.Color(1, 1, 1) },
+    aspect: { value: 1 }, seed: { value: 0 }, draft: { value: 0 }, dtime: { value: 0 }, grade: { value: new THREE.Vector3(1.04, 0.99, 0.97) }, sat: { value: 1.08 }, flash: { value: 0 }, flashCol: { value: new THREE.Color(1, 1, 1) },
   });
   final.toneMapped = true;
   const black = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); black.needsUpdate = true;
@@ -254,6 +275,8 @@ const sound = (() => {
       case 'scoop': hiss('lowpass', 900, 260, 0.8, 0.32, 0.3); tone('sine', 240 * r, 120, 0.18, 0.12); break;
       case 'pour': hiss('bandpass', 900 * r, 420, 0.9, 0.55, 0.32); tone('sine', 180, 90, 0.3, 0.08, sfxBus, 0.1); break;
       case 'sail': hiss('lowpass', 500, 300, 0.6, 0.9, 0.2); tone('triangle', 196, 196, 0.5, 0.05); break;
+      case 'glimpse': hiss('highpass', 5200, 2600, 0.5, 0.9, 0.12); tone('sine', 523, 523, 2.4, 0.06); tone('sine', 784, 790, 2.2, 0.05, sfxBus, 0.15); tone('sine', 1046, 1040, 2.0, 0.035, sfxBus, 0.3); break;
+      case 'toll': tone('sine', 98, 96, 3.2, 0.5); tone('triangle', 196, 194, 2.4, 0.18); tone('sine', 294, 292, 2.0, 0.08); hiss('lowpass', 400, 120, 0.6, 0.6, 0.15); break;
       case 'wood': tone('triangle', 240 * r, 160, 0.1, 0.35 * k); tone('triangle', 410 * r, 300, 0.06, 0.15 * k); break;
       case 'roll': hiss('lowpass', 1400, 300, 0.8, 0.3, 0.32); break;
       case 'land': hiss('lowpass', 700, 200, 0.6, 0.12, 0.25); break;
@@ -368,10 +391,15 @@ let caves = null, cavesRoot = null, foesCaves = null, cavesSaved = null;
 let belfry = null, belfryRoot = null, foesBelfry = null, belfrySaved = null;
 let brine = null, brineRoot = null, foesBrine = null;
 let seaW = null, seaRoot = null, foesSea = null;
+// the Clocktide Market (a Rift, grown fresh each time you go in) and Bell Rock (a little town-like place)
+let market = null, marketRoot = null, foesMarket = null;
+let bellW = null, bellRoot = null, foesBell = null;
 // which place is which
-const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : 'cove');
+const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : w === market ? 'market' : w === bellW ? 'bell' : 'cove');
+const isRift = (w = world) => !!w && (w === rift || w === market);
+const isTown = (w = world) => !!w && (w === brine || w === bellW);
 const isDungeon = (w = world) => !!w && (w === caves || w === belfry);
-const outdoors = (w = world) => w === cove || w === brine || w === seaW;
+const outdoors = (w = world) => w === cove || w === brine || w === seaW || w === bellW;
 const camDir = new V3(...CONFIG.camera.dir).normalize();
 const camFwd = new V3(-camDir.x, 0, -camDir.z).normalize();
 const camRight = new V3().crossVectors(camFwd, new V3(0, 1, 0)).normalize();
@@ -720,8 +748,9 @@ function swapTo(to) {
   ui.bossBar(null);
   const from = world;
   if (isDungeon(from)) { if (from === caves) cavesSaved = caves.snapshot(); else belfrySaved = belfry.snapshot(); }
-  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot]) if (r) r.visible = false;
+  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot, marketRoot, bellRoot]) if (r) r.visible = false;
   boatModel.visible = false;
+  ui.setMap(null);   // the Rift's room map (a Rift sets its own again below)
   if (P.boat) { P.boat = null; resetPose(); P.model.legL.rotation.x = P.model.legR.rotation.x = 0; P.iframes = false; }
   P.model.root.rotation.z = 0;
   P.path = null; P.state = P.state === 'dead' ? 'dead' : 'move';
@@ -747,19 +776,44 @@ function swapTo(to) {
     for (const c of brine.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 6 });
     ui.buildMap(brine.mapInfo, MAP_ROT, 'brine');
     syncKeys();
+  } else if (to === 'market') {
+    // the Clocktide Market grows anew every time you go in
+    if (marketRoot) { scene.remove(marketRoot); marketRoot = null; }
+    marketRoot = new THREE.Group(); scene.add(marketRoot);
+    market = buildRift(marketRoot, (Date.now() % 100000) | 0, MARKET);
+    market.fx.sparks = sparks;
+    foesMarket = makeFoes(market, marketRoot);
+    market.attach({ P, foes: foesMarket, sound, shake, onEvent: riftEvent, onMap: () => ui.setMap(market.mapState()) });
+    marketRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+    guardianSeen = false;
+    world = market; foes = foesMarket;
+    applyLight(market.light);
+    P.x = market.spawn.x; P.z = market.spawn.z; P.y = 0; P.face = Math.PI;
+    ui.setMap(market.mapState());
+  } else if (to === 'bell') {
+    bellBuilt();
+    bellRoot.visible = true;
+    world = bellW; foes = foesBell;
+    outdoorLight(28, 80);
+    P.x = bellW.spawn.x; P.z = bellW.spawn.z; P.y = bellW.groundAt(P.x, P.z); P.face = 0;
+    ui.buildMap(bellW.mapInfo, MAP_ROT, 'bell');
+    syncKeys();
   } else if (to === 'sea') {
     seaBuilt();
     seaRoot.visible = true;
     world = seaW; foes = foesSea;
     outdoorLight(60, 260);
-    const isl = SEA.islands.find((o) => o.id === (from === brine ? 'brinemoor' : 'lanternhold'));
-    P.x = isl.dock.x; P.z = isl.dock.z + (from === brine ? -4 : 3); P.y = 0;
-    P.face = from === brine ? Math.PI : 0;
+    // out from the dock you left; out of the Market onto the warm water, a little way off from where it was
+    const fromId = from === brine ? 'brinemoor' : from === bellW || from === market ? 'bellrock' : 'lanternhold';
+    const isl = SEA.islands.find((o) => o.id === fromId);
+    P.x = isl.dock.x; P.z = isl.dock.z + (fromId === 'lanternhold' ? 3 : -4); P.y = 0;
+    P.face = fromId === 'lanternhold' ? 0 : Math.PI;
+    if (from === market) { P.x = isl.x; P.z = isl.z - 30; P.face = 0; }
     P.boat = { speed: 0, course: null, hop: 0, lockT: 0 };
     boatModel.visible = true;
     foes.reset();
     seaFoes();
-    ui.buildMap(seaW.mapInfo, MAP_ROT, 'sea');
+    ui.buildMap(seaW.mapInfo, MAP_ROT, 'sea' + (seaW.mapInfo.version || 0));
     syncKeys();
   } else if (to === 'caves') {
     cavesBuilt();
@@ -827,6 +881,20 @@ function placeBySeep() {
   P.x = spot.x; P.z = spot.z; P.y = cove.groundAt(P.x, P.z); P.face = Math.atan2(S.x - P.x, S.z - P.z);
 }
 async function arrived(to, from) {
+  if (to === 'market') {
+    ui.titleCard(MARKET.name, 'A Rift on the Glass Sea', MARKET.line);
+    if (story.state.step === 'act1Sea') story.setStep('market');
+    await story.say(STORY.marketLines.enter);
+    ui.showHint('strike', STORY.marketLines.strike, 7000);
+    return;
+  }
+  if (to === 'sea' && from === 'market') { risingScene(); return; }
+  if (to === 'bell') {
+    ui.titleCard(BELLROCK.name, BELLROCK.region, BELLROCK.line);
+    if (!bellW.visited) { bellW.visited = true; await story.say(STORY.bellRockLines.arrive); }
+    saveSoon = 0.5;
+    return;
+  }
   if (to === 'belfry') {
     ui.titleCard(BELFRY.name, BELFRY.region, BELFRY.line);
     if (!belfry.state.visited) { belfry.state.visited = true; await story.say(STORY.belfryLines.enter); ui.showHint('bell', 'Strike the Tide Bell to turn the water', 6000); }
@@ -865,7 +933,8 @@ function updateGTimers(dt) { for (let i = gTimers.length - 1; i >= 0; i--) { gTi
 // and the guardian only hangs there and looks at you until it's over. Seen once per visit. -----
 let bossIntro = null, guardianSeen = false, wheelSlow = false;
 async function guardianIntro(rm) {
-  story.setStep('guardian');
+  const mk = world === market, kind = mk ? MARKET.guardian : 'gardener', L = mk ? STORY.marketLines : STORY.riftLines;
+  story.setStep(mk ? 'marketBoss' : 'guardian');
   if (guardianSeen) return;
   guardianSeen = true;
   bossIntro = { rm };
@@ -874,17 +943,18 @@ async function guardianIntro(rm) {
   document.body.classList.add('cine');
   // low on the floor, looking up into the dark as it comes down
   cineView = { pos: new V3(rm.cx + 3.4, 0.8, rm.cz + 4.6), look: new V3(rm.cx - 0.3, 5.2, rm.cz - 1.5), k: 0.02 };
-  const g = () => foes.list.find((f) => f.kind === 'gardener' && f.alive);
+  const g = () => foes.list.find((f) => f.kind === kind && f.alive);
   let w = 0;
   while ((!g() || g().state === 'emerge') && w < 8) { await gwait(0.1); w += 0.1; }
   const f = g();
   if (f) {
     // closer: up at its eyes
-    cineView = { pos: new V3(f.x + 2.4, 5.6, f.z + 6.0), look: new V3(f.x, 4.7, f.z), k: 0.025 };
-    const C = STORY.riftLines.guardianCard;
+    cineView = mk ? { pos: new V3(f.x + 2.2, 3.4, f.z + 6.5), look: new V3(f.x, 3.0, f.z) } : { pos: new V3(f.x + 2.4, 5.6, f.z + 6.0), look: new V3(f.x, 4.7, f.z) };
+    cineView.k = 0.025;
+    const C = L.guardianCard;
     ui.titleCard(C.name, C.region, C.line);
     await gwait(3.6);
-    await story.say(STORY.riftLines.guardian);
+    await story.say(L.guardian);
   }
   // back to you
   cineView = null; camBlend = 1.4;
@@ -894,12 +964,36 @@ async function guardianIntro(rm) {
   P.safe = 1.2;
 }
 async function riftEvent(name, arg) {
+  const mk = world === market;
   if (name === 'guardian') {
     guardianIntro(arg);
   } else if (name === 'guardianDown') {
-    rift.guardianDown(arg);
-    story.setStep('heartGlass');
-    setTimeout(() => story.say(STORY.riftLines.cleared), 900);
+    world.guardianDown(arg);
+    if (mk) {
+      // the Market's win counts at once: Bell Rock is coming, whatever happens next
+      story.setStep('bellRock');
+      writeSave();
+      setTimeout(() => story.say(STORY.marketLines.cleared), 900);
+    } else {
+      story.setStep('heartGlass');
+      setTimeout(() => story.say(STORY.riftLines.cleared), 900);
+    }
+  } else if (name === 'strike') {
+    // the great clock strikes: a golden flash, a toll, and everything but you holds still
+    sound.sfx('toll'); sound.sfx('chime');
+    Object.assign(cineFlash, { r: 1, g: 0.86, b: 0.55, k: 0.35 });
+    shake(0.12);
+  } else if (name === 'strikeEnd') {
+    sound.sfx('tick');
+  } else if (name === 'tick') {
+    sound.sfx('tick', 0.6 + arg);
+  } else if (name === 'chest' && mk) {
+    sound.sfx('treasure');
+    const c = arg.root.position;
+    for (let i = 0; i < MARKET.treasure.slivers; i++) foes.dropSliver(c.x, 0.8, c.z);
+    if (MARKET.treasure.keepsake && !kept.has(MARKET.treasure.keepsake)) await foundKeepsake({ id: MARKET.treasure.keepsake });
+  } else if (name === 'exit' && mk) {
+    travel('sea');
   } else if (name === 'chest') {
     // the treasure: slivers, and a Seaglass Heart that adds a heart for good
     sound.sfx('treasure');
@@ -933,6 +1027,12 @@ function playtestJump(where) {
     });
   } else if (where === 'tether') {
     giveTool('tether'); ui.toast('Tether (for testing)');
+  } else if (where === 'market' || where === 'bellrock') {
+    if (travelling) return;
+    if (!story.past('act1Sea')) { story.applyState('act1Sea'); clock.running = true; }
+    giveTool('tether'); giveTool('jar');
+    if (where === 'market') travel('market');
+    else { if (!story.past('bellRock')) story.setStep('bellRock'); seaBuilt(); seaW.raise('bellrock', true); ui.buildMap(seaW.mapInfo, MAP_ROT, 'sea' + seaW.mapInfo.version); travel('bell'); }
   } else if (where === 'sea' || where === 'brinemoor' || where === 'belfry') {
     // the sea round, for testing: the Act so far is done, the Tether's yours, and off you go
     if (travelling) return;
@@ -968,7 +1068,8 @@ function objectiveSpot() {
   if (st === 'boathouse') return sp.boathouse;
   if (st === 'findTobin') return story.people().find((n) => n.id === 'tobin');
   if (['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st)) return sp.lantern;
-  if (st === 'reportMaren2') return maren;
+  if (['reportMaren2', 'reportMaren3'].includes(st)) return maren;
+  if (['act1Sea', 'market', 'marketBoss', 'bellRock'].includes(st)) return sp.lantern;
   return null;
 }
 // where the story wants you, in a town or on the sea
@@ -980,8 +1081,10 @@ function placeGoal() {
     if (['reportMaren2', 'act1Sea'].includes(st)) return brine.spots.pier;
     return null;
   }
+  if (world === bellW) return st === 'bellRock' ? bellW.spots.bell : bellW.spots.pier;
   if (world === seaW) {
-    const id = ['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st) ? 'brinemoor' : 'lanternhold';
+    if (['act1Sea', 'market', 'marketBoss'].includes(st)) { const o = SEA.islands.find((v) => v.id === 'bellrock'); return { x: o.x / 2, z: o.z / 2 }; }
+    const id = ['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st) ? 'brinemoor' : st === 'bellRock' ? 'bellrock' : 'lanternhold';
     const o = SEA.islands.find((v) => v.id === id);
     return { x: o.dock.x / 2, z: o.dock.z / 2 };
   }
@@ -989,7 +1092,7 @@ function placeGoal() {
 }
 function updateIslandMap() {
   const inCaves = isDungeon();
-  const show = started && !intro && (world === cove || inCaves || world === brine || world === seaW) && !story.state.cine && !story.state.ending && !bossIntro;
+  const show = started && !intro && (world === cove || inCaves || isTown() || world === seaW) && !story.state.cine && !story.state.ending && !bossIntro;
   if (!show) { if (isleFrame !== -1) { ui.islandMap(null); isleFrame = -1; } return; }
   isleFrame = 1;
   const o = STORY.objectives[story.state.step];
@@ -998,8 +1101,8 @@ function updateIslandMap() {
     ui.islandMap({ x: P.x, z: P.z, face: P.face, people: [], goal: null, objective, title: world === belfry ? BELFRY.name : CAVES.name, waystones: [] });
     return;
   }
-  if (world === brine) {
-    ui.islandMap({ x: P.x, z: P.z, face: P.face, people: story.people(brine), goal: placeGoal(), objective, title: BRINEMOOR.name, waystones: [] });
+  if (isTown()) {
+    ui.islandMap({ x: P.x, z: P.z, face: P.face, people: story.people(world), goal: placeGoal(), objective, title: world.D.name, waystones: [] });
     return;
   }
   if (world === seaW) {
@@ -1149,7 +1252,11 @@ async function beginJourney(save) {
     else if (at === 'brine' && save.pos && brine.walkable(save.pos.x, save.pos.z, brine.groundAt(save.pos.x, save.pos.z), 0.4)) { P.x = save.pos.x; P.z = save.pos.z; }
     P.y = brine.groundAt(P.x, P.z);
     pl = BRINEMOOR;
-  } else if (at === 'sea') { const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); }
+  } else if (at === 'bell') {
+    seaBuilt();
+    swapTo('bell');
+    pl = BELLROCK;
+  } else if (at === 'sea' || at === 'market') { const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); }
   started = true;
   snapCamera();
   ui.show(true);
@@ -1211,6 +1318,89 @@ async function warpTo(id) {
   await curtainTo(0, 0.6);
 }
 
+// ----- a glimpse of the Draft: for a moment the world is the first world, as the Weaver drew it. Paper and ink,
+// words where colours should be, and a hole where the sun will go. Labels are [{ text, pos: V3 }] -----
+const glimpseS = { k: 0, to: 0, labels: [] };
+function glimpse(labels, hold = 3.2) {
+  glimpseS.labels = labels || []; glimpseS.to = 1;
+  sound.sfx('glimpse');
+  Object.assign(cineFlash, { r: 1, g: 0.97, b: 0.9, k: 0.6 });
+  return gwait(0.8 + hold).then(() => { glimpseS.to = 0; sound.sfx('glimpse'); return gwait(1.0); });
+}
+const lblV = new V3();
+function updateGlimpse(dt) {
+  const G = glimpseS;
+  if (G.k === G.to && G.k === 0) return;
+  G.k = G.to > G.k ? Math.min(G.to, G.k + dt / 0.8) : Math.max(G.to, G.k - dt / 0.9);
+  const e = smooth(G.k);
+  post.final.uniforms.draft.value = e;
+  post.final.uniforms.dtime.value += dt;
+  SKY_UNIFORMS.uHole.value = e;
+  ui.draftLabels(G.labels.map((L) => {
+    lblV.copy(L.pos).project(camera);
+    return { text: L.text, x: (lblV.x + 1) / 2 * view.w, y: (1 - lblV.y) / 2 * view.h, off: lblV.z > 1 };
+  }), e);
+  if (G.k === 0) { G.labels = []; ui.draftLabels([], 0); }
+}
+// Bell Rock rises out of the warm water where the Market was, in a glimpse of the Draft
+async function risingScene() {
+  const o = SEA.islands.find((v) => v.id === 'bellrock');
+  story.state.busy = true; story.state.cine = true;
+  ui.show(false); document.body.classList.add('cine');
+  P.safe = 99; if (P.boat) { P.boat.speed = 0; P.boat.course = null; }
+  const isl = seaW.islands.find((v) => v.id === 'bellrock');
+  cineView = { pos: new V3(o.x - 18, 7, o.z - 34), look: new V3(o.x, 1.5, o.z), k: 0.02 };
+  await gwait(0.8);
+  await story.say(STORY.rising);
+  isl.group.visible = true; isl.group.position.y = -12;
+  sound.sfx('roar'); shake(0.6);
+  const top = new V3(o.x + (bellW.mapInfo.bellAt ? bellW.mapInfo.bellAt.x / 2 : 0), 5, o.z + (bellW.mapInfo.bellAt ? bellW.mapInfo.bellAt.z / 2 : 0));
+  const G = STORY.glimpses.rising;
+  const done = glimpse([{ text: G[0], pos: new V3(o.x - 6, 3, o.z + 2) }, { text: G[1], pos: new V3(o.x - 12, 0.3, o.z - 14) }, { text: G[2], pos: top }, { text: G[3], pos: new V3(o.x + 8, 9, o.z - 4) }], 4.6);
+  // up it comes, shedding water
+  for (let t = 0; t < 6; t += 0.05) {
+    await gwait(0.05);
+    const k = smooth(Math.min(1, t / 5.6));
+    isl.group.position.y = -12 + k * 12 + Math.sin(t * 9) * 0.05 * (1 - k);
+    if (Math.random() < 0.8) for (let i = 0; i < 4; i++) { const a = Math.random() * TAU, d = 6 + Math.random() * 10; sparks.spawn({ x: o.x + Math.cos(a) * d, y: 0.2, z: o.z + Math.sin(a) * d, vx: Math.cos(a) * 2, vy: 3 + Math.random() * 4, vz: Math.sin(a) * 2, grav: 7, life: 1.2, size: 0.3, color: i % 2 ? '#e6fcff' : '#9fe8ff', glow: 0.6 }); }
+    if (Math.random() < 0.15) shake(0.15);
+  }
+  seaW.raise('bellrock');
+  ui.buildMap(seaW.mapInfo, MAP_ROT, 'sea' + seaW.mapInfo.version);
+  sound.sfx('toll');
+  await done;
+  const C = STORY.risenCard;
+  ui.titleCard(C.name, C.region, C.line);
+  await gwait(1.6);
+  cineView = null; camBlend = 1.4;
+  document.body.classList.remove('cine'); ui.show(true);
+  story.state.busy = false; story.state.cine = null;
+  P.safe = 1;
+  saveSoon = 0.3;
+}
+// the bell on Bell Rock: one stroke, and the world is paper for a breath
+async function ringBell() {
+  if (story.busy()) return;
+  if (story.past('reportMaren3')) { ui.toast(STORY.bellRockLines.again); sound.sfx('bellHit'); return; }
+  story.state.busy = true;
+  ui.setContext(null);
+  const b = bellW.spots.bell, by = bellW.groundAt(b.x, b.z - 1.6);
+  P.face = Math.PI; P.path = null;
+  sound.sfx('toll'); shake(0.4);
+  for (let i = 0; i < 30; i++) { const a = Math.random() * TAU; sparks.spawn({ x: b.x, y: by + 3, z: b.z - 1.6, vx: Math.cos(a) * 3, vy: Math.random() * 2, vz: Math.sin(a) * 3, drag: 1, life: 1.2, size: 0.16, color: '#ffd29a', glow: 2.2 }); }
+  cineView = { pos: new V3(b.x + 7, by + 6, b.z + 11), look: new V3(b.x, by + 2.5, b.z - 1.5), k: 0.03 };
+  await gwait(0.9);
+  const G = STORY.glimpses.bell;
+  const sunPos = camera.position.clone().addScaledVector(SKY_UNIFORMS.uSunDir.value, 120);
+  const done = glimpse([{ text: G[0], pos: new V3(b.x - 6, by + 10, b.z - 12) }, { text: G[1], pos: new V3(b.x - 5, by - 1, b.z + 2) }, { text: G[2], pos: new V3(b.x + 1.5, by + 4.5, b.z - 1.6) }, { text: G[3], pos: sunPos }, { text: G[4], pos: new V3(P.x, P.y + 2.2, P.z) }], 4.2);
+  await story.say(STORY.bellRockLines.bell);
+  await done;
+  await story.say(STORY.bellRockLines.after);
+  cineView = null; camBlend = 1.2;
+  story.state.busy = false;
+  story.setStep('reportMaren3');
+  saveSoon = 0.3;
+}
 // the tide post in Brinemoor: sit a while, and the tide turns (low if it's in, high if it's out)
 async function waitTide() {
   if (story.busy()) return;
@@ -1481,14 +1671,27 @@ function brineBuilt() {
   brineRoot.visible = false;
   brineRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
 }
+function bellBuilt() {
+  if (bellW) return;
+  bellRoot = new THREE.Group();
+  scene.add(bellRoot);
+  bellW = buildTown(bellRoot, BELLROCK);
+  foesBell = makeFoes(bellW, bellRoot);
+  bellW.attach({ P, foes: foesBell, sound, shake, onEvent: caveEvent, camera });
+  bellRoot.visible = false;
+  bellRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+}
 function seaBuilt() {
   if (seaW) return;
   brineBuilt();
+  bellBuilt();
   seaRoot = new THREE.Group();
   scene.add(seaRoot);
-  seaW = buildSeaPlace(seaRoot, SEA, { lanternhold: cove.mapInfo, brinemoor: brine.mapInfo });
+  seaW = buildSeaPlace(seaRoot, SEA, { lanternhold: cove.mapInfo, brinemoor: brine.mapInfo, bellrock: bellW.mapInfo });
   foesSea = makeFoes(seaW, seaRoot);
-  seaW.attach({ onEvent: caveEvent });
+  seaW.attach({ onEvent: caveEvent, sparks });
+  // Bell Rock has already risen in a journey past the Market
+  if (story.past('bellRock')) seaW.raise('bellrock', true);
   if (seaSeen) { const b = atob(seaSeen); for (let k = 0; k < Math.min(b.length, seaW.mapInfo.seen.length); k++) seaW.mapInfo.seen[k] = b.charCodeAt(k); }
   seaRoot.visible = false;
 }
@@ -1662,7 +1865,7 @@ async function bossEntrance(o) {
 }
 
 // ----- getting hurt, falling, waking by the fire -----
-let hurtFlash = 0, fade = 0, deadSat = 1;
+let hurtFlash = 0, fade = 0, deadSat = 1, stillK = 0;
 const cineFlash = { r: 1, g: 1, b: 1, k: 0 };
 function hurtPlayer(dmg, fx, fz) {
   if (!started || intro || P.state === 'dead' || P.iframes || P.invuln > 0 || P.safe > 0) return false;
@@ -1713,6 +1916,7 @@ function deadUpdate(dt) {
       if (story.state.step === 'belfryBoss') story.setStep('belfryIn', true);
     }
     if (world === brine) { foes.reset(); for (const c of brine.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 6 }); }
+    if (world === market) { guardianSeen = false; if (story.state.step === 'marketBoss') story.setStep('market', true); }
     P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.groundAt(P.x, P.z);
     if (world === seaW) {
       // out at sea: you come to, drifting, off the nearest island you can dock at
@@ -1728,7 +1932,7 @@ function deadUpdate(dt) {
     deadSat = 1;
     P.waking = 1;
     camLook.set(P.x, P.y + 0.6, P.z);
-    const wn = world === cove ? 'The Keeper\u2019s Cove' : world === caves ? CAVES.name : world === belfry ? BELFRY.name : world === brine ? BRINEMOOR.name : RIFT.name;
+    const wn = world === cove ? 'The Keeper\u2019s Cove' : world === caves ? CAVES.name : world === belfry ? BELFRY.name : world === brine ? BRINEMOOR.name : world === market ? MARKET.name : world === bellW ? BELLROCK.name : RIFT.name;
     ui.titleCard(world === cove ? TEXT.fallen : 'You wake where you came in', wn, story.past('free') ? 'Nothing you found is lost.' : 'Nothing is lost in the Prologue.');
     sound.sfx('wake');
   }
@@ -1775,7 +1979,7 @@ function sailUpdate(dt) {
   let hy = 0;
   if (B.hop > 0) { B.hop -= dt; const k = 1 - B.hop / S2.hop; hy = Math.sin(k * Math.PI) * 1.3; P.iframes = true; if (B.hop <= 0) { P.iframes = false; splash(P.x, 0, P.z, true); } }
   // the sling still slings (the sword button too, out here)
-  const firing = I.ranged.down || (I.attack.down && !B.dockable);
+  const firing = I.ranged.down || (I.attack.down && !B.dockable && !B.atRift);
   if (firing && P.fireCd <= 0) { fire(aimFor(I.ranged.down ? I.ranged : I.attack, WEAPONS.tidesling.range)); P.fireCd = 1 / WEAPONS.tidesling.rate; }
   if (I.use) { I.use = null; }
   if (I.shoot) { I.shoot = false; if (P.fireCd <= 0) { fire(aimFor(I.ranged, WEAPONS.tidesling.range)); P.fireCd = 1 / WEAPONS.tidesling.rate; } }
@@ -1798,8 +2002,14 @@ function sailUpdate(dt) {
   // docking: the sword button offers "Dock" at an island's dock
   const dk = world.islandNear(P.x, P.z, 9);
   B.dockable = dk && dk.dock ? dk.o : null;
-  ui.setContext(B.dockable ? 'dock' : null);
-  if (B.dockable && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; travel(B.dockable.id === 'lanternhold' ? 'cove' : 'brine'); }
+  // the Market's Rift on the warm water: the sword button offers "Enter"
+  const pt = world.portal && world.portal();
+  const atRift = !!pt && pt.g.visible && story.past('act1Sea') && !story.past('bellRock') && Math.hypot(P.x - pt.x, P.z - pt.z) < 8;
+  B.atRift = atRift;
+  if (atRift && !B.riftTold) { B.riftTold = true; ui.toast(STORY.marketLines.portal); }
+  ui.setContext(B.dockable ? 'dock' : atRift ? 'enter' : null);
+  if (B.dockable && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; travel(B.dockable.id === 'lanternhold' ? 'cove' : B.dockable.id === 'bellrock' ? 'bell' : 'brine'); }
+  else if (atRift && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; B.dockable = { id: 'rift' }; travel('market'); }
   I.attack.pressed = false;
 }
 function updatePlayer(dt) {
@@ -2256,14 +2466,14 @@ function tick(dt) {
   P.safe = Math.max(0, (P.safe || 0) - dt);
   if (wheelSlow) simDt *= 0.2;   // choosing a tool: the world slows almost to a stop
   if (started && !intro && world === cove) story.update(dt);
-  else if (started && !intro && world === brine) story.updateTown(dt, brine);
+  else if (started && !intro && isTown()) story.updateTown(dt, world);
   if (isDungeon() && started) {
     // in a dungeon the sword button opens chests
     const c = !story.busy() && P.state === 'move' ? world.chestNear(P) : null;
     ui.setContext(c ? 'open' : null);
     if (c && ui.input.attack.pressed && !travelling) { ui.input.attack.pressed = false; ui.input.attack.down = false; openChest(c); }
     checkCaveBoss();
-  } else if (world !== cove && world !== brine && world !== seaW) ui.setContext(null);
+  } else if (world !== cove && !isTown() && world !== seaW) ui.setContext(null);
   if (travelling) updateTravel(dt);
   if (floodPlane) floodPlane.position.y = -0.3 + foesRift.flood.k * 0.42;
   ui.talkFrame(dt);
@@ -2271,7 +2481,7 @@ function tick(dt) {
   if (started && !intro && !busy) {
     // the sword button says "Talk" when someone is near: then it talks instead of swinging
     // (only in the cove: there's no one to talk to and no door to open inside the Rift)
-    if ((world === cove || world === brine) && ui.input.attack.pressed && story.tryTalk()) { ui.input.attack.pressed = false; ui.input.attack.down = false; }
+    if ((world === cove || isTown()) && ui.input.attack.pressed && story.tryTalk()) { ui.input.attack.pressed = false; ui.input.attack.down = false; }
     if (ui.input.tap) {
       if (P.boat) { const h = groundUnder(ui.input.tap.x, ui.input.tap.y); if (h) { P.boat.course = { x: h.x, z: h.z }; tapRing.position.set(h.x, 0.1, h.z); tapRing.visible = true; tapRing.userData.t = 0; } }
       else if (P.state === 'move' && !ui.input.ranged.down) walkTo(ui.input.tap.x, ui.input.tap.y);
@@ -2342,6 +2552,8 @@ function tick(dt) {
   }
   cove.seaLevel = clock.running ? tideAt(clockH) : -0.08;
   if (brine) brine.setTide(clock.running ? tideAt(clockH) : -0.08);
+  if (bellW) bellW.setTide(clock.running ? tideAt(clockH) : -0.08);
+  updateGlimpse(dt);
   // the Jar rides at your hip while it's the tool in hand, and tips when you use it
   // the tool in your hand: the one you're using (the jar shows its water when it's full, and tips when you pour)
   const H2 = P.held;
@@ -2356,15 +2568,17 @@ function tick(dt) {
     stats.time += dt;
     if (saveSoon >= 0) { saveSoon -= dt; if (saveSoon < 0) writeSave(); }
     saveClock += dt;
-    if (saveClock > 30 && !busy && (world === cove || world === brine)) { saveClock = 0; writeSave(); }
+    if (saveClock > 30 && !busy && (world === cove || isTown())) { saveClock = 0; writeSave(); }
   }
   const FU = post.final.uniforms;
   cineFlash.k = Math.max(0, cineFlash.k - dt * 1.6);
   if (cineFlash.k > 0.01) { FU.flashCol.value.setRGB(cineFlash.r, cineFlash.g, cineFlash.b); FU.flash.value = cineFlash.k; }
   else if (dark > 0) { FU.flashCol.value.setRGB(0.02, 0.01, 0.05); FU.flash.value = dark; }
   else { FU.flashCol.value.setRGB(0.85, 0.08, 0.16); FU.flash.value = hurtFlash * 0.22; }
-  FU.sat.value = 1.08 * deadSat;
-  FU.vig.value = 0.42 + (1 - deadSat) * 0.4 + hurtFlash * 0.25;
+  // time standing still in the Market: the colour drains a little and the edges darken
+  stillK = lerp(stillK, world.frozen && world.frozen() ? 1 : 0, Math.min(1, dt * 10));
+  FU.sat.value = 1.08 * deadSat * (1 - stillK * 0.5);
+  FU.vig.value = 0.42 + (1 - deadSat) * 0.4 + hurtFlash * 0.25 + stillK * 0.3;
   ui.setHearts(P.hp, P.maxHp);
   ui.setShards(P.shards);
   sound.update();
@@ -2424,6 +2638,7 @@ try {
     setClock: (h) => { clockH = h; setClock(h); clock.running = true; },
     showLantern: () => showLantern(),
     waitTide: () => waitTide(),
+    ringBell: () => ringBell(),
   });
   setTime(0);
   applyQuality();
@@ -2441,7 +2656,7 @@ try {
   setTimeout(showTitle, 450);
   addEventListener('pagehide', () => writeSave());
   document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, jar, setJarFull, waitTide, get place() { return placeOf(world); }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

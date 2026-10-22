@@ -1535,6 +1535,12 @@ async function risingScene() {
   saveSoon = 0.3;
 }
 // the bell on Bell Rock: one stroke, and the world is paper for a breath
+// islands the story has opened by now
+function seaUnlocks() {
+  if (!seaW) return;
+  if (story.past('act1Cinder')) seaW.unlock('cinderglass');
+  if (story.past('act1Saltglass')) seaW.unlock('saltglass');
+}
 async function ringBell() {
   if (story.busy()) return;
   if (story.past('reportMaren3')) { ui.toast(STORY.bellRockLines.again); sound.sfx('bellHit'); return; }
@@ -2005,8 +2011,7 @@ function seaBuilt() {
   seaW.attach({ onEvent: caveEvent, sparks });
   // Bell Rock has already risen in a journey past the Market
   if (story.past('bellRock')) seaW.raise('bellrock', true);
-  if (story.past('act1Cinder')) seaW.unlock('cinderglass');
-  if (story.past('act1Saltglass')) seaW.unlock('saltglass');
+  seaUnlocks();
   if (story.past('remLight')) seaW.showLight(true);
   if (story.past('act1Reef')) seaW.holdBeam();
   if (seaSeen) { const b = atob(seaSeen); for (let k = 0; k < Math.min(b.length, seaW.mapInfo.seen.length); k++) seaW.mapInfo.seen[k] = b.charCodeAt(k); }
@@ -2364,7 +2369,8 @@ function sailUpdate(dt) {
     P.face += (l && !r2 ? -1 : 1) * dt * 2.5;
   }
   P.vx = vx; P.vz = vz;
-  // a locked island turns you away
+  // a locked island turns you away (a step reached since the sea was built opens its island here)
+  seaUnlocks();
   const near = world.islandNear(P.x, P.z, 7);
   if (near && near.locked) {
     const o = near.o, dx = P.x - o.x, dz = P.z - o.z, d = Math.hypot(dx, dz) || 1;

@@ -1476,9 +1476,9 @@ async function warpTo(id) {
 
 // ----- a glimpse of the Draft: for a moment the world is the first world, as the Weaver drew it. Paper and ink,
 // words where colours should be, and a hole where the sun will go. Labels are [{ text, pos: V3 }] -----
-const glimpseS = { k: 0, to: 0, labels: [] };
-function glimpse(labels, hold = 3.2) {
-  glimpseS.labels = labels || []; glimpseS.to = 1;
+const glimpseS = { k: 0, to: 0, labels: [], caption: '' };
+function glimpse(labels, hold = 3.2, caption = '') {
+  glimpseS.labels = labels || []; glimpseS.caption = caption; glimpseS.to = 1;
   sound.sfx('glimpse');
   Object.assign(cineFlash, { r: 1, g: 0.97, b: 0.9, k: 0.6 });
   return gwait(0.8 + hold).then(() => { glimpseS.to = 0; sound.sfx('glimpse'); return gwait(1.0); });
@@ -1495,7 +1495,7 @@ function updateGlimpse(dt) {
   ui.draftLabels(G.labels.map((L) => {
     lblV.copy(L.pos).project(camera);
     return { text: L.text, x: (lblV.x + 1) / 2 * view.w, y: (1 - lblV.y) / 2 * view.h, off: lblV.z > 1 };
-  }), e);
+  }), e, G.caption);
   if (G.k === 0) { G.labels = []; ui.draftLabels([], 0); }
 }
 // Bell Rock rises out of the warm water where the Market was, in a glimpse of the Draft
@@ -1512,7 +1512,7 @@ async function risingScene() {
   sound.sfx('roar'); shake(0.6);
   const top = new V3(o.x + (bellW.mapInfo.bellAt ? bellW.mapInfo.bellAt.x / 2 : 0), 5, o.z + (bellW.mapInfo.bellAt ? bellW.mapInfo.bellAt.z / 2 : 0));
   const G = STORY.glimpses.rising;
-  const done = glimpse([{ text: G[0], pos: new V3(o.x - 6, 3, o.z + 2) }, { text: G[1], pos: new V3(o.x - 12, 0.3, o.z - 14) }, { text: G[2], pos: top }, { text: G[3], pos: new V3(o.x + 8, 9, o.z - 4) }], 4.6);
+  const done = glimpse([{ text: G[0], pos: new V3(o.x - 6, 3, o.z + 2) }, { text: G[1], pos: new V3(o.x - 12, 0.3, o.z - 14) }, { text: G[2], pos: top }, { text: G[3], pos: new V3(o.x + 8, 9, o.z - 4) }], 4.6, STORY.glimpses.caption.rising);
   // up it comes, shedding water
   for (let t = 0; t < 6; t += 0.05) {
     await gwait(0.05);
@@ -1554,7 +1554,7 @@ async function ringBell() {
   await gwait(0.9);
   const G = STORY.glimpses.bell;
   const sunPos = camera.position.clone().addScaledVector(SKY_UNIFORMS.uSunDir.value, 120);
-  const done = glimpse([{ text: G[0], pos: new V3(b.x - 6, by + 10, b.z - 12) }, { text: G[1], pos: new V3(b.x - 5, by - 1, b.z + 2) }, { text: G[2], pos: new V3(b.x + 1.5, by + 4.5, b.z - 1.6) }, { text: G[3], pos: sunPos }, { text: G[4], pos: new V3(P.x, P.y + 2.2, P.z) }], 4.2);
+  const done = glimpse([{ text: G[0], pos: new V3(b.x - 6, by + 10, b.z - 12) }, { text: G[1], pos: new V3(b.x - 5, by - 1, b.z + 2) }, { text: G[2], pos: new V3(b.x + 1.5, by + 4.5, b.z - 1.6) }, { text: G[3], pos: sunPos }, { text: G[4], pos: new V3(P.x, P.y + 2.2, P.z) }], 4.2, STORY.glimpses.caption.bell);
   await story.say(STORY.bellRockLines.bell);
   await done;
   await story.say(STORY.bellRockLines.after);
@@ -3004,7 +3004,7 @@ async function rememberedScene() {
   cineView = { pos: new V3(mid.x + 9, 9, mid.z + 16), look: new V3(mid.x, 1.5, mid.z - 2), k: 0.025 };
   await gwait(1.2);
   const G = STORY.saltLines.glimpse, md = saltW.rem.mirage.dir;
-  await glimpse([{ text: G[0], pos: new V3(mid.x - 9, 3.5, mid.z - 6) }, { text: G[1], pos: new V3(mid.x, 1.6, mid.z) }, { text: G[2], pos: new V3(md.x * 60, 8, md.z * 60) }, { text: G[3], pos: new V3(mid.x + 9, 4, mid.z + 6) }], 3.6);
+  await glimpse([{ text: G[0], pos: new V3(mid.x - 9, 3.5, mid.z - 6) }, { text: G[1], pos: new V3(mid.x, 1.6, mid.z) }, { text: G[2], pos: new V3(md.x * 60, 8, md.z * 60) }, { text: G[3], pos: new V3(mid.x + 9, 4, mid.z + 6) }], 3.6, STORY.glimpses.caption.salt);
   const C = STORY.saltLines.card; ui.titleCard(C.name, C.region, C.line);
   await story.say(STORY.saltLines.rise);
   cineView = null; camBlend = 1.2;

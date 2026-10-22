@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.15.3';
+export const VERSION = '0.15.4';
 
 export const CONFIG = {
   // ----- the player -----
@@ -1335,6 +1335,12 @@ export const STORY = {
   glimpses: {
     rising: ['ROCK (old)', 'sea, warm', 'a bell goes here', 'up?'],
     bell: ['SKY (blue, not decided)', 'grass', 'stone', 'a sun goes here', 'you'],
+    // the line across the top of the page while a glimpse lasts
+    caption: {
+      rising: 'For a moment, the sea is only a sketch, and someone is still drawing it.',
+      bell: 'For a moment, the world is unfinished: words where the colours should be.',
+      salt: 'For a moment, the town is only notes in a margin, remembered by someone.',
+    },
   },
   // Act 1: Cinderglass, Odda, the Kiln, and the forge
   odda: {

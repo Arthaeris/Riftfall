@@ -292,7 +292,17 @@ export function createUI(opts) {
   const draftEl = el('div', 'dLabels');
   root.appendChild(draftEl);
   const draftSpans = [];
-  function draftLabels(list, k) {
+  // the page itself: a paper edge, a ruled margin, an ink compass in the corner and a line of handwriting across the top
+  const draftPage = el('div', 'dPage');
+  draftPage.innerHTML = '<div class="dCap"></div><svg class="dRose" viewBox="-50 -50 100 100" aria-hidden="true"><circle r="34" fill="none" stroke="currentColor" stroke-width="1.2"/><circle r="27" fill="none" stroke="currentColor" stroke-width="0.6" stroke-dasharray="2 3"/>'
+    + '<path d="M0-44 L6-6 L0 0 L-6-6Z M0 44 L6 6 L0 0 L-6 6Z M-44 0 L-6-6 L0 0 L-6 6Z M44 0 L6-6 L0 0 L6 6Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>'
+    + '<path d="M0-44 L6-6 L0 0Z M0 44 L-6 6 L0 0Z M-44 0 L-6 6 L0 0Z M44 0 L6-6 L0 0Z" fill="currentColor" opacity="0.75"/><text y="-47" text-anchor="middle" font-size="11" fill="currentColor">N</text></svg>';
+  draftEl.appendChild(draftPage);
+  const draftCap = draftPage.querySelector('.dCap');
+  function draftLabels(list, k, caption) {
+    draftPage.style.opacity = String(Math.max(0, Math.min(1, (k - 0.15) * 1.3)));
+    draftPage.style.display = k > 0.01 ? 'block' : 'none';
+    if (caption !== undefined && draftCap.textContent !== caption) draftCap.textContent = caption || '';
     while (draftSpans.length < list.length) { const sp = el('span', 'dLabel'); sp.style.setProperty('--tilt', ((draftSpans.length * 37) % 11 - 5) + 'deg'); draftEl.appendChild(sp); draftSpans.push(sp); }
     draftSpans.forEach((sp, i) => {
       const L = list[i];

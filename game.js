@@ -1224,7 +1224,7 @@ function writeSave() {
     caves: caves ? caves.snapshot() : cavesSaved, inCaves: world === caves,
     // the Glass Sea and on
     belfry: belfry ? belfry.snapshot() : belfrySaved, at: travelling ? travelling.to : placeOf(world), jar: jar.full,
-    kiln: kiln ? kiln.snapshot() : kilnSaved, sword: P.sword, upgrades: [...P.upgrades], forgeSeen: !!P.forgeSeen,
+    kiln: kiln ? kiln.snapshot() : kilnSaved, marks: ui.atlas.marks(), sword: P.sword, upgrades: [...P.upgrades], forgeSeen: !!P.forgeSeen,
     chart: seaW ? (() => { let t = ''; for (const v of seaW.mapInfo.seen) t += String.fromCharCode(v); return btoa(t); })() : seaSeen };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); savedAt = Date.now(); ui.savedMark(); } catch (_) { /* private mode: progress lives only as long as the page */ }
 }
@@ -1303,6 +1303,7 @@ async function beginJourney(save) {
   cavesSaved = save.caves || null;
   belfrySaved = save.belfry || null;
   kilnSaved = save.kiln || null;
+  ui.atlas.setMarks(save.marks);
   if (save.sword) setSword(save.sword);
   P.upgrades = new Set(save.upgrades || []);
   P.forgeSeen = !!save.forgeSeen;
@@ -2611,6 +2612,40 @@ function gameplayCam(out, outLook) {
   out.copy(outLook).addScaledVector(camDir, dist);
 }
 const wantPos = new V3(), wantLook = new V3();
+// ----- your mark from the map, standing in the world: a pillar of light you can see from far off -----
+const beacon = (() => {
+  const g = new THREE.Group();
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 70, 16, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color('#7fe8f5').multiplyScalar(1.6), transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide }));
+  beam.position.y = 35; g.add(beam);
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 70, 8, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color('#e6fcff').multiplyScalar(2), transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  core.position.y = 35; g.add(core);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.05, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color('#7fe8f5').multiplyScalar(1.5), transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.06; g.add(ring);
+  g.visible = false; g.renderOrder = 5;
+  scene.add(g);
+  return { g, beam, core, ring };
+})();
+function updateBeacon(dt) {
+  const m = started && !intro && world && !travelling ? ui.atlas.mark() : null;
+  if (!m || cineView || story.state.cine) { beacon.g.visible = false; return; }
+  const u = ui.atlas.unit(), x = m.x * u, z = m.z * u;
+  const d = Math.hypot(P.x - x, P.z - z);
+  // there: it lets go with a chime
+  if (d < (P.boat ? 7 : 2.2)) {
+    ui.atlas.clearMark(); beacon.g.visible = false;
+    sound.sfx('chime'); ui.toast(m.name ? 'You reached ' + m.name : 'You reached your mark');
+    for (let i = 0; i < 26; i++) { const a = Math.random() * TAU; sparks.spawn({ x: x + Math.cos(a) * 0.6, y: (world.groundAt ? world.groundAt(x, z) : 0) + 0.3, z: z + Math.sin(a) * 0.6, vx: Math.cos(a) * 2, vy: 2 + Math.random() * 3, vz: Math.sin(a) * 2, grav: 4, life: 0.9, size: 0.14, color: '#bff6ff', glow: 2.4 }); }
+    return;
+  }
+  beacon.g.visible = true;
+  const y = P.boat || world === seaW ? 0 : Math.max(world.groundAt(x, z), -0.4);
+  beacon.g.position.set(x, y, z);
+  // fainter when you're right by it, so it doesn't fill the screen
+  const k = clamp((d - 3) / 12, 0.15, 1);
+  beacon.beam.material.opacity = 0.3 * k; beacon.core.material.opacity = 0.55 * k;
+  const pulse = (time * 0.7) % 1;
+  beacon.ring.scale.setScalar(1 + pulse * 1.6); beacon.ring.material.opacity = 0.75 * (1 - pulse);
+}
 // ----- the close view: low behind you, looking out to the horizon (on foot and at sea) -----
 // viewK blends between the usual view from above (0) and this one (1); the stick steers relative to whichever is showing.
 // The camera hangs on an arm from your head: turned by yaw and pitch, and shortened at once whenever something is
@@ -2649,8 +2684,9 @@ function updateCloseCam(dt) {
     // the camera stick: sideways turns, up and down tilts (down looks down)
     if (I.look.active) {
       const lx = I.look.x, ly = I.look.y, curve = (v) => Math.sign(v) * v * v;
-      viewYaw -= curve(lx) * 2.7 * dt;
-      viewPitch = clamp(viewPitch + curve(ly) * 1.6 * dt, PITCH.min, PITCH.max);
+      const sens = prefs.camSens || 1;
+      viewYaw -= curve(lx) * 2.7 * sens * dt;
+      viewPitch = clamp(viewPitch + curve(ly) * (prefs.invertY ? -1 : 1) * 1.6 * sens * dt, PITCH.min, PITCH.max);
       lookIdle = 0;
     } else lookIdle += dt;
     // left alone for a moment while you're on the move, the view drifts back round behind you (and back to its usual tilt);
@@ -2886,6 +2922,7 @@ function tick(dt) {
   if (bellW) bellW.setTide(clock.running ? tideAt(clockH) : -0.08);
   updateGlimpse(dt);
   MOLTEN.uTime.value = time;
+  updateBeacon(dt);
   ui.setHeat(P.heat);
   // heat haze over hot ground near you
   if ((world === cinderW || world === kiln) && Math.random() < dt * 25) {
@@ -2950,6 +2987,7 @@ try {
     onTool: (id) => setTool(id),
     onSeaView: () => { if (started && !intro) setCloseView(!closeCam); },
     camStick: () => viewK > 0.5,
+    onMark: () => { saveSoon = 0.6; },
     onWheel: (open) => { wheelSlow = open; },
     onWarp: (id) => warpTo(id),
     onChart: (x, z) => { if (P.boat) { P.boat.course = { x: x * 2, z: z * 2 }; ui.toast('Course set'); } },

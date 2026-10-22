@@ -1,7 +1,7 @@
 /* Riftfall — ui.js
    Everything on top of the 3D view: touch controls, keyboard & mouse, the quiet HUD, title cards,
    hints, damage numbers, the title menu, the pause sheet (journey, settings, help) and the end of the Prologue. */
-import { VERSION, TEXT, STORY } from '@rf/data';
+import { VERSION, TEXT, STORY, NPCS } from '@rf/data';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
@@ -10,7 +10,7 @@ const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls)
 // Preferences (saved on this device)
 // ---------------------------------------------------------------------------
 const PREF_KEY = 'riftfall-prefs';
-const DEFAULT_PREFS = { quality: 'auto', shake: true, numbers: true, lefty: false, music: 0.6, sfx: 0.8, seen: {} };
+const DEFAULT_PREFS = { quality: 'auto', shake: true, numbers: true, lefty: false, music: 0.6, sfx: 0.8, camSens: 1, invertY: false, seen: {} };
 export function loadPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(PREF_KEY) || '{}') || {}; } catch (_) { p = {}; }
@@ -669,24 +669,63 @@ export function createUI(opts) {
   const isle = el('div', 'isleMap hidden', '<canvas></canvas><i class="imRing"></i>');
   hud.appendChild(isle);
   const isleCv = $('canvas', isle);
-  const bigMap = el('div', 'veil mapVeil hidden');
-  bigMap.innerHTML = `<div class="mapSheet glass" role="dialog" aria-label="Map">
-      <div class="mapCv"><canvas></canvas></div>
-      <div class="mapSide">
-        <div class="kicker">Map</div><h2>Lanternhold</h2>
-        <div class="jObj"><i class="qDot"></i><span></span></div>
-        <ul class="mapKey"><li><i class="mk you"></i>You</li><li><i class="mk goal"></i>Where you're headed</li><li><i class="mk ppl"></i>People</li><li><i class="mk way"></i>Waystone</li></ul>
-        <p class="sub mapWarp">Tap a lit waystone to travel there.</p>
-        <button class="ghost" data-act="closeMap">Back to the game</button>
-      </div>
-      <button class="x" data-act="closeMap" aria-label="Close map">✕</button>
-    </div>`;
+  // ===== the atlas: the full map =====
+  // Drag to move it, pinch (or the wheel, or + and −) to zoom, tap anything on it to learn about it,
+  // tap open ground to set your own mark. The mark shows on the small map with how far it is,
+  // stands in the world as a pillar of light, and clears itself when you get there.
+  const AT_ICON = {
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    minus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>',
+    me: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+    goal: '<svg viewBox="0 0 24 24"><path d="M12 3l7 9-7 9-7-9z" fill="#ffd29a"/></svg>',
+    mark: '<svg viewBox="0 0 24 24"><path d="M12 22s-7-7.2-7-12a7 7 0 0114 0c0 4.8-7 12-7 12z" fill="#7fe8f5"/><circle cx="12" cy="10" r="2.6" fill="#0e2a3a"/></svg>',
+    key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.6" r="0.6" fill="currentColor"/></svg>',
+    way: '<svg viewBox="0 0 24 24"><path d="M12 3l6 9-6 9-6-9z" fill="#bff6ff"/></svg>',
+    ppl: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="#f6f2ff"/></svg>',
+    place: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff4e4" stroke-width="1.8"><path d="M4 19l5-11 4 7 3-4 4 8z"/></svg>',
+    you: '<svg viewBox="0 0 24 24"><path d="M12 3l7 17-7-4-7 4z" fill="#e6fcff"/></svg>',
+  };
+  const bigMap = el('div', 'atlas hidden');
+  bigMap.innerHTML = `
+    <canvas class="atCv"></canvas>
+    <div class="atVig"></div>
+    <div class="atHead"><div class="kicker">Map</div><h2></h2><div class="atObj"><i class="qDot"></i><span></span></div></div>
+    <button class="atX glass" data-at="close" aria-label="Close map">${AT_ICON.close}</button>
+    <div class="atRail glass">
+      <button data-at="in" aria-label="Zoom in">${AT_ICON.plus}</button>
+      <button data-at="out" aria-label="Zoom out">${AT_ICON.minus}</button>
+      <i></i>
+      <button data-at="me" aria-label="Find yourself">${AT_ICON.me}</button>
+      <button data-at="goal" aria-label="Find where you're headed">${AT_ICON.goal}</button>
+      <button data-at="mark" aria-label="Find your mark">${AT_ICON.mark}</button>
+      <i></i>
+      <button data-at="key" aria-label="Legend">${AT_ICON.key}</button>
+    </div>
+    <div class="atKey glass hidden">
+      <ul>
+        <li>${AT_ICON.you}<span>You</span></li><li>${AT_ICON.goal}<span>Where you're headed</span></li>
+        <li>${AT_ICON.mark}<span>Your mark</span></li><li>${AT_ICON.ppl}<span>People</span></li><li>${AT_ICON.way}<span>Waystone</span></li>
+      </ul>
+      <p>Drag to move · Pinch to zoom<br>Tap a place to learn about it<br>Tap open ground to set a mark</p>
+    </div>
+    <div class="atCard glass hidden"><div class="acIcon"></div><div class="acText"><div class="kicker"></div><h3></h3><p></p></div><div class="acBtns"></div></div>
+    <div class="atHint">Tap open ground to set a mark</div>`;
   root.appendChild(bigMap);
-  const bigCv = $('canvas', bigMap);
-  let lastBig = null;
-  let mapBase = null, mapInfo = null, mapRot = 0, mapState = null, mapOpen = false, mapTick = 0, mapFog = null;
+  const atCv = $('.atCv', bigMap), atCard = $('.atCard', bigMap), atKey = $('.atKey', bigMap), atHint = $('.atHint', bigMap);
+  let mapBase = null, mapInfo = null, mapRot = 0, mapState = null, mapOpen = false, mapTick = 0, mapFog = null, mapKey0 = 'cove';
   const bases = {};   // one drawn map per place
   const S_PX = 6;   // pixels per world unit in the drawn base map
+  // your marks: one per place, in map units
+  const marks = {};
+  const markKey = () => mapKey0.replace(/\d+$/, '');
+  const curMark = () => marks[markKey()] || null;
+  const unitOf = () => (mapInfo && mapInfo.scale) || 1;
+  function setMark(m) {
+    if (m) marks[markKey()] = { x: m.x, z: m.z, name: m.name || null };
+    else delete marks[markKey()];
+    opts.onMark && opts.onMark();
+  }
   function shadeHex(hex, k) {
     const n = parseInt(hex.slice(1), 16);
     const c = (v) => Math.max(0, Math.min(255, Math.round(v * k)));
@@ -694,6 +733,7 @@ export function createUI(opts) {
   }
   // draw the island once: ground by kind and height, cliffs, houses, the dock, the lighthouse
   function buildMap(info, rot, key = 'cove') {
+    mapKey0 = key;
     if (bases[key]) { ({ mapBase, mapInfo, mapFog } = bases[key]); mapRot = rot; return; }
     mapInfo = info; mapRot = rot;
     const { N, H0, H, K } = info;
@@ -763,7 +803,6 @@ export function createUI(opts) {
     g.clearRect(0, 0, W, Hh);
     g.fillStyle = mapInfo.cave ? '#0b0912' : '#2a6f8f'; g.fillRect(0, 0, W, Hh);
     const ox = W / 2, oy = Hh / 2;
-    if (big) lastBig = { cx, cz, sc, ox, oy };
     g.save();
     g.translate(ox, oy); g.rotate(mapRot); g.scale(sc / S_PX, sc / S_PX);
     g.translate(-(cx - mapInfo.H0) * S_PX, -(cz - mapInfo.H0) * S_PX);
@@ -813,6 +852,9 @@ export function createUI(opts) {
       g.fillStyle = '#ffd29a'; g.fillRect(-s3 / 2, -s3 / 2, s3, s3);
       g.restore();
     }
+    // your mark: a pin (held at the rim, pointing the way, when it's further off)
+    const mk = curMark();
+    if (mk) { const q = edge(proj(mk.x, mk.z, cx, cz, ox, oy, sc)); drawPin(g, q.x, q.y + 5, q.out ? 0.6 : 0.7, false); }
     // you: an arrow pointing the way you face
     const me = proj(mapState.x, mapState.z, cx, cz, ox, oy, sc);
     const a = Math.atan2(Math.cos(mapState.face), Math.sin(mapState.face)) + mapRot;
@@ -824,61 +866,388 @@ export function createUI(opts) {
     g.restore();
   }
   // every frame from the game: where you are, who's where, and the goal. state = null hides the map
-  const bigCentre = () => mapInfo.cave ? [mapState.x, mapState.z, bigCv.clientWidth / 44] : [mapInfo.H0 + mapInfo.N / 2, mapInfo.H0 + mapInfo.N / 2, bigCv.clientWidth / (mapInfo.N * 1.08)];
+  const markDist = el('div', 'imDist hidden');
+  hud.appendChild(markDist);
+  let lastDistTxt = '';
   function islandMap(state) {
     mapState = state;
     isle.classList.toggle('hidden', !state);
-    if (!state || !mapBase) return;
-    if (mapOpen) { const [a, b2, c] = bigCentre(); drawMap(bigCv, a, b2, c, true); return; }
+    const mk = state && mapBase ? curMark() : null;
+    const txt = mk ? Math.round(Math.hypot(mk.x - state.x, mk.z - state.z) * unitOf()) + ' m' : '';
+    if (txt !== lastDistTxt) { lastDistTxt = txt; markDist.innerHTML = txt ? `${AT_ICON.mark}<b>${txt}</b>` : ''; markDist.classList.toggle('hidden', !txt); }
+    if (!state || !mapBase || mapOpen) return;
     if ((mapTick = (mapTick + 1) % 2) === 0) {
-      // the small map can turn with the view (the low view at sea); the big chart stays north-up
+      // the small map can turn with the view (the close view); the atlas stays as drawn
       const r0 = mapRot; if (state.rot !== undefined) mapRot = state.rot;
       drawMap(isleCv, state.x, state.z, 3.6, false);
       mapRot = r0;
     }
   }
+
+  // ----- the atlas view: centre (cx, cz) in map units, sc pixels per unit; a target to glide to; a little momentum -----
+  const AV = { cx: 0, cz: 0, sc: 8, W: 1, H: 1, to: null, vx: 0, vz: 0, sel: null, hits: [], drop: -9, t: 0, last: 0, raf: 0 };
+  const fitSc = () => Math.min(AV.W / (mapInfo.N * 1.02), AV.H / (mapInfo.N * 1.02));
+  const minSc = () => fitSc() * 0.9;
+  const maxSc = () => Math.max(fitSc() * 4, 18);
+  const s2w = (sx, sy) => { const dx = (sx - AV.W / 2) / AV.sc, dy = (sy - AV.H / 2) / AV.sc, c = Math.cos(-mapRot), s2 = Math.sin(-mapRot); return { x: AV.cx + dx * c - dy * s2, z: AV.cz + dx * s2 + dy * c }; };
+  const w2s = (x, z) => proj(x, z, AV.cx, AV.cz, AV.W / 2, AV.H / 2, AV.sc);
+  function clampView() {
+    AV.sc = Math.max(minSc(), Math.min(maxSc(), AV.sc));
+    const H0 = mapInfo.H0, N = mapInfo.N;
+    AV.cx = Math.max(H0, Math.min(H0 + N, AV.cx)); AV.cz = Math.max(H0, Math.min(H0 + N, AV.cz));
+  }
+  function glideTo(x, z, sc) { AV.to = { x, z, sc: sc === undefined ? AV.sc : Math.max(minSc(), Math.min(maxSc(), sc)) }; AV.vx = AV.vz = 0; }
+  // zoom by a factor, keeping the map point under (sx, sy) where it is
+  function zoomAt(f, sx, sy) {
+    const a = s2w(sx, sy);
+    AV.sc = Math.max(minSc(), Math.min(maxSc(), AV.sc * f));
+    const b = s2w(sx, sy);
+    AV.cx += a.x - b.x; AV.cz += a.z - b.z; AV.to = null;
+    clampView();
+  }
+  const dist = (x, z) => Math.hypot(x - mapState.x, z - mapState.z) * unitOf();
+  const fmtDist = (x, z) => { const d = dist(x, z); return d < 4 ? 'Right here' : Math.round(d) + ' m away'; };
+  const unseen = (x, z) => {
+    const I = mapInfo; if (!I.seen) return false;
+    const i = Math.floor(x - I.H0), j = Math.floor(z - I.H0);
+    return i < 0 || j < 0 || i >= I.seenW || !I.seen[j * I.seenW + i];
+  };
+
+  function drawAtlas() {
+    const cv = atCv, dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = cv.clientWidth, Hh = cv.clientHeight;
+    if (!W || !Hh || !mapBase || !mapState) return;
+    AV.W = W; AV.H = Hh;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(Hh * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(Hh * dpr); }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const t = AV.t, cave = !!mapInfo.cave;
+    // the deep around the map
+    const bg = g.createRadialGradient(W / 2, Hh / 2, 0, W / 2, Hh / 2, Math.max(W, Hh) * 0.7);
+    bg.addColorStop(0, cave ? '#14101f' : '#2a6f8f'); bg.addColorStop(1, cave ? '#06050a' : '#173f57');
+    g.fillStyle = bg; g.fillRect(0, 0, W, Hh);
+    // the ground: crisp voxels up close, smooth when far out
+    g.save();
+    g.translate(W / 2, Hh / 2); g.rotate(mapRot); g.scale(AV.sc / S_PX, AV.sc / S_PX);
+    g.translate(-(AV.cx - mapInfo.H0) * S_PX, -(AV.cz - mapInfo.H0) * S_PX);
+    g.imageSmoothingEnabled = AV.sc < S_PX * 0.9;
+    g.drawImage(mapBase, 0, 0);
+    if (mapFog) { revealFog(); g.drawImage(mapFog, 0, 0); }
+    g.restore();
+    // a faint survey grid, every 16 units, once you're zoomed in enough to want it
+    if (AV.sc > 5) {
+      g.save(); g.strokeStyle = cave ? 'rgba(255,255,255,0.035)' : 'rgba(255,255,255,0.06)'; g.lineWidth = 1;
+      const H0 = mapInfo.H0, N = mapInfo.N, step = 16;
+      for (let v = Math.ceil(H0 / step) * step; v <= H0 + N; v += step) {
+        let a = w2s(v, H0), b = w2s(v, H0 + N); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+        a = w2s(H0, v); b = w2s(H0 + N, v); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+      }
+      g.restore();
+    }
+    const hits = [];
+    const mk = curMark(), me = w2s(mapState.x, mapState.z);
+    // the way to your mark: a dotted line that drifts toward it
+    if (mk) {
+      const q = w2s(mk.x, mk.z);
+      g.save(); g.setLineDash([2, 9]); g.lineDashOffset = -t * 22; g.lineCap = 'round';
+      g.strokeStyle = 'rgba(14,10,38,0.45)'; g.lineWidth = 5; g.beginPath(); g.moveTo(me.x, me.y); g.lineTo(q.x, q.y); g.stroke();
+      g.strokeStyle = 'rgba(127,232,245,0.95)'; g.lineWidth = 3; g.beginPath(); g.moveTo(me.x, me.y); g.lineTo(q.x, q.y); g.stroke();
+      g.restore();
+    }
+    // named places: bigger as you zoom in, never piled on each other, "Uncharted" until you've seen them
+    const fs = Math.round(Math.max(11, Math.min(16, 9 + AV.sc * 0.45)));
+    g.font = `italic 600 ${fs}px Fraunces, Georgia, serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const taken = [];
+    for (const p of mapInfo.places) {
+      const q = w2s(p.x, p.z);
+      if (q.x < -60 || q.y < -30 || q.x > W + 60 || q.y > Hh + 30) continue;
+      const name = unseen(p.x, p.z) ? 'Uncharted' : p.name;
+      const w = g.measureText(name).width + 18, h = fs + 10, r = { x: q.x - w / 2, y: q.y - h / 2, w, h };
+      if (taken.some((o) => r.x < o.x + o.w + 4 && r.x + r.w + 4 > o.x && r.y < o.y + o.h + 2 && r.y + r.h + 2 > o.y)) continue;
+      taken.push(r);
+      const sel = AV.sel && AV.sel.kind === 'place' && AV.sel.ref === p;
+      g.fillStyle = sel ? 'rgba(255,244,228,0.92)' : 'rgba(14,10,38,0.6)';
+      g.beginPath(); g.roundRect(r.x, r.y, w, h, h / 2); g.fill();
+      g.fillStyle = sel ? '#1d1b4a' : name === 'Uncharted' ? 'rgba(255,244,228,0.6)' : '#fff4e4';
+      g.fillText(name, q.x, q.y + 0.5);
+      hits.push({ kind: 'place', ref: p, x: q.x, y: q.y, r: Math.max(w, h) / 2, pri: 1, name });
+    }
+    // waystones
+    for (const w of mapState.waystones || []) {
+      const q = w2s(w.x, w.z), s4 = 8;
+      g.save();
+      if (w.lit) { g.shadowColor = 'rgba(159,243,255,0.95)'; g.shadowBlur = 14; }
+      g.fillStyle = w.lit ? '#bff6ff' : '#5a5470'; g.strokeStyle = w.lit ? 'rgba(14,10,38,0.9)' : 'rgba(230,230,245,0.85)'; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(q.x, q.y - s4); g.lineTo(q.x + s4 * 0.7, q.y); g.lineTo(q.x, q.y + s4); g.lineTo(q.x - s4 * 0.7, q.y); g.closePath(); g.fill(); g.stroke();
+      g.restore();
+      hits.push({ kind: 'way', ref: w, x: q.x, y: q.y, r: 18, pri: 3 });
+    }
+    // people, named once you're close enough in
+    g.font = '800 11px Nunito, system-ui, sans-serif';
+    for (const n of mapState.people) {
+      const q = w2s(n.x, n.z);
+      g.fillStyle = n.news ? '#ffd29a' : '#f6f2ff'; g.strokeStyle = 'rgba(14,10,38,0.85)'; g.lineWidth = 1.6;
+      g.beginPath(); g.arc(q.x, q.y, 5, 0, Math.PI * 2); g.fill(); g.stroke();
+      const nm = NPCS[n.id] ? NPCS[n.id].name : '';
+      if (nm && AV.sc > 9) { g.lineWidth = 3; g.strokeStyle = 'rgba(14,10,38,0.75)'; g.strokeText(nm, q.x, q.y + 13); g.fillStyle = '#f6f2ff'; g.fillText(nm, q.x, q.y + 13); }
+      hits.push({ kind: 'person', ref: n, x: q.x, y: q.y, r: 16, pri: 4, name: nm });
+    }
+    // where you're headed: a gold diamond with a slow ripple
+    if (mapState.goal) {
+      const q = w2s(mapState.goal.x, mapState.goal.z), k = (t * 0.6) % 1;
+      g.strokeStyle = `rgba(255,210,154,${0.7 * (1 - k)})`; g.lineWidth = 2; g.beginPath(); g.arc(q.x, q.y, 8 + k * 16, 0, Math.PI * 2); g.stroke();
+      g.save(); g.translate(q.x, q.y); g.rotate(Math.PI / 4); g.shadowColor = 'rgba(255,210,154,0.95)'; g.shadowBlur = 12;
+      g.fillStyle = '#ffd29a'; g.fillRect(-6, -6, 12, 12); g.strokeStyle = 'rgba(60,30,10,0.6)'; g.lineWidth = 1.2; g.strokeRect(-6, -6, 12, 12); g.restore();
+      hits.push({ kind: 'goal', x: q.x, y: q.y, r: 18, pri: 5 });
+    }
+    // your mark: a pin that drops in and bounces, with a ring pulsing under it
+    if (mk) {
+      const q = w2s(mk.x, mk.z), dt2 = t - AV.drop;
+      const fall = dt2 < 0.35 ? (1 - dt2 / 0.35) ** 2 * -40 : dt2 < 0.55 ? -Math.sin(((dt2 - 0.35) / 0.2) * Math.PI) * 6 : 0;
+      const k = (t * 0.8) % 1;
+      g.strokeStyle = `rgba(127,232,245,${0.8 * (1 - k)})`; g.lineWidth = 2;
+      g.beginPath(); g.ellipse(q.x, q.y, 6 + k * 14, (6 + k * 14) * 0.55, 0, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = 'rgba(14,10,38,0.35)'; g.beginPath(); g.ellipse(q.x, q.y, 5, 2.5, 0, 0, Math.PI * 2); g.fill();
+      drawPin(g, q.x, q.y + fall, 1.15, AV.sel && AV.sel.kind === 'mark');
+      hits.push({ kind: 'mark', x: q.x, y: q.y - 12, r: 20, pri: 6 });
+    }
+    // you: an arrow, with a soft cone showing which way you face
+    const a = Math.atan2(Math.cos(mapState.face), Math.sin(mapState.face)) + mapRot;
+    g.save(); g.translate(me.x, me.y); g.rotate(a);
+    const cone = g.createRadialGradient(0, 0, 2, 0, 0, 46); cone.addColorStop(0, 'rgba(191,246,255,0.4)'); cone.addColorStop(1, 'rgba(191,246,255,0)');
+    g.fillStyle = cone; g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, 46, -0.5, 0.5); g.closePath(); g.fill();
+    g.shadowColor = 'rgba(159,243,255,0.95)'; g.shadowBlur = 10;
+    g.fillStyle = '#e6fcff'; g.strokeStyle = '#1d1b4a'; g.lineWidth = 1.8;
+    const L = 11; g.beginPath(); g.moveTo(L, 0); g.lineTo(-L * 0.7, L * 0.68); g.lineTo(-L * 0.32, 0); g.lineTo(-L * 0.7, -L * 0.68); g.closePath(); g.fill(); g.stroke();
+    g.restore();
+    hits.push({ kind: 'you', x: me.x, y: me.y, r: 16, pri: 7 });
+    // the selection: a bright ring
+    if (AV.sel) {
+      const h = hits.find((x) => x.kind === AV.sel.kind && (x.ref === AV.sel.ref || !AV.sel.ref));
+      if (h) { g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 2; g.setLineDash([4, 4]); g.lineDashOffset = t * 10; g.beginPath(); g.arc(h.x, h.y, (h.kind === 'place' ? 14 : h.r) + 2 + Math.sin(t * 5) * 1.5, 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }
+    }
+    // off the edge: small arrows pointing to you, the goal and your mark
+    // kept clear of the header, the rail on the right and the compass below
+    const box = { l: 34, r: W - 84, t: 34, b: Hh - 70 };
+    const edgeTo = (q, col, icon) => {
+      if (q.x > box.l && q.x < box.r && q.y > box.t && q.y < box.b) return;
+      const mx = (box.l + box.r) / 2, my = (box.t + box.b) / 2, dx = q.x - mx, dy = q.y - my;
+      const k = Math.min((box.r - mx) / Math.abs(dx || 1e-6), (box.b - my) / Math.abs(dy || 1e-6));
+      const ex = mx + dx * k, ey = my + dy * k, ang = Math.atan2(dy, dx);
+      g.save(); g.translate(ex, ey);
+      g.fillStyle = 'rgba(14,10,38,0.72)'; g.beginPath(); g.arc(0, 0, 13, 0, Math.PI * 2); g.fill();
+      g.rotate(ang); g.fillStyle = col; g.beginPath(); g.moveTo(17, 0); g.lineTo(11, -5); g.lineTo(11, 5); g.closePath(); g.fill();
+      g.rotate(-ang); icon(g); g.restore();
+      hits.push({ kind: 'edge', x: ex, y: ey, r: 18, pri: 8, go: q });
+    };
+    edgeTo(me, '#e6fcff', (c) => { c.fillStyle = '#e6fcff'; c.beginPath(); c.arc(0, 0, 4, 0, Math.PI * 2); c.fill(); });
+    if (mapState.goal) edgeTo(w2s(mapState.goal.x, mapState.goal.z), '#ffd29a', (c) => { c.rotate(Math.PI / 4); c.fillStyle = '#ffd29a'; c.fillRect(-4, -4, 8, 8); });
+    if (mk) edgeTo(w2s(mk.x, mk.z), '#7fe8f5', (c) => drawPin(c, 0, 5, 0.6, false));
+    // a compass and a scale, bottom left
+    const cx0 = 46, cy0 = Hh - 42;
+    g.save(); g.translate(cx0, cy0);
+    g.fillStyle = 'rgba(14,10,38,0.55)'; g.beginPath(); g.arc(0, 0, 22, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = 'rgba(255,244,228,0.35)'; g.lineWidth = 1; g.beginPath(); g.arc(0, 0, 18, 0, Math.PI * 2); g.stroke();
+    g.rotate(mapRot);   // north is -z
+    g.fillStyle = '#ff8a7a'; g.beginPath(); g.moveTo(0, -16); g.lineTo(4.5, 0); g.lineTo(-4.5, 0); g.closePath(); g.fill();
+    g.fillStyle = '#fff4e4'; g.beginPath(); g.moveTo(0, 16); g.lineTo(4.5, 0); g.lineTo(-4.5, 0); g.closePath(); g.fill();
+    g.font = '800 9px Nunito, sans-serif'; g.fillStyle = '#ff8a7a'; g.textAlign = 'center'; g.fillText('N', 0, -25);
+    g.restore();
+    const u = unitOf(), want = 110 / AV.sc * u;
+    const nice = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find((v) => v >= want * 0.55) || 1000;
+    const len = nice / u * AV.sc, sx0 = cx0 + 34, sy0 = cy0 + 8;
+    g.fillStyle = 'rgba(14,10,38,0.55)'; g.beginPath(); g.roundRect(sx0 - 8, sy0 - 22, len + 16, 32, 10); g.fill();
+    g.strokeStyle = '#fff4e4'; g.lineWidth = 2; g.beginPath(); g.moveTo(sx0, sy0 - 4); g.lineTo(sx0, sy0); g.lineTo(sx0 + len, sy0); g.lineTo(sx0 + len, sy0 - 4); g.stroke();
+    g.font = '800 11px Nunito, sans-serif'; g.fillStyle = '#fff4e4'; g.textAlign = 'center'; g.fillText(nice + ' m', sx0 + len / 2, sy0 - 11);
+    AV.hits = hits;
+  }
+  // a map pin (used on both maps)
+  function drawPin(g, x, y, s, hi) {
+    g.save(); g.translate(x, y); g.scale(s, s);
+    g.shadowColor = 'rgba(127,232,245,0.9)'; g.shadowBlur = hi ? 14 : 8;
+    g.fillStyle = hi ? '#c8fbff' : '#7fe8f5'; g.strokeStyle = '#0e2a3a'; g.lineWidth = 1.6;
+    g.beginPath(); g.moveTo(0, 0); g.bezierCurveTo(-3, -6, -8, -9, -8, -15); g.arc(0, -15, 8, Math.PI, 0); g.bezierCurveTo(8, -9, 3, -6, 0, 0); g.closePath(); g.fill(); g.stroke();
+    g.shadowBlur = 0; g.fillStyle = '#0e2a3a'; g.beginPath(); g.arc(0, -15, 3, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+
+  // ----- the card at the bottom: what you tapped, and what you can do with it -----
+  function select(h) {
+    AV.sel = h ? { kind: h.kind, ref: h.ref || null } : null;
+    atHint.style.display = h ? 'none' : '';
+    if (!h) { atCard.classList.add('hidden'); return; }
+    const I = (k) => AT_ICON[k];
+    let icon = '', kick = '', name = '', line = '', btns = [];
+    const mk = curMark();
+    if (h.kind === 'mark') { icon = I('mark'); kick = 'Your mark'; name = mk.name || 'Marked spot'; line = fmtDist(mk.x, mk.z);
+      btns = [['unmark', 'Remove', 'ghost']]; if (mapState.chart) btns.unshift(['course', 'Set course', 'primary']); }
+    else if (h.kind === 'goal') { icon = I('goal'); kick = 'Where you’re headed'; name = mapState.objective || 'Your objective'; line = fmtDist(mapState.goal.x, mapState.goal.z); }
+    else if (h.kind === 'you') { icon = I('you'); kick = 'You'; name = mapState.title || 'Here'; line = 'You are here'; }
+    else if (h.kind === 'person') { icon = I('ppl'); kick = NPCS[h.ref.id] ? NPCS[h.ref.id].role || 'Islander' : 'Islander'; name = h.name || 'Someone'; line = (h.ref.news ? 'Has something to tell you · ' : '') + fmtDist(h.ref.x, h.ref.z); btns = [['markHere', 'Mark', 'primary']]; }
+    else if (h.kind === 'way') { icon = I('way'); kick = 'Waystone'; name = h.ref.name || 'Waystone'; line = h.ref.lit ? fmtDist(h.ref.x, h.ref.z) : 'Light it to travel here from the map'; btns = h.ref.lit ? [['warp', 'Travel here', 'primary'], ['markHere', 'Mark', 'ghost']] : [['markHere', 'Mark', 'primary']]; }
+    else if (h.kind === 'place') { icon = I('place'); kick = h.name === 'Uncharted' ? 'Not yet seen' : 'Place'; name = h.name; line = fmtDist(h.ref.x, h.ref.z); btns = [['markHere', 'Mark', 'primary']]; }
+    $('.acIcon', atCard).innerHTML = icon;
+    $('.kicker', atCard).textContent = kick; $('h3', atCard).textContent = name; $('p', atCard).textContent = line;
+    $('.acBtns', atCard).innerHTML = btns.map(([a, l, c]) => `<button class="${c}" data-ac="${a}">${l}</button>`).join('');
+    atCard.classList.remove('hidden'); atCard.style.animation = 'none'; void atCard.offsetWidth; atCard.style.animation = '';
+  }
+  function dropMark(x, z, name) {
+    setMark({ x, z, name });
+    AV.drop = AV.t;
+    try { navigator.vibrate && navigator.vibrate(8); } catch (_) { /* no buzz here */ }
+    opts.sfx && opts.sfx('tick');
+    select({ kind: 'mark' });
+    atHint.classList.add('gone'); prefs.seen.atlasMark = 1; savePrefs(prefs);
+  }
+  atCard.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ac]'); if (!b || !AV.sel) return;
+    const a = b.dataset.ac, sel = AV.sel, h = AV.hits.find((x) => x.kind === sel.kind && (x.ref === sel.ref || !sel.ref));
+    if (a === 'unmark') { setMark(null); select(null); opts.sfx && opts.sfx('tick'); }
+    else if (a === 'course') { const m = curMark(); closeMap(); opts.onChart && opts.onChart(m.x, m.z); }
+    else if (a === 'warp') { const id = sel.ref.id; closeMap(); opts.onWarp && opts.onWarp(id); }
+    else if (a === 'markHere' && h) { const r = sel.ref; dropMark(r.x, r.z, h.name || r.name || null); }
+  });
+
+  // ----- the loop while it's open: momentum, glides, and a redraw -----
+  function atlasFrame(now) {
+    if (!mapOpen) return;
+    AV.raf = requestAnimationFrame(atlasFrame);
+    const dt = Math.min(0.05, (now - (AV.last || now)) / 1000); AV.last = now; AV.t += dt;
+    if (!ptrs.size && (Math.abs(AV.vx) + Math.abs(AV.vz)) > 0.01) {
+      AV.cx += AV.vx * dt; AV.cz += AV.vz * dt;
+      const f = Math.exp(-dt * 5.5); AV.vx *= f; AV.vz *= f;
+    }
+    if (AV.to) {
+      const k = 1 - Math.exp(-dt * 9);
+      AV.cx += (AV.to.x - AV.cx) * k; AV.cz += (AV.to.z - AV.cz) * k; AV.sc += (AV.to.sc - AV.sc) * k;
+      if (Math.abs(AV.to.x - AV.cx) + Math.abs(AV.to.z - AV.cz) < 0.02 && Math.abs(AV.to.sc - AV.sc) < 0.01) AV.to = null;
+    }
+    clampView();
+    drawAtlas();
+  }
+
+  // ----- touch: one finger pans (with a flick), two pinch; a short tap selects or marks -----
+  const ptrs = new Map();
+  let pinch2 = null, pan = null;
+  const ptOf = (e) => toStage(e.clientX, e.clientY);
+  atCv.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { atCv.setPointerCapture(e.pointerId); } catch (_) { /* fine */ }
+    const p = ptOf(e);
+    ptrs.set(e.pointerId, { x: p.x, y: p.y });
+    AV.to = null;
+    if (ptrs.size === 1) { pan = { x0: p.x, y0: p.y, t0: performance.now(), moved: false, last: p, lt: performance.now() }; AV.vx = AV.vz = 0; }
+    else if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      pinch2 = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, sc0: AV.sc, anchor: s2w(mid.x, mid.y) };
+      if (pan) pan.moved = true;
+    }
+  });
+  atCv.addEventListener('pointermove', (e) => {
+    const q = ptrs.get(e.pointerId); if (!q) return;
+    const p = ptOf(e); q.x = p.x; q.y = p.y;
+    if (ptrs.size >= 2 && pinch2) {
+      const [a, b] = [...ptrs.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      AV.sc = Math.max(minSc(), Math.min(maxSc(), pinch2.sc0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch2.d0));
+      const w = s2w(mid.x, mid.y); AV.cx += pinch2.anchor.x - w.x; AV.cz += pinch2.anchor.z - w.z;
+      clampView(); return;
+    }
+    if (!pan) return;
+    if (!pan.moved && Math.hypot(p.x - pan.x0, p.y - pan.y0) > 7) pan.moved = true;
+    if (!pan.moved) return;
+    const a = s2w(pan.last.x, pan.last.y), b = s2w(p.x, p.y), now = performance.now(), dt = Math.max(0.008, (now - pan.lt) / 1000);
+    AV.cx += a.x - b.x; AV.cz += a.z - b.z;
+    AV.vx = AV.vx * 0.6 + ((a.x - b.x) / dt) * 0.4; AV.vz = AV.vz * 0.6 + ((a.z - b.z) / dt) * 0.4;
+    pan.last = p; pan.lt = now;
+    clampView();
+  });
+  function atUp(e) {
+    if (!ptrs.has(e.pointerId)) return;
+    const p = ptOf(e);
+    ptrs.delete(e.pointerId);
+    if (ptrs.size === 1) { pinch2 = null; const r = [...ptrs.values()][0]; pan = { x0: r.x, y0: r.y, t0: 0, moved: true, last: { x: r.x, y: r.y }, lt: performance.now() }; AV.vx = AV.vz = 0; return; }
+    if (ptrs.size) return;
+    pinch2 = null;
+    if (pan && performance.now() - pan.lt > 90) { AV.vx = AV.vz = 0; }
+    if (pan && !pan.moved && performance.now() - pan.t0 < 450 && e.type === 'pointerup') tapAt(p.x, p.y);
+    pan = null;
+  }
+  atCv.addEventListener('pointerup', atUp);
+  atCv.addEventListener('pointercancel', atUp);
+  atCv.addEventListener('wheel', (e) => { e.preventDefault(); const p = ptOf(e); zoomAt(e.deltaY > 0 ? 0.88 : 1.14, p.x, p.y); }, { passive: false });
+  function tapAt(sx, sy) {
+    let best = null, bd = 1e9;
+    for (const h of AV.hits) { const d = Math.hypot(h.x - sx, h.y - sy); if (d < h.r && (d - h.pri * 2) < bd) { bd = d - h.pri * 2; best = h; } }
+    if (best && best.kind === 'edge') { const w = s2w(best.go.x, best.go.y); glideTo(w.x, w.z); return; }
+    if (best) { opts.sfx && opts.sfx('tick'); select(best); return; }
+    // open ground: your mark goes here (tapping again elsewhere moves it)
+    const w = s2w(sx, sy);
+    if (w.x < mapInfo.H0 || w.z < mapInfo.H0 || w.x > mapInfo.H0 + mapInfo.N || w.z > mapInfo.H0 + mapInfo.N) { select(null); return; }
+    dropMark(w.x, w.z, null);
+  }
+  bigMap.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-at]'); if (!b) return;
+    const a = b.dataset.at, mk = curMark();
+    opts.sfx && opts.sfx('tick');
+    if (a === 'close') closeMap();
+    else if (a === 'in') glideTo(AV.cx, AV.cz, AV.sc * 1.6);
+    else if (a === 'out') glideTo(AV.cx, AV.cz, AV.sc / 1.6);
+    else if (a === 'me') { glideTo(mapState.x, mapState.z, Math.max(AV.sc, fitSc() * 2.2)); select({ kind: 'you' }); }
+    else if (a === 'goal' && mapState.goal) { glideTo(mapState.goal.x, mapState.goal.z); select({ kind: 'goal' }); }
+    else if (a === 'mark' && mk) { glideTo(mk.x, mk.z); select({ kind: 'mark' }); }
+    else if (a === 'key') atKey.classList.toggle('hidden');
+  });
+  function syncRail() {
+    $('[data-at="goal"]', bigMap).classList.toggle('off', !mapState.goal);
+    $('[data-at="mark"]', bigMap).classList.toggle('off', !curMark());
+  }
+
   function openMap() {
-    if (!mapState || mapOpen) return;
+    if (!mapState || mapOpen || !mapBase) return;
     mapOpen = true;
-    $('.jObj span', bigMap).textContent = mapState.objective || 'Wander. Nothing is asked of you right now.';
-    $('.jObj', bigMap).classList.toggle('hidden', !mapState.objective);
+    $('.atHead h2', bigMap).textContent = mapState.title || 'Lanternhold';
+    $('.atObj span', bigMap).textContent = mapState.objective || '';
+    $('.atObj', bigMap).classList.toggle('hidden', !mapState.objective);
+    atHint.classList.toggle('gone', !!prefs.seen.atlasMark);
+    atKey.classList.add('hidden');
     bigMap.classList.remove('hidden');
     opts.onPause && opts.onPause();
     opts.sfx && opts.sfx('open');
-    $('.mapSide h2', bigMap).textContent = mapState.title || 'Lanternhold';
-    $('.mapWarp', bigMap).classList.toggle('hidden', !(mapState.waystones || []).some((w) => w.lit) && !mapState.chart);
-    $('.mapWarp', bigMap).textContent = mapState.chart ? 'Tap the chart to set a course.' : 'Tap a lit waystone to travel there.';
-    requestAnimationFrame(() => { const [a, b2, c] = bigCentre(); drawMap(bigCv, a, b2, c, true); });
+    AV.W = atCv.clientWidth || view.w; AV.H = atCv.clientHeight || view.h;
+    // open on you, a little zoomed in, and settle in
+    const sc = Math.max(fitSc() * 1.0, Math.min(maxSc(), Math.max(fitSc() * 1.9, 4.5)));
+    AV.cx = mapState.x; AV.cz = mapState.z; AV.sc = sc * 0.82; AV.vx = AV.vz = 0;
+    glideTo(mapState.x, mapState.z, sc);
+    select(null); syncRail();
+    AV.last = 0; AV.raf = requestAnimationFrame(atlasFrame);
   }
   function closeMap() {
     if (!mapOpen) return;
     mapOpen = false;
+    cancelAnimationFrame(AV.raf);
+    ptrs.clear(); pan = pinch2 = null;
     bigMap.classList.add('hidden');
     opts.onResume && opts.onResume();
   }
   isle.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); openMap(); });
-  bigMap.addEventListener('click', (e) => { if (e.target === bigMap || e.target.closest('[data-act="closeMap"]')) closeMap(); });
-  // tap a lit waystone on the big map to travel there
-  bigCv.addEventListener('pointerdown', (e) => {
-    if (!mapState || (!mapState.waystones && !mapState.chart)) return;
-    // where the tap is on the canvas, in the stage's own (unrotated) space
-    const p = toStage(e.clientX, e.clientY);
-    let ox = 0, oy = 0;
-    for (let n = bigCv; n && n.id !== 'stage'; n = n.offsetParent) { ox += n.offsetLeft; oy += n.offsetTop; }
-    const sx = p.x - ox, sy = p.y - oy;
-    const hitW = (mapState.waystones || []).find((w) => w.lit && w.screen && Math.hypot(w.screen.x - sx, w.screen.y - sy) < 18);
-    if (hitW) { closeMap(); opts.onWarp && opts.onWarp(hitW.id); return; }
-    // on the sea chart, a tap sets the course
-    if (mapState.chart && lastBig) {
-      const L = lastBig, dx = sx - L.ox, dy = sy - L.oy, c = Math.cos(-mapRot), s2 = Math.sin(-mapRot);
-      const x = L.cx + (dx * c - dy * s2) / L.sc, z = L.cz + (dx * s2 + dy * c) / L.sc;
-      closeMap(); opts.onChart && opts.onChart(x, z);
-    }
-  });
+  markDist.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); openMap(); });
+  // for the game: your mark here (in map units), and the marks to save
+  const atlas = {
+    mark: () => (mapState && mapBase ? curMark() : null), unit: unitOf,
+    clearMark: () => setMark(null),
+    marks: () => JSON.parse(JSON.stringify(marks)),
+    setMarks: (m) => { for (const k of Object.keys(marks)) delete marks[k]; Object.assign(marks, m || {}); },
+    open: openMap, close: closeMap, isOpen: () => mapOpen,
+    view: AV, tap: (sx, sy) => tapAt(sx, sy), w2s: (x, z) => w2s(x, z),
+  };
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === 'm' && opts.isStarted() && !talk.lines) { mapOpen ? closeMap() : (!opts.isPaused() && openMap()); }
     else if (k === 'escape' && mapOpen) { e.stopImmediatePropagation(); closeMap(); }
+    else if (mapOpen && (k === '+' || k === '=')) glideTo(AV.cx, AV.cz, AV.sc * 1.6);
+    else if (mapOpen && k === '-') glideTo(AV.cx, AV.cz, AV.sc / 1.6);
   }, true);
 
   // ----- hints: small, once, then gone -----
@@ -962,11 +1331,17 @@ export function createUI(opts) {
           <label class="row"><span>Damage numbers</span><input type="checkbox" class="sw" data-pref="numbers"></label>
           <label class="row"><span>Left-handed buttons</span><input type="checkbox" class="sw" data-pref="lefty"></label>
         </div>
+        <div class="group">
+          <div class="gTitle">Camera</div>
+          <label class="row"><span>Camera stick sensitivity <em class="val" data-val="camSens"></em></span><input type="range" min="0.3" max="2.5" step="0.05" data-pref="camSens"></label>
+          <label class="row"><span>Invert up and down</span><input type="checkbox" class="sw" data-pref="invertY"></label>
+          <p class="sub">For the close view: the stick on the right side of the screen turns the camera.</p>
+        </div>
       </section>
       <section class="tab help" data-tab="help">
         <div class="group">
           <div class="gTitle">Controls</div>
-          <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch.</p>
+          <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch. <b>Close view</b> — the button under pause; then the right side of the screen is a stick for the camera. <b>Map</b> — tap the small map: drag, pinch, tap to set a mark.</p>
           <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
         </div>
         <div class="group">
@@ -1003,6 +1378,7 @@ export function createUI(opts) {
   function syncSheet() {
     sheet.querySelectorAll('[data-pref] button').forEach((b) => b.classList.toggle('on', prefs.quality === b.dataset.v));
     sheet.querySelectorAll('input[data-pref]').forEach((i) => { if (i.type === 'checkbox') i.checked = !!prefs[i.dataset.pref]; else i.value = prefs[i.dataset.pref]; });
+    sheet.querySelectorAll('[data-val]').forEach((v) => { v.textContent = (+prefs[v.dataset.val]).toFixed(2).replace(/0$/, '') + '\u00d7'; });
     sheet.classList.toggle('titleMode', titleMode);
     $('.shTitle', sheet).textContent = titleMode ? (tab === 'help' ? 'Controls' : 'Settings') : 'Paused';
     $('.shKick', sheet).textContent = titleMode ? 'Riftfall' : 'Lanternhold';
@@ -1169,7 +1545,7 @@ export function createUI(opts) {
 
   return {
     input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
-    titleMenu, closeTitle, endCard, savedMark, fmtTime, buildMap, islandMap, closeMap, mapIsOpen: () => mapOpen,
+    titleMenu, closeTitle, endCard, savedMark, fmtTime, buildMap, islandMap, closeMap, mapIsOpen: () => mapOpen, atlas,
     setTools, setToolArt, draftLabels, setHeat, forgeMenu, setSeaView, openTools: () => openWheel(null), closeTools: () => closeWheel(false), setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
     show(on) { document.body.classList.toggle('playing', on); },
   };

@@ -57,9 +57,9 @@ export function createStory(ctx) {
     scene.add(m);
     return m;
   })();
-  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil', 'reportMaren2', 'reportMaren3', 'act1Temple', 'reportMaren4', 'act1Saltglass'].includes(S.step) && !(S.step === 'act1Temple' && S.templeTold) && !(S.step === 'act1Saltglass' && S.saltTold);
+  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil', 'reportMaren2', 'reportMaren3', 'act1Temple', 'reportMaren4', 'act1Saltglass', 'act1Reef'].includes(S.step) && !(S.step === 'act1Temple' && S.templeTold) && !(S.step === 'act1Saltglass' && S.saltTold) && !(S.step === 'act1Reef' && S.reefTold);
   // whoever the story wants you to talk to next wears the marker
-  const newsWho = () => (S.step === 'findTobin' ? 'tobin' : ['brinemoor', 'reportHale'].includes(S.step) ? 'hale' : ['cinder', 'reportOdda', 'forgeHome'].includes(S.step) ? 'odda' : hasNews() ? 'maren' : null);
+  const newsWho = () => (S.step === 'findTobin' ? 'tobin' : ['brinemoor', 'reportHale'].includes(S.step) ? 'hale' : ['cinder', 'reportOdda', 'forgeHome'].includes(S.step) ? 'odda' : ['saltglass', 'sightings'].includes(S.step) ? 'vesper' : hasNews() ? 'maren' : null);
   const O = STORY.order, past = (step) => O.indexOf(S.step) >= O.indexOf(step);
   // put someone somewhere at once (between scenes), or send them walking there
   function place(n, spot, walk) {
@@ -173,6 +173,11 @@ export function createStory(ctx) {
         lines = [line('odda', O2.forge[0])];
         then = async () => { await ctx.forgeMenu(); if (S.step === 'forgeHome') ctx.shardFall(); };
       }
+    } else if (n.id === 'vesper') {
+      const V = STORY.vesper, L2 = (arr) => arr.map((t) => line('vesper', t));
+      if (['act1Saltglass', 'saltglass'].includes(S.step)) { lines = L2(V.saltglass); then = () => setStep('noon'); }
+      else if (V[S.step]) lines = L2(V[S.step]);
+      else { lines = [line('vesper', V.after[n.line % V.after.length])]; n.line++; }
     } else if (n.id === 'brann') {
       const set = STORY.brann[past('reportOdda') ? 'after' : 'before'];
       lines = [line('brann', set[n.line % set.length])];
@@ -225,7 +230,8 @@ export function createStory(ctx) {
     else if (S.step === 'reportMaren3') setStep('act1Cinder');
     else if (S.step === 'act1Temple' && !S.templeTold) { S.templeTold = true; }
     else if (S.step === 'reportMaren4') setStep('saltworks');
-    else if (S.step === 'act1Saltglass' && !S.saltTold) { S.saltTold = true; ui.toast(STORY.roundEnd); }
+    else if (S.step === 'act1Saltglass' && !S.saltTold) { S.saltTold = true; }
+    else if (S.step === 'act1Reef' && !S.reefTold) { S.reefTold = true; ui.toast(STORY.roundEnd); }
   }
   // Act 1 begins: Maren hands over the key, the keepers' gate opens, and the clock starts to run
   async function openGate() {
@@ -740,6 +746,7 @@ export function createStory(ctx) {
     if (S.nearTide && !S.busy) { ctx.waitTide(); return true; }
     if (S.nearBelfry && !S.busy) { if (['brinemoor', 'belfry'].includes(S.step)) setStep('belfryIn'); ctx.travel('belfry'); return true; }
     if (S.nearBell && !S.busy) { ctx.ringBell(); return true; }
+    if (S.nearSight && !S.near && !S.busy) { ctx.sight(S.nearSight); return true; }
     if (S.nearKiln && !S.busy) { if (S.step === 'kiln') setStep('kilnIn'); ctx.travel('kiln'); return true; }
     if (S.nearPier && !S.busy) { ctx.travel('sea'); return true; }
     return false;
@@ -762,9 +769,12 @@ export function createStory(ctx) {
     S.nearPier = free && Math.hypot(P.x - sp.pier.x, P.z - sp.pier.z) < 2.0;
     // Bell Rock's bell
     S.nearBell = free && !!sp.bell && Math.hypot(P.x - sp.bell.x, P.z - sp.bell.z) < 2.0;
+    // Saltglass: the remembered town's sighting stones, while the town stands
+    S.nearSight = null;
+    if (free && w.rem && w.rem.solid) for (const st of w.rem.stones) if (Math.hypot(P.x - st.spot.x, P.z - st.spot.z) < 1.5) S.nearSight = st.id;
     // the Kiln's mouth: Odda has to tell you about it first
     S.nearKiln = free && !!sp.kiln && past('kiln') && Math.hypot(P.x - sp.kiln.x, P.z - sp.kiln.z) < 2.0;
-    ui.setContext(n ? 'talk' : S.nearBelfry || S.nearKiln ? 'enter' : S.nearBell ? 'ring' : S.nearTide ? 'wait' : S.nearPier ? 'sail' : null);
+    ui.setContext(n ? 'talk' : S.nearSight ? 'look' : S.nearBelfry || S.nearKiln ? 'enter' : S.nearBell ? 'ring' : S.nearTide ? 'wait' : S.nearPier ? 'sail' : null);
     S.near = n;
   }
   function begin() { setStep('findMaren'); }

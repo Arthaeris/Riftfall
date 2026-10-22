@@ -41,7 +41,7 @@ export function createFoes(ctx) {
     };
     if (opts.placed) {
       scene.remove(crack); f.crack = null;
-      f.state = { mirrorpuddle: 'chase', bellfish: 'drift', shardmite: 'chase', barnacle: 'idle', doorcrab: 'up', lullabypod: 'up', rootscript: 'up', bubblebishop: 'drift', rustgill: 'chase', mudmimic: 'hidden', hound: 'chase', molten: 'drift', wisp: 'drift', sentinel: 'watch' }[kind] || 'up';
+      f.state = { mirrorpuddle: 'chase', bellfish: 'drift', shardmite: 'chase', barnacle: 'idle', doorcrab: 'up', lullabypod: 'up', rootscript: 'up', bubblebishop: 'drift', rustgill: 'chase', mudmimic: 'hidden', hound: 'chase', molten: 'drift', wisp: 'drift', sentinel: 'watch', saltgeist: 'drift' }[kind] || 'up';
       f.hittable = true; f.asleep = opts.wake || 8.5;
       m.root.visible = true;
       Object.assign(f, opts.extra || {});
@@ -235,7 +235,7 @@ export function createFoes(ctx) {
       turnTo(f, Math.atan2(tp.x, tp.z), 10, dt);
     } else if (f.state === 'dash') {
       run = 1;
-      moveFoe(f, f.dir.x * D.dash * dt, f.dir.z * D.dash * dt);
+      if (world.groundAt(f.x + f.dir.x * 0.5, f.z + f.dir.z * 0.5) < 1.1) moveFoe(f, f.dir.x * D.dash * dt, f.dir.z * D.dash * dt);
       turnTo(f, Math.atan2(f.dir.x, f.dir.z), 14, dt);
       if (!f.bit && touch(f, D.reach, D.dmg)) f.bit = true;
       if (f.t >= D.dashT) { f.state = 'chase'; f.t = 0; f.bit = false; f.wait = rnd(...D.pause); }
@@ -691,6 +691,7 @@ export function createFoes(ctx) {
         for (let i = 0; i < 30; i++) sparks.spawn({ x: f.x + (Math.random() - 0.5) * 2, y: f.y + 0.3, z: f.z + (Math.random() - 0.5) * 2, vy: 1.5 + Math.random() * 2, drag: 0.6, life: 1.4, size: 0.3, color: '#f2f6f8', glow: 0.5 });
         dropSliver(f.x, f.y + 0.5, f.z);
       }
+      if (f.kind === 'saltgeist' && d < rad + 1.2) { f.hp = 1; hit(f, 0, 0, 5, false, 0); out.salt = (out.salt || 0) + 1; sound.sfx('hiss'); ctx.number('Dissolved', f.x, f.y + 1.6, f.z, true); }
       if (f.kind === 'wisp' && d < rad + 1.2) { f.hp = 1; hit(f, 0, 0, 5, false, 0); out.wisp = (out.wisp || 0) + 1; sound.sfx('hiss'); }
       if (f.kind === 'golem' && d < f.D.r + rad + 0.6) { sound.sfx('hiss'); ctx.number('It shrugs it off', f.x, f.y + 4, f.z, false); }
       if (f.kind === 'bellringer' && d < f.D.r + rad + 0.6) {
@@ -771,6 +772,34 @@ export function createFoes(ctx) {
     f.barY = 0.9;
   }
   // Ember Wisp: drifts round you at a distance, swells (the warning), and drops an ember that sets the ground burning
+  // Saltgeist: drifts toward you over the flats, then gathers itself (the warning: it brightens and shivers) and darts
+  function saltgeist(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f), now = performance.now() / 1000;
+    f.t += dt;
+    m.float.position.y = 0.5 + Math.sin(now * 2.4 + f.hop * 6) * 0.12;
+    m.hem.forEach((h, k) => { h.position.y = 0.06 + Math.sin(now * 5 + k) * 0.05; });
+    if (Math.random() < dt * 6) sparks.spawn({ x: f.x + (Math.random() - 0.5) * 0.5, y: f.y + 0.3, z: f.z + (Math.random() - 0.5) * 0.5, vy: 0.3, life: 0.8, size: 0.08, color: '#f4f0e8', glow: 0.5, drag: 1 });
+    if (f.state === 'up' || f.state === 'drift' || f.state === 'chase') {
+      f.state = 'drift';
+      turnTo(f, Math.atan2(tp.x, tp.z), 3, dt);
+      // they keep to the salt: never up onto the outpost's boardwalks
+      const onSalt = (x, z) => world.groundAt(x, z) < 1.1;
+      if (tp.d < 14 && tp.d > D.reach * 0.6 && onSalt(f.x + tp.x * 0.6, f.z + tp.z * 0.6)) moveFoe(f, tp.x * D.speed * dt, tp.z * D.speed * dt);
+      f.cd -= dt;
+      if (tp.d < D.reach && f.cd <= 0 && P.y < 1.2) { f.state = 'tell'; f.t = 0; f.dir = { x: tp.x, z: tp.z }; sound.sfx('shimmer'); }
+    } else if (f.state === 'tell') {
+      f.tellGlow = (f.t / D.tell) * 0.5;
+      m.body.position.x = Math.sin(now * 40) * 0.05;
+      f.dir = { x: tp.x, z: tp.z };
+      if (f.t >= D.tell) { f.state = 'dash'; f.t = 0; f.tellGlow = 0; m.body.position.x = 0; f.hitDone = false; }
+    } else if (f.state === 'dash') {
+      moveFoe(f, f.dir.x * D.dash * dt, f.dir.z * D.dash * dt);
+      if (!f.hitDone && toPlayer(f).d < D.r + 0.55 && ctx.hurtPlayer(D.dmg, f.x, f.z)) f.hitDone = true;
+      if (f.t > 0.38) { f.state = 'rest'; f.t = 0; }
+    } else if (f.state === 'rest') {
+      if (f.t > D.rest) { f.state = 'drift'; f.t = 0; f.cd = 0.6 + Math.random() * 0.6; }
+    } else if (f.state === 'stagger') { if (f.t > 0.4) { f.state = 'drift'; f.t = 0; } }
+  }
   function wisp(f, dt) {
     const D = f.D, m = f.m, tp = toPlayer(f);
     const now = performance.now() / 1000;
@@ -1632,7 +1661,7 @@ export function createFoes(ctx) {
     f.alive = false; f.hittable = false;
     if (ctx.onKill) ctx.onKill(f);
     const hy = f.y + (f.kind === 'bellfish' ? f.D.hover : 0.35);
-    const cols = f.kind === 'hound' ? ['#5fae7a', '#6fc08a', '#bff6ff'] : f.kind === 'wisp' ? ['#ffb04a', '#ff7a2a', '#ffe08a'] : f.kind === 'sentinel' ? ['#7a7070', '#dfe8f4', '#c9a24a'] : f.kind === 'mirrorpuddle' ? ['#3f9fc4', '#62c3e0', '#ff9f7a'] : f.kind === 'bellfish' ? ['#e2a5d8', '#f2c8e9', '#ffd27a'] : ['#6b4a33', '#7a5236', '#ffc46b'];
+    const cols = f.kind === 'saltgeist' ? ['#f4f0e8', '#e6e1d4', '#bff6ff'] : f.kind === 'hound' ? ['#5fae7a', '#6fc08a', '#bff6ff'] : f.kind === 'wisp' ? ['#ffb04a', '#ff7a2a', '#ffe08a'] : f.kind === 'sentinel' ? ['#7a7070', '#dfe8f4', '#c9a24a'] : f.kind === 'mirrorpuddle' ? ['#3f9fc4', '#62c3e0', '#ff9f7a'] : f.kind === 'bellfish' ? ['#e2a5d8', '#f2c8e9', '#ffd27a'] : ['#6b4a33', '#7a5236', '#ffc46b'];
     for (let i = 0; i < 18; i++) {
       const a = Math.random() * TAU, sp = 1.5 + Math.random() * 3.5;
       bits.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * sp + nx * 2, vy: 2 + Math.random() * 3.5, vz: Math.sin(a) * sp + nz * 2, life: 1.3, size: 0.09 + Math.random() * 0.1, color: cols[i % 3], floor: f.y });
@@ -1931,6 +1960,7 @@ export function createFoes(ctx) {
       else if (f.kind === 'sentinel') sentinel(f, dt);
       else if (f.kind === 'golem') golem(f, dt);
       else if (f.kind === 'reflection') reflectionAI(f, dt);
+      else if (f.kind === 'saltgeist') saltgeist(f, dt);
       if (!f.alive) continue;
       // knockback from your hits, sliding out
       if (Math.abs(f.kx) + Math.abs(f.kz) > 0.01) { moveFoe(f, f.kx * dt, f.kz * dt); const k = Math.exp(-9 * dt); f.kx *= k; f.kz *= k; }

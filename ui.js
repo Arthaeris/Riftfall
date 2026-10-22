@@ -39,6 +39,7 @@ const ICON = {
   dock: '<svg viewBox="0 0 48 48"><path d="M6 30h36M10 30v12M22 30v12M34 30v12" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/><path d="M24 6v16M17 15l7 7 7-7" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
   wait: '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="currentColor" stroke-width="3.5"/><path d="M24 14v10l7 5" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none"/><path d="M8 40c4-3 8-3 12 0s8 3 12 0 8-3 8-3" stroke="currentColor" stroke-width="3" fill="none"/></svg>',
   ring: '<svg viewBox="0 0 48 48"><path d="M24 7c-7 0-11 6-11 13v8l-4 6h30l-4-6v-8c0-7-4-13-11-13z" fill="currentColor"/><circle cx="24" cy="39" r="3.5" fill="currentColor"/><path d="M6 16c-2 4-2 9 0 13M42 16c2 4 2 9 0 13" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/></svg>',
+  look: '<svg viewBox="0 0 48 48"><path d="M4 24c6-9 12-13 20-13s14 4 20 13c-6 9-12 13-20 13S10 33 4 24z" fill="none" stroke="currentColor" stroke-width="3.5"/><circle cx="24" cy="24" r="6.5" fill="currentColor"/></svg>',
   remember: '<svg viewBox="0 0 48 48"><path d="M24 8l4 10 11 1-8 7 3 11-10-6-10 6 3-11-8-7 11-1z" fill="currentColor"/></svg>',
   key: '<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M11 11l8 8m-3-3l2-2m-4 0l2-2" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
   rest: '<svg viewBox="0 0 48 48"><path d="M24 6c3 7 11 11 11 21a11 11 0 0 1-22 0c0-5 3-8 5-11 1 4 3 5 5 5-2-6 0-11 1-15z" fill="currentColor"/><path d="M24 27c2 3 5 5 5 9a5 5 0 0 1-10 0c0-3 3-5 5-9z" fill="#1d1b4a" opacity=".55"/><path d="M10 42h28" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg>',
@@ -594,7 +595,7 @@ export function createUI(opts) {
     ctxKind = kind;
     bAttack.querySelector('.ic').innerHTML = ICON[kind] || ICON.sword;
     bAttack.classList.toggle('ctx', !!kind);
-    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep', rest: 'Rest', open: 'Open', light: 'Light', remember: 'Remember', sail: 'Sail', dock: 'Dock', wait: 'Wait for the tide', ring: 'Ring' }[kind] || 'Attack');
+    bAttack.setAttribute('aria-label', { talk: 'Talk', enter: 'Enter', sleep: 'Sleep', rest: 'Rest', open: 'Open', light: 'Light', remember: 'Remember', look: 'Look', sail: 'Sail', dock: 'Dock', wait: 'Wait for the tide', ring: 'Ring' }[kind] || 'Attack');
   }
 
   // ----- the guardian's health, across the top of the screen -----
@@ -718,6 +719,8 @@ export function createUI(opts) {
   const S_PX = 6;   // pixels per world unit in the drawn base map
   // your marks: one per place, in map units
   const marks = {};
+  // chart notes: lines you've drawn on a place's chart (map units), e.g. sight-lines from Saltglass's stones
+  const notes = {};
   const markKey = () => mapKey0.replace(/\d+$/, '');
   const curMark = () => marks[markKey()] || null;
   const unitOf = () => (mapInfo && mapInfo.scale) || 1;
@@ -746,6 +749,8 @@ export function createUI(opts) {
       let c;
       if (info.cave) c = k === 'rock' ? '#1c1826' : k === 'chasm' ? '#08060e' : k === 'water' ? '#3f7f96' : k === 'molten' ? '#d8602a' : k === 'ledge' ? '#8a8496' : '#6f6a7c';
       else if (h <= 0.01) c = h < -1.2 ? '#2a6f8f' : h < -0.5 ? '#36869f' : '#47a3bb';
+      else if (k === 'salt') c = '#ece8de';
+      else if (k === 'pan') c = '#cfe0ea';
       else if (k === 'sand') c = '#ead6a6';
       else if (k === 'wood') c = '#a6764d';
       else if (k === 'street') c = '#7d8a84';
@@ -956,6 +961,16 @@ export function createUI(opts) {
     }
     const hits = [];
     const mk = curMark(), me = w2s(mapState.x, mapState.z);
+    // chart notes: ink lines, as if drawn with a ruler
+    for (const n of notes[markKey()] || []) {
+      const a = w2s(n.x0, n.z0), b = w2s(n.x1, n.z1);
+      g.save(); g.lineCap = 'round'; g.setLineDash([10, 6]);
+      g.strokeStyle = 'rgba(20,14,30,0.55)'; g.lineWidth = 4.5; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+      g.strokeStyle = '#fff1c4'; g.lineWidth = 2; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+      g.setLineDash([]);
+      if (n.label) { g.font = 'italic 600 11px Fraunces, Georgia, serif'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.lineWidth = 3; g.strokeStyle = 'rgba(14,10,38,0.8)'; g.strokeText(n.label, a.x + 8, a.y - 10); g.fillStyle = '#fff1c4'; g.fillText(n.label, a.x + 8, a.y - 10); }
+      g.restore();
+    }
     // the way to your mark: a dotted line that drifts toward it
     if (mk) {
       const q = w2s(mk.x, mk.z);
@@ -1252,6 +1267,11 @@ export function createUI(opts) {
   const atlas = {
     mark: () => (mapState && mapBase ? curMark() : null), unit: unitOf,
     clearMark: () => setMark(null),
+    setMarkAt: (x, z, name) => setMark({ x, z, name }),
+    setNotes: (key, list) => { notes[key] = list || []; },
+    notes: () => JSON.parse(JSON.stringify(notes)),
+    // a line of text over the map for a moment (the atlas hides the game's own toasts)
+    say: (text) => { atHint.textContent = text; atHint.style.display = ''; atHint.classList.remove('gone'); clearTimeout(atHint._t); atHint._t = setTimeout(() => { atHint.classList.add('gone'); }, 2600); },
     marks: () => JSON.parse(JSON.stringify(marks)),
     setMarks: (m) => { for (const k of Object.keys(marks)) delete marks[k]; Object.assign(marks, m || {}); },
     open: openMap, close: closeMap, isOpen: () => mapOpen,
@@ -1365,7 +1385,7 @@ export function createUI(opts) {
         </div>
         <details class="group playtest">
           <summary class="gTitle">Playtest shortcuts</summary>
-          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button><button data-jump="market">The Market</button><button data-jump="bellrock">Bell Rock</button><button data-jump="cinder">Cinderglass</button><button data-jump="kiln">The Kiln</button><button data-jump="forge">The forge</button><button data-jump="temple">The Temple</button><button data-jump="lantern">The Lantern</button></div>
+          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button><button data-jump="market">The Market</button><button data-jump="bellrock">Bell Rock</button><button data-jump="cinder">Cinderglass</button><button data-jump="kiln">The Kiln</button><button data-jump="forge">The forge</button><button data-jump="temple">The Temple</button><button data-jump="lantern">The Lantern</button><button data-jump="saltglass">Saltglass</button></div>
           <p class="sub">For testing only: these skip story steps.</p>
         </details>
       </section>

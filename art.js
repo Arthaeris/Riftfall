@@ -1261,6 +1261,17 @@ export function buildFoe(kind) {
     out.mirror = pivot(body, 0, 1.85, 0.05);
     K.box(out.mirror, 0.7, 0.7, 0.1, '#c9a24a', 0, 0, 0); out.glass = K.box(out.mirror, 0.56, 0.56, 0.04, '#dfe8f4', 0, 0, 0.06, 0.9);
     root.add(blob(1.0, 1.0));
+  } else if (kind === 'saltgeist') {
+    // a drift of salt in the shape of somebody: a column of white crystals, a hollow face, a trailing hem of grains
+    const salt = ['#f4f0e8', '#e6e1d4', '#dcd6c8'];
+    out.float = pivot(body, 0, 0.5, 0);
+    K.box(out.float, 0.5, 0.7, 0.42, salt[0], 0, 0.45, 0);
+    K.box(out.float, 0.42, 0.36, 0.38, salt[1], 0, 0.98, 0);
+    for (const [x, z] of [[-0.18, 0.1], [0.2, -0.06], [0, -0.18]]) K.box(out.float, 0.14, 0.4, 0.14, salt[2], x, 1.2, z);
+    for (const x of [-0.09, 0.09]) K.box(out.float, 0.08, 0.1, 0.04, '#5a7a9a', x, 1.0, 0.2);
+    out.hem = [];
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; out.hem.push(K.box(out.float, 0.14, 0.24, 0.14, salt[k % 3], Math.cos(a) * 0.24, 0.06, Math.sin(a) * 0.2)); }
+    out.core = K.box(out.float, 0.18, 0.18, 0.18, '#bff6ff', 0, 0.6, 0.12, 1.2);
   } else if (kind === 'reflection') {
     // your Reflection: your own shape in dark mirror-glass, with pink light where your eyes would be
     const pm = buildPlayer();
@@ -1736,6 +1747,7 @@ const NPC_LOOKS = {
   peg: { body: 'b', hair: 3, skin: '#f0c8a8', hairColor: '#c86a4a', tunic: '#8a4a5a', trim: '#f4ead2', scarf: '#f4ead2', pants: '#4a3a4a', boots: '#3a2a20' },
   ennis: { body: 'a', hair: 0, skin: '#c99a78', hairColor: '#e8e4dc', tunic: '#4a5a3a', trim: '#c9a24a', scarf: '#8a4a2a', pants: '#3a3226', boots: '#2a1e18' },
   odda: { body: 'b', hair: 1, skin: '#c8906a', hairColor: '#8a3a22', tunic: '#5a3a2a', trim: '#e0b85a', scarf: '#2a2a34', pants: '#3a2a26', boots: '#2a1e18' },
+  vesper: { body: 'b', hair: 1, skin: '#e8c4a0', hairColor: '#d8d4cc', tunic: '#2f5a6a', trim: '#e0d6c0', scarf: '#c94a3f', pants: '#2a3a44', boots: '#3a2a20' },
   brann: { body: 'a', hair: 0, skin: '#e0b090', hairColor: '#3a2a20', tunic: '#7a5a3a', trim: '#c8b28a', scarf: '#c94a3f', pants: '#3a3a40', boots: '#2a1e18' },
 };
 export function buildNpc(kind) {
@@ -1786,6 +1798,14 @@ export function buildNpc(kind) {
     box(m.head, 0.44, 0.05, 0.44, '#3a2a20', 0, 0.36, 0);
     for (const c of m.armL.children) if (Math.abs(c.position.y + 0.36) < 0.01) c.visible = false;
     box(m.armL, 0.09, 0.08, 0.09, '#bff6ff', 0, -0.36, 0, 0.6); box(m.armL, 0.05, 0.14, 0.05, '#bff6ff', 0, -0.46, 0.03, 0.6); box(m.armL, 0.05, 0.05, 0.09, '#bff6ff', 0, -0.53, 0.08, 0.6);
+  } else if (kind === 'vesper') {
+    // the cartographer: a long sea-coat, round spectacles pushed up, an ink-stained hand, and charts rolled on her back
+    box(m.body, 0.46, 0.5, 0.3, '#2f5a6a', 0, 0.05, 0.0);
+    for (const x of [-0.08, 0.08]) box(m.head, 0.1, 0.1, 0.04, '#bff6ff', x, 0.3, 0.18, 0.5);
+    box(m.head, 0.24, 0.03, 0.04, '#c9a24a', 0, 0.3, 0.19);
+    const roll = pivot(m.torso, 0, 0.1, -0.2); roll.rotation.z = 0.7;
+    for (const [dx, c] of [[-0.06, '#efe6d0'], [0.06, '#e2d8c0'], [0, '#f4ecd8']]) box(roll, 0.08, 0.7, 0.08, c, dx, 0, (dx === 0 ? -0.07 : 0));
+    box(m.armR, 0.1, 0.06, 0.1, '#2a2a40', 0, -0.4, 0);
   } else if (kind === 'brann') {
     // a bottle-blower: a long blowpipe over his shoulder and a soot-black beard
     box(m.head, 0.34, 0.16, 0.06, '#2a1e18', 0, 0.02, 0.18);
@@ -2329,7 +2349,7 @@ export function buildSailboat() {
 // a little island seen from the sea: a grid of heights and kinds, drawn a block per cell at a given cell size
 export function buildMiniIsland(cells, n, cell, base) {
   const b = new Batch(600 + n);
-  const kindCol = { grass: ['#5f9c46', '#67a54b', '#58923f'], sand: ['#ead6a6', '#e5cf9b'], stone: ['#a19b8f', '#958f83'], path: ['#c9b48d'], wood: ['#a6764d'], roof: ['#a8473d', '#3f7a6a', '#7a4a8a'], dark: ['#3a3644'], white: ['#f2ece0'], glass: ['#bff6ff'], ash: ['#4a4450', '#5a5460'], salt: ['#f2eee6', '#e8e4dc'] };
+  const kindCol = { salt: ['#ece8de', '#e2ddcf', '#f2eee6'], grass: ['#5f9c46', '#67a54b', '#58923f'], sand: ['#ead6a6', '#e5cf9b'], stone: ['#a19b8f', '#958f83'], path: ['#c9b48d'], wood: ['#a6764d'], roof: ['#a8473d', '#3f7a6a', '#7a4a8a'], dark: ['#3a3644'], white: ['#f2ece0'], glass: ['#bff6ff'], ash: ['#4a4450', '#5a5460'], salt: ['#f2eee6', '#e8e4dc'] };
   const r = rng(77 + n);
   for (const c of cells) {
     if (c.h <= 0) continue;

@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.14.0';
+export const VERSION = '0.15.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -315,6 +315,13 @@ export const FOES = {
     knockTaken: 0,
     drops: [20, 26],
   },
+  // Saltglass: a ghost of salt that drifts over the flats, then darts. Water dissolves it outright
+  saltgeist: {
+    name: 'Saltgeist',
+    desc: 'A drift of salt that remembers being someone. It darts at whatever moves. A splash of water and it\u2019s only brine.',
+    hp: 34, r: 0.4, dmg: 1, speed: 1.6, dash: 10, reach: 4.2, tell: 0.55, rest: 0.9,
+    knockTaken: 0.9, drops: [1, 3],
+  },
   // the Temple's guardian: your own reflection. It moves as your mirror image across the arena; only where
   // a brazier burns can it be seen for what it is, and only then can it be hurt
   reflection: {
@@ -577,7 +584,7 @@ export const SEA = {
     { id: 'brinemoor', name: 'Brinemoor', x: -130, z: 150, dock: { x: -129.5, z: 134 }, open: true },
     { id: 'bellrock', name: 'Bell Rock', x: 72, z: 128, dock: { x: 72.5, z: 111 }, risen: true },
     { id: 'cinderglass', name: 'Cinderglass Atoll', x: 150, z: 96, r: 16, dock: { x: 149.75, z: 79 }, locked: 'A ring of boiling water keeps you off. Not yet.', opens: 'act1Cinder' },
-    { id: 'saltglass', name: 'Saltglass Flats', x: -190, z: -40, r: 22, locked: 'The shallows are full of rocks you can\u2019t see. Not yet.' },
+    { id: 'saltglass', name: 'Saltglass Flats', x: -190, z: -40, r: 22, dock: { x: -189.75, z: -64 }, locked: 'The shallows are full of rocks you can\u2019t see. Not yet.', opens: 'act1Saltglass' },
     { id: 'choir', name: 'The Hushed Choir', x: 40, z: -180, r: 14, locked: 'A wall of fog that hums. Your sail goes slack. Not yet.' },
   ],
   // currents: they carry the boat along (the first runs most of the way to Brinemoor)
@@ -587,6 +594,81 @@ export const SEA = {
     { x0: -120, z0: 30, x1: -160, z1: -40, w: 10, speed: 5 },
   ],
   speed: 7.5, turn: 1.6, hop: 0.6,
+};
+
+// ----- Saltglass Flats: a bright salt-flat outpost, all wind and white, and mirages. At noon the town that used to be
+// here remembers itself and is solid until dusk; the rest of the day it's a shimmer you can walk through.
+//   ~ sea   , salt crust   . salt pan   = boardwalk   D pier   P where the boat ties up   H the outpost's huts
+//   T the sundial (wait for noon)   V Vesper   l lamps   r rocks   z saltgeist
+//   Q the remembered town's houses   x its square   1 2 its sighting stones, at either end of the flats
+export const SALTGLASS = {
+  key: 'saltglass',
+  name: 'Saltglass Flats',
+  region: 'The Glass Sea',
+  line: 'Wind, salt and white light. At noon, a town.',
+  theme: 'salt',
+  heights: { D: 1.35, P: 1.35, '=': 1.35, H: 1.35, l: 1.35, T: 1.35, V: 1.35, ',': 0.9, r: 0.9, z: 0.9, Q: 0.9, x: 0.9, 1: 0.9, 2: 0.9, '.': 0.72 },
+  noon: [11.8, 18.6],      // the hours the remembered town stands
+  // where its lighthouse really stands, out at sea (sea units): the sighting stones point at it
+  light: { x: -212, z: -102, tolerance: 18 },
+  map: [
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DPD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~====l================l=====~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~==HHHHH=======HHHH==HHHHH==~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~==HHHHH=======HHHH==HHHHH==~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~==HHHHH=======HHHH==HHHHH==~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~==HHHHH=============HHHHH==~,,~~~~~~~~~~~~~',
+    '~~~~~~~~~~~,,,,,,=======V===================,,,,,~~~~~~~~~~~',
+    '~~~~~~~~~~,,,,,,,============T==============,,,,,,~~~~~~~~~~',
+    '~~~~~~~~~~,,,,,,,===========================,,,,,,~~~~~~~~~~',
+    '~~~~~~~~~~,,,,,,,=========l=======l=========,,,,,,~~~~~~~~~~',
+    '~~~~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~~',
+    '~~~~~~~~~,,,,,r,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,r,,,,~~~~~~~~~',
+    '~~~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~',
+    '~~~~~~r,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~',
+    '~~~~~,,,,,,,,,,,,,,,,,z,,,,,,,,,,,,,,,,,z,,,,,,,,,,,,,,,~~~~',
+    '~~~~~,,,,,,,z,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,z,,,,,,,,~~~',
+    '~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~',
+    '~~~~~~,,....,....,,,,,,,,,,,,,,,,,,,,,,,,,,,,,....,....,,~~~',
+    '~~~~~~,,....,....,,,,,,,,,,,,,,,,,,,,,,,,,,,,,....,....,,~~~',
+    '~~~~,,,,....,....,,,,,,,,QQQQ,,,QQQQ,,,,,,,,,,....,....,,,~~',
+    '~~~,,,,,....,....,,QQQQ,,QQQQ,,,QQQQ,,QQQQ,,,,....,....,,,~~',
+    '~~~,,,,,,,,,,,,,,,,QQQQ,,QQQQ,,,QQQQ,,QQQQ,,,,,,,,,,,,,,,,~~',
+    '~~~,,,,,....,,,,,,,QQQQ,,QQQQ,,,QQQQ,,QQQQ,,,,....,,,,,,,,~~',
+    '~~~~,,,,....,,,,,,,QQQQ,,,,,xxxxx,,,,,QQQQ,,,,....,,,,r,,,~~',
+    '~~~~,,1,....,,,,,,,,,,,xxxxxxxxxxxxxxx,,,,,,,,....,,,,2,,~~~',
+    '~~~~,,,,....,,,,,,,,,,,xxxxxxxxxxxxxxx,,,,,,,,....,,,,,,,~~~',
+    '~~~,,,,,,,,,,,,,,,,,,,,xxxxxxxxxxxxxxx,,,,,,,,,,,,,,,,,,,~~~',
+    '~~~,,,,,,,,,,,,,,,,,,,,xxxxxxxxxxxxxxx,,,,,,,,,,,,,,,,,,,,~~',
+    '~~~,,,,,,,,,,,,,,,,,,,,xxxxxxxxxxxxxxx,,,,,,,,,,,,,,,,,,,,~~',
+    '~~~,,,,,,,,,r,,,,,,,,,,xxxxxxxxxxxxxxx,,,,,,,,,,,,r,,,,,,~~~',
+    '~~~~,,,,,,,,,,,,,,,,,,,xxxxxxxxxxxxxxx,,,,,,,,,,,,,,,,,,,~~~',
+    '~~~~~,r,,,,,,,,,,,,QQQQ,,,,,xxxxx,,,,,QQQQ,,,,,,,,,,,,,,~~~~',
+    '~~~~~~,,,,,,,,,,,,,QQQQ,,,,,xxxxx,,,,,QQQQ,,,,,,,,,,,,,~~~~~',
+    '~~~~~~,,,,z,,,,,,,,QQQQ,,,QQQQ,QQQQ,,,QQQQ,,,,,,,,,,,,,,~~~~',
+    '~~~~~~,,,,,,,,,,,,,QQQQ,,,QQQQ,QQQQ,,,QQQQ,,,,,,,,,,,,,,~~~~',
+    '~~~~~~~,,,,,,,,,,,,,,,,,,,QQQQ,QQQQ,,,,,,,,,,,,,,,z,,,,,~~~~',
+    '~~~~~~~~,,,,,,,,,,,,,,,,,,QQQQ,QQQQ,,,,,,,,,,,,,,,,,,,~~~~~~',
+    '~~~~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~',
+    '~~~~~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~~',
+    '~~~~~~~~~~....,....,,,,,,,,,,,,,,,,,,,,,,,,,....,....~~~~~~~',
+    '~~~~~~~~~~....,....,,,,,,,,,,,,,,,,,,,,,,,,,....,....~~~~~~~',
+    '~~~~~~~~~~....,....,,,,,,,,,,,z,,,,,,,,,,,,,....,....~~~~~~~',
+    '~~~~~~~~~~....,....,,,,,,,,,,,,,,,,,,,,,,,,,....,....~~~~~~~',
+    '~~~~~~~~~~~~~,,,,,,,,,,,r,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~,,,,,,,,,,,,,,,,,,r,,,,,~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~,,,,,,,,,,,,,,,,,,,~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~,,,,,,,~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~,,,,,~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~,,~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  ],
 };
 
 // ----- Bell Rock: a rock that wasn't there, risen when the Clocktide Market closed. A great bell hangs on top.
@@ -904,6 +986,7 @@ export const NPCS = {
   jun: { name: 'Jun', color: '#ffb38a', role: 'Diver' },
   peg: { name: 'Peg', color: '#e8a0c0', role: 'Innkeeper' },
   odda: { name: 'Odda', color: '#ffb070', role: 'Glassblower' },
+  vesper: { name: 'Vesper', color: '#9fd8ff', role: 'Cartographer' },
   brann: { name: 'Brann', color: '#d8c0a0', role: 'Glassblower' },
 };
 
@@ -958,7 +1041,13 @@ export const STORY = {
     templeBoss: 'Face your Reflection',
     reportMaren4: 'Bring the Lantern back to Maren',
     saltworks: 'Burn the brambles at the Old Saltworks with the Lantern',
-    act1Saltglass: 'A page of the old chart: Saltglass Flats, where the town is only there at noon. (Saltglass arrives in the next build.)',
+    act1Saltglass: 'Sail west to Saltglass Flats, where the town is only there at noon',
+    saltglass: 'Find the cartographer at the Saltglass outpost',
+    noon: 'Wait for noon at the sundial',
+    sightings: 'Look through both sighting stones in the remembered town',
+    markLight: 'Open your chart at sea and mark where the two sight-lines cross',
+    remLight: 'Sail to the Remembered Light',
+    act1Reef: 'The Remembered Light points at something under the sea to the west. (The Paper Reef arrives in the next build.)',
   },
   // the Prologue in chapters, for the journal in the pause menu (each lists the steps it covers)
   chapters: [
@@ -974,10 +1063,11 @@ export const STORY = {
     { name: 'Act 1 \u00b7 Cinderglass', steps: ['act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda', 'forgeHome'] },
     { name: 'Act 1 \u00b7 The Mirror Pool', steps: ['mirrorPool', 'act1Temple'] },
     { name: 'Act 1 \u00b7 The Reflected Lighthouse', steps: ['temple', 'templeBoss', 'reportMaren4'] },
-    { name: 'Act 1 \u00b7 The Old Saltworks', steps: ['saltworks', 'act1Saltglass'] },
+    { name: 'Act 1 \u00b7 The Old Saltworks', steps: ['saltworks'] },
+    { name: 'Act 1 \u00b7 Saltglass Flats', steps: ['act1Saltglass', 'saltglass', 'noon', 'sightings', 'markLight', 'remLight'] },
   ],
   // every step in order (saving and the journal use this)
-  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3', 'act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda', 'forgeHome', 'mirrorPool', 'act1Temple', 'temple', 'templeBoss', 'reportMaren4', 'saltworks', 'act1Saltglass'],
+  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3', 'act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda', 'forgeHome', 'mirrorPool', 'act1Temple', 'temple', 'templeBoss', 'reportMaren4', 'saltworks', 'act1Saltglass', 'saltglass', 'noon', 'sightings', 'markLight', 'remLight', 'act1Reef'],
   maren: {
     findMaren: [
       'There you are. I thought the tide had taken you.',
@@ -1086,7 +1176,16 @@ export const STORY = {
     saltworks: ['The brambles at the Old Saltworks. South-east, past the dock. Burn them, and see what they were hiding.'],
     act1Saltglass: [
       'Saltglass Flats. My grandmother sailed there once. She said the town is only there at noon, and the rest of the day it\u2019s a lake of salt.',
-      'If the chart shows it again, the sea is changing. We\u2019ll need Tobin. And patience.',
+      'If the chart shows it again, the sea is changing. West, past the long current. Tobin says the rocks round it have gone soft as bread. Go and see.',
+    ],
+    saltglass: ['There\u2019s someone living on Saltglass. A mapmaker, Tobin says. Mapmakers always know more than they draw.'],
+    noon: ['Noon on Saltglass. I\u2019d like to see that, one day. Tell me what it looks like.'],
+    sightings: ['A town that comes back at noon. Apprentice, write down everything. Everything.'],
+    markLight: ['A lighthouse that isn\u2019t anywhere. Our trade, that is. Put it on the chart.'],
+    remLight: ['You found where it stands? Then go. A keeper should always know where every light is.'],
+    act1Reef: [
+      'Two lighthouses on this sea now. Ours, and one that remembers being somewhere.',
+      'Vesper says its beam swings west and stops, like a finger on a map. Something\u2019s under the water there.',
     ],
   },
   // after the beacon is lit: night falls, then the first Riftfall
@@ -1294,6 +1393,42 @@ export const STORY = {
     blocked: 'It isn\u2019t really there',
     down: [{ who: '', text: 'Your reflection looks at its hands, then at you. Then it is only a mirror again, and in it there is only you, holding a lantern that wasn\u2019t there before.' }],
     heart: { name: 'Mirror-glass Heart', line: 'Your health grows by one heart.' },
+  },
+  vesper: {
+    saltglass: [
+      'A visitor. With a chart page in your pocket I\u2019ve been waiting for since I was your age. Vesper. I draw the sea.',
+      'You\u2019ve come about the town. Everyone who comes here comes about the town.',
+      'It was here. It\u2019s still here, at noon. From noon till dusk it remembers itself, every brick, and you can walk its streets. The rest of the day it\u2019s a shimmer.',
+      'Sit by the sundial if you\u2019re in a hurry. Salt is patient, and so am I.',
+    ],
+    noon: ['Noon comes when it comes. Or sit by the sundial and it comes faster. Don\u2019t ask me how; it\u2019s salt.'],
+    sightings: [
+      'There. Every brick. Did you see the light, out on the water, standing on nothing?',
+      'It was the town\u2019s lighthouse. It\u2019s a mirage now, but mirages stand somewhere. The town kept two sighting stones for its ships. Look through both.',
+      'Every look draws a line on your chart. Where two lines cross, there\u2019s a thing. That\u2019s all mapmaking is.',
+    ],
+    markLight: ['Two lines. Now take your chart out on the water and put your mark where they cross. A light is only lost until someone writes it down.'],
+    remLight: ['You put it on the chart. I felt it. Go and see what you\u2019ve found.'],
+    after: ['Come back when the sea moves again. I\u2019ll want to draw it.', 'A chart is a promise that something will still be there. Keep yours.'],
+    notNoon: 'The town only stands from noon till dusk',
+  },
+  saltLines: {
+    card: { name: 'The Remembered Town', region: 'Saltglass Flats \u00b7 Noon', line: 'Every brick, until dusk.' },
+    rise: [{ who: '', text: 'The shimmer over the flats thickens, and stops being light. It is stone. It is streets. Somebody\u2019s washing is on a line.' }],
+    glimpse: ['the baker\u2019s, as it was', 'the square: shouting, fish, a wedding', 'the town\u2019s light, out on the water', 'remembered'],
+    wait: 'You sit by the sundial while the shadows shorten',
+    already: 'It\u2019s noon already',
+    stone: 'A sighting stone, worn smooth where a thousand eyes leaned on it',
+    look: [{ who: '', text: 'Through the stone\u2019s eye: water, water, and far off, standing on nothing, a lighthouse. You draw the line on your chart.' }],
+    noted: 'A line on your chart',
+    both: 'Two lines on your chart. Mark where they cross, out at sea',
+    wrong: 'That\u2019s not where the lines cross',
+    right: 'You mark it on the chart. Out to the north-west, something rises',
+    lightCard: { name: 'The Remembered Light', region: 'The Glass Sea', line: 'Charted, so it stands.' },
+    arrive: [
+      { who: '', text: 'It is the lighthouse from the mirage, built of salt and the colour of noon. The lamp at the top is lit, and nobody lit it.' },
+      { who: '', text: 'Its beam goes round once, twice, and stops, pointing west across the water at a place where the sea is folded like paper.' },
+    ],
   },
   saltworksLines: {
     brambles: 'Thorns as hard as glass. A flame might do it',

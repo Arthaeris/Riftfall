@@ -1849,6 +1849,7 @@ export function buildRift(root, seed = 7, R = RIFT) {
 // Creatures are placed and wait in their rooms. Keys, locked doors, a gate on a chain you pull with
 // the Tether, a lever that opens a shortcut, chasms crossed by brass rings, and the guardian's pool.
 // ===========================================================================
+const smoothK = (t) => t * t * (3 - 2 * t);
 const CAVE_H = { '#': 1.9, '.': 0, ':': 1, '=': 0.5, '~': -0.4, '_': -5, ',': -1.5, a: -1.0, b: -0.5, v: -0.4, O: -0.4, h: 0 };
 export function buildCaves(root, D, saved = {}) {
   const r = rng(4242);
@@ -2527,6 +2528,9 @@ export function buildCaves(root, D, saved = {}) {
     if (fireLight) fireLight.intensity = fires.some((f) => !f.out) ? 6 + Math.sin(t * 15) * 0.8 : 0;
     if (wheel && state.basin) wheel.rotation.z -= dt * 1.4;
     for (const [k2, v] of hotCells) if (v > 0) hotCells.set(k2, Math.max(0, v - dt));
+    // the remembered town shimmers while it's only light
+    if (SLT && !rem.solid) { rem.ghostMat.opacity = (0.1 + rem.k * 0.5) * (0.75 + Math.sin(t * 2.3) * 0.25); rem.g.position.y = Math.sin(t * 1.7) * 0.04; }
+    if (SLT && rem.mirage) rem.mirage.g.position.y = -2 + Math.sin(t * 0.9) * 0.6;
     for (const l of torchLights) l.intensity = 5 + Math.sin(t * 11 + l.position.x) * 0.6 + Math.sin(t * 17 + l.position.z) * 0.4;
     // doors sinking and rising
     for (const dr of doors) {
@@ -2640,9 +2644,11 @@ export function buildTown(root, D) {
   // a map can set its own heights (Bell Rock's terraces); everything else is Brinemoor's
   const TH = Object.assign({}, TOWN_H, D.heights || {});
   const rocky = !!D.heights;
-  const CIN = D.theme === 'cinder';
-  // Cinderglass: black sand, basalt underfoot, molten glass, hot ground
-  const kindOf = CIN
+  const CIN = D.theme === 'cinder', SLT = D.theme === 'salt';
+  // Cinderglass: black sand, basalt underfoot, molten glass, hot ground. Saltglass: white crust and mirror-pans
+  const kindOf = SLT
+    ? (c) => (c === '~' ? 'sea' : c === '.' ? 'pan' : 'D P = H l T V'.split(' ').includes(c) ? 'deck' : 'salt')
+    : CIN
     ? (c) => (c === '~' ? 'sea' : c === ',' ? 'sand' : c === 'v' ? 'molten' : c === 'h' ? 'hot' : c === 'D' || c === 'P' ? 'deck' : 'stone')
     : (c) => (c === '~' ? 'sea' : c === ',' || c === 'r' ? 'sand' : c === 'g' || c === 'L' || (rocky && 'm456K'.includes(c)) ? 'grass' : c === '#' ? 'rock' : '.JMmfBRZ123'.includes(c) ? 'street' : 'deck');
   for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) {
@@ -2682,7 +2688,7 @@ export function buildTown(root, D) {
     const k = j * Wd + i, h = H[k], kind = KD[k];
     const x0 = X0 + i, z0 = Z0 + j, x1 = x0 + 1, z1 = z0 + 1;
     const nn = noise(i * 0.5, j * 0.5);
-    let base = kind === 'deck' ? PLANK[(j * 3 + (i >> 1)) % 4] : kind === 'street' ? COBBLE[Math.floor((nn * 0.7 + hashJ(i, j) * 0.3) * 4) % 4] : kind === 'sand' ? (CIN ? ASH[Math.floor(nn * 2) % 2] : SAND[Math.floor(nn * 2) % 2]) : kind === 'grass' ? GRASS[Math.floor(nn * 3) % 3] : kind === 'rock' ? '#8a8694' : kind === 'stone' ? BASALT[Math.floor((nn * 0.6 + hashJ(i, j) * 0.4) * 4) % 4] : kind === 'hot' ? HOT[(i + j) % 2] : kind === 'molten' ? '#2a1410' : '#c8b48a';
+    let base = kind === 'salt' ? ['#ece8de', '#e6e1d4', '#f0ece3', '#e2ddcf'][Math.floor((nn * 0.7 + hashJ(i, j) * 0.3) * 4) % 4] : kind === 'pan' ? ['#cfe0ea', '#c6d9e4'][(i + j) % 2] : kind === 'deck' ? PLANK[(j * 3 + (i >> 1)) % 4] : kind === 'street' ? COBBLE[Math.floor((nn * 0.7 + hashJ(i, j) * 0.3) * 4) % 4] : kind === 'sand' ? (CIN ? ASH[Math.floor(nn * 2) % 2] : SAND[Math.floor(nn * 2) % 2]) : kind === 'grass' ? GRASS[Math.floor(nn * 3) % 3] : kind === 'rock' ? '#8a8694' : kind === 'stone' ? BASALT[Math.floor((nn * 0.6 + hashJ(i, j) * 0.4) * 4) % 4] : kind === 'hot' ? HOT[(i + j) % 2] : kind === 'molten' ? '#2a1410' : '#c8b48a';
     tc.set(base).multiplyScalar(0.94 + hashJ(i * 3, j * 7) * 0.12);
     // the square's stones are stained green up to the high-tide line
     if (kind === 'street') tc.lerp(new THREE.Color('#6a8a5a'), 0.12 + hashJ(i, j * 5) * 0.14);
@@ -2695,7 +2701,7 @@ export function buildTown(root, D) {
       const wallDown = kind === 'deck' && nk !== 'street' && nk !== undefined ? Math.max(nh, h - 0.35) : nh;
       for (let y = h; y > wallDown + 0.001; y -= 0.5) {
         const y0 = Math.max(wallDown, y - 0.5);
-        const sc = kind === 'deck' ? (nk === 'street' ? ['#6f7a74', '#77827c', '#68736d'][(Math.floor(y * 2) + i + j) % 3] : '#7a5236') : kind === 'grass' ? '#8a7f6a' : kind === 'rock' ? '#7d7a86' : kind === 'sand' ? (CIN ? '#2e282a' : '#c8b07a') : kind === 'stone' || kind === 'hot' ? '#3a3436' : '#5f6a64';
+        const sc = kind === 'salt' || kind === 'pan' ? '#cdc6b6' : kind === 'deck' ? (nk === 'street' ? ['#6f7a74', '#77827c', '#68736d'][(Math.floor(y * 2) + i + j) % 3] : '#7a5236') : kind === 'grass' ? '#8a7f6a' : kind === 'rock' ? '#7d7a86' : kind === 'sand' ? (CIN ? '#2e282a' : '#c8b07a') : kind === 'stone' || kind === 'hot' ? '#3a3436' : '#5f6a64';
         tc.set(sc).multiplyScalar(y0 < -0.3 ? 0.75 : 1);
         tb.quad([a[0], y0, a[1]], [b2[0], y0, b2[1]], [b2[0], y, b2[1]], [a[0], y, a[1]], n, tc, 0.75, 0.75, 1, 1);
       }
@@ -2719,8 +2725,8 @@ export function buildTown(root, D) {
     if (p.j % 2 === 0) { b.box(0.2, 3.6, 0.2, '#5d3d26', p.x + (p.i === 28 ? -0.4 : 0.4), 0.0, p.z); b.box(0.26, 0.1, 0.26, '#4a3020', p.x + (p.i === 28 ? -0.4 : 0.4), 1.85, p.z); }
   }
   // houses: painted planks, a gabled roof, a lit window or two, a chimney, a door toward the boardwalk
-  const HOUSE = CIN ? ['#5a5050', '#6a5a50', '#544a48', '#625654'] : ['#3f7a8a', '#b0533f', '#d8a23f', '#5a6a9a', '#6a8a5a', '#c8c0b0'];
-  const ROOF = CIN ? ['#8a3a2a', '#6a4a3a', '#7a3328'] : ['#7a3f3a', '#3a4a5a', '#5a3f5a', '#3f5a4a'];
+  const HOUSE = SLT ? ['#f0ebe0', '#e6eef2', '#ece4d8'] : CIN ? ['#5a5050', '#6a5a50', '#544a48', '#625654'] : ['#3f7a8a', '#b0533f', '#d8a23f', '#5a6a9a', '#6a8a5a', '#c8c0b0'];
+  const ROOF = SLT ? ['#3f6a8a', '#4f7a9a', '#2f5a7a'] : CIN ? ['#8a3a2a', '#6a4a3a', '#7a3328'] : ['#7a3f3a', '#3a4a5a', '#5a3f5a', '#3f5a4a'];
   const boxes = [];
   // tall things that fade when they come between the camera and you
   const occluders = [];
@@ -2802,7 +2808,16 @@ export function buildTown(root, D) {
   for (const l of lampSpots) { PROPS.lanternPost(b, g, l.x, l.y, l.z, r() * TAU); solids.push({ x: l.x, z: l.z, r: 0.18, h: 2 }); }
   // the tide post: a tall striped post with tide marks, a brass hand, and a bench to wait on
   const tp = find('T')[0];
-  if (tp) {
+  if (tp && SLT) {
+    // Saltglass: a sundial of white stone with a brass gnomon, and a bench to wait on
+    b.push(tp.x, tp.y, tp.z);
+    b.box(1.3, 0.5, 1.3, '#d8d2c4', 0, 0.25, 0, { top: '#ece6da' }); b.box(1.0, 0.12, 1.0, '#f4efe4', 0, 0.56, 0);
+    for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; b.box(0.05, 0.03, 0.14, '#5a6a7a', Math.cos(a) * 0.4, 0.63, Math.sin(a) * 0.4, { rotY: -a, jitter: 0 }); }
+    b.box(0.06, 0.5, 0.5, '#c9a24a', 0, 0.85, 0, { rotX: 0.6 });
+    b.box(1.6, 0.1, 0.5, '#8b5e3c', 1.6, 0.45, 0.2); for (const sx of [1.0, 2.2]) b.box(0.1, 0.45, 0.4, '#5d3d26', sx, 0.22, 0.2);
+    b.pop();
+    solids.push({ x: tp.x, z: tp.z, r: 0.7, h: 1 }, { x: tp.x + 1.6, z: tp.z + 0.2, r: 0.4, h: 0.6 });
+  } else if (tp) {
     b.push(tp.x, tp.y, tp.z);
     b.box(0.3, 3.4, 0.3, '#e8e0d0', 0, 1.7, 0);
     for (let k = 0; k < 6; k++) b.box(0.32, 0.12, 0.32, k % 2 ? '#2f5a7a' : '#c94a3f', 0, 0.4 + k * 0.5, 0);
@@ -2811,7 +2826,7 @@ export function buildTown(root, D) {
     b.pop();
     solids.push({ x: tp.x, z: tp.z, r: 0.25, h: 3.4 }, { x: tp.x + 1.3, z: tp.z + 0.2, r: 0.4, h: 0.6 });
   }
-  const tideHand = !tp ? null : (() => { const hb = new Batch(1104); hb.box(0.04, 0.2, 0.03, '#e0b85a', 0, 0.1, 0); const m = hb.mesh(); m.matrixAutoUpdate = true; m.position.set(tp.x, tp.y + 3.0, tp.z + 0.27); root.add(m); return m; })();
+  const tideHand = !tp || SLT ? null : (() => { const hb = new Batch(1104); hb.box(0.04, 0.2, 0.03, '#e0b85a', 0, 0.1, 0); const m = hb.mesh(); m.matrixAutoUpdate = true; m.position.set(tp.x, tp.y + 3.0, tp.z + 0.27); root.add(m); return m; })();
   // the old light on the hill: dark since the sky broke
   const ol = find('L')[0];
   if (ol) { PROPS.lighthouse(b, g, ol.x, ol.y, ol.z); solids.push({ x: ol.x, z: ol.z, r: 1.7, h: 9 }); }
@@ -2980,10 +2995,62 @@ export function buildTown(root, D) {
     }
     return { x: pierEnd.x, z: pierEnd.z + 1 };
   }
+  // ----- Saltglass: the remembered town. Built once; a shimmer you walk through most of the day, stone and streets
+  // from noon till dusk. Its houses, its square, its two sighting stones; and its lighthouse, a mirage out at sea -----
+  const rem = { k: 0, solid: false, stones: [], g: null, boxes: [], mirage: null };
+  if (SLT) {
+    const rg = new THREE.Group();
+    const rb = new Batch(1140), rgl = new Batch(1141);
+    const RW = ['#e8e0d6', '#dcd6e4', '#e4dccf'], RR = ['#8a9ab8', '#9a8aa8', '#7a8aa8'];
+    rects('Q').forEach((hs, n) => {
+      const y = hs.y === undefined ? 0.9 : 0.9, w = hs.w - 0.3, d = hs.d - 0.3, wallH = 2.2 + (n % 3) * 0.5, wc = RW[n % 3], rc = RR[n % 3];
+      rb.box(w, wallH, d, wc, hs.x, y + wallH / 2, hs.z, { top: shade(wc, 0.92) });
+      for (let k = 0; k < 4; k++) rb.box(w + 0.3 - k * 0.15, 0.3, (d + 0.3) * (1 - k * 0.22), k % 2 ? rc : shade(rc, 1.1), hs.x, y + wallH + 0.15 + k * 0.28, hs.z);
+      for (const off of [-0.9, 0.9]) rgl.box(0.45, 0.45, 0.06, '#ffe9b8', hs.x + off, y + 1.4, hs.z + d / 2 + 0.03, { glow: 0.8, jitter: 0 });
+      rem.boxes.push({ x0: hs.x0, z0: hs.z0, x1: hs.x1, z1: hs.z1 });
+    });
+    // the square's cobbles, a little proud of the salt
+    for (const p of find('x')) rb.box(0.98, 0.06, 0.98, ['#c8c2d2', '#d2ccda', '#beb8c8'][(p.i * 3 + p.j) % 3], p.x, 0.93, p.z, { jitter: 0 });
+    // the sighting stones: a standing stone with an eye through it, on a step
+    for (const c of ['1', '2']) for (const p of find(c)) {
+      rb.box(1.2, 0.25, 1.2, '#b8b2a6', p.x, 1.02, p.z); rb.box(0.6, 1.9, 0.45, '#cfc8ba', p.x, 2.1, p.z, { top: '#e0d9cc' });
+      rgl.box(0.22, 0.22, 0.5, '#9fd8ff', p.x, 2.55, p.z, { glow: 1.4, jitter: 0 });
+      rem.stones.push({ id: c === '1' ? 'west' : 'east', x: p.x, z: p.z, spot: { x: p.x + (c === '1' ? 1.2 : -1.2), z: p.z + 0.2 }, solid: { x: p.x, z: p.z, r: 0.7, h: 2.5 } });
+    }
+    const rm = rb.mesh(), rgm = rgl.mesh(MAT.glow);
+    rgm.castShadow = false;
+    rg.add(rm, rgm); root.add(rg);
+    rem.g = rg; rem.mesh = rm; rem.glowM = rgm;
+    rem.solidMat = rm.material; rem.ghostMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.18, depthWrite: false });
+    rm.material = rem.ghostMat; rm.castShadow = false; rgm.visible = false;
+    // the mirage: the town's lighthouse, standing on nothing out at sea, in the direction it really is
+    const L = D.light, dx = L.x - (-190), dz = L.z - (-40), dl = Math.hypot(dx, dz) || 1;
+    const mb = new Batch(1142), mg = new Batch(1143);
+    PROPS.lighthouse(mb, mg, 0, 0, 0);
+    const mir = new THREE.Group(); const mm = mb.mesh(); mm.material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, depthWrite: false, fog: false });
+    const mgm = mg.mesh(MAT.glow); mgm.material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, depthWrite: false, fog: false });
+    mir.add(mm, mgm); mir.scale.setScalar(3.2); mir.position.set(dx / dl * 170, -2, dz / dl * 170); root.add(mir);
+    rem.mirage = { g: mir, mats: [mm.material, mgm.material], dir: { x: dx / dl, z: dz / dl } };
+  }
+  // k: 0 = a shimmer, 1 = stone. Solid (in the way, and with its stones usable) once it's nearly there
+  function setRem(k) {
+    if (!SLT) return;
+    rem.k = k;
+    const solid = k > 0.85;
+    if (solid !== rem.solid) {
+      rem.solid = solid;
+      rem.mesh.material = solid ? rem.solidMat : rem.ghostMat; rem.mesh.castShadow = solid; rem.glowM.visible = solid;
+      // its houses fill their cells exactly while they stand
+      for (const p of find('Q')) block[p.j * Wd + p.i] = solid ? 1 : 0;
+      for (const st of rem.stones) { if (solid) dyn.push(st.solid); else { const i = dyn.indexOf(st.solid); if (i >= 0) dyn.splice(i, 1); } }
+    }
+    if (!solid) rem.ghostMat.opacity = 0.1 + k * 0.5;
+    for (const m of rem.mirage.mats) m.opacity = k * 0.55;
+  }
   // the creatures of the drowned square, made when you arrive
   function populate() {
     const list = [];
-    for (const [c, kind] of [['M', 'mudmimic'], ['m', 'mirrorpuddle'], ['w', 'hound'], ['e', 'wisp']]) for (const p of find(c)) list.push({ kind, x: p.x, z: p.z });
+    for (const [c, kind] of [['M', 'mudmimic'], ['m', 'mirrorpuddle'], ['w', 'hound'], ['e', 'wisp'], ['z', 'saltgeist']]) for (const p of find(c)) list.push({ kind, x: p.x, z: p.z });
     return list;
   }
   let hooks = null;
@@ -3027,6 +3094,12 @@ export function buildTown(root, D) {
       { name: 'Tide post', x: tp.x, z: tp.z - 1 },
       { name: 'The Drowned Anchor', x: wx(37), z: wz(8) },
       { name: 'The old light', x: ol.x, z: ol.z },
+    ] : SLT ? [
+      { name: 'The outpost', x: wx(30), z: wz(12) },
+      { name: 'The remembered town', x: wx(30), z: wz(34) },
+      { name: 'East stone', x: wx(54), z: wz(30) },
+      { name: 'West stone', x: wx(6), z: wz(30) },
+      { name: 'Salt pans', x: wx(12), z: wz(27) },
     ] : bellAt ? [{ name: 'The bell', x: bellAt.x, z: bellAt.z - 1.5 }] : kilnAt ? [{ name: 'The Kiln', x: kilnAt.x, z: kilnAt.z + 1 }, { name: 'The furnaces', x: wx(30), z: wz(11) }, { name: 'The crater', x: wx(30), z: wz(34) }] : [],
     dock: pierBox,
     bellAt: bellAt ? { x: bellAt.x, z: bellAt.z } : null,
@@ -3036,14 +3109,15 @@ export function buildTown(root, D) {
     dummies: [], solids: dyn, seep: null, shardOn: () => false, setSeepPower() {}, setNight() {}, rings: [],
     deepAt, nearestDry, setTide, get level() { return level; }, sea, keepsakes, populate, mapInfo, windows,
     attach(h) { hooks = h; },
+    rem, setRemembered: (k) => setRem(k),
     takeKeepsake(id) { const k = keepsakes.find((v) => v.id === id); if (k && !k.taken) { k.taken = true; k.m.visible = false; } return k; },
     // Cinderglass's rule: hot ground (that hasn't been cooled with water lately)
     hotAt: (x, z) => { const [i, j] = cellOf(x, z); const v = hotCells.get(j * Wd + i); return v !== undefined && v <= 0; },
     cool(x, z, rad, sec) { let n2 = 0; for (const [k2] of hotCells) { const i = k2 % Wd, j = Math.floor(k2 / Wd); if (Math.hypot(wx(i) - x, wz(j) - z) < rad + 0.5) { hotCells.set(k2, sec); n2++; } } return n2; },
     hotCells: () => [...hotCells.entries()].filter(([, v]) => v <= 0).map(([k2]) => ({ x: wx(k2 % Wd), z: wz(Math.floor(k2 / Wd)), y: H[k2] })),
-    waterNear: (x, z, reach) => { for (const t of troughs) if (Math.hypot(x - t.x, z - t.z) < reach + 0.9) return true; const [ci, cj] = cellOf(x, z); for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) if (Math.hypot(di, dj) <= reach + 0.5 && level - hAt(ci + di, cj + dj) > 0.3) return true; return false; },
+    waterNear: (x, z, reach) => { for (const t of troughs) if (Math.hypot(x - t.x, z - t.z) < reach + 0.9) return true; const [ci, cj] = cellOf(x, z); for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) if (Math.hypot(di, dj) <= reach + 0.5 && (level - hAt(ci + di, cj + dj) > 0.3 || KD[(cj + dj) * Wd + ci + di] === 'pan')) return true; return false; },
     spawn: { x: pierEnd.x, z: pierEnd.z + 1.5, y: 1.5 },
-    spots: { hale: spot('h', Math.PI), jun: spot('j', Math.PI / 2), peg: spot('q', Math.PI), tidePost: tp ? { x: tp.x + 1.0, z: tp.z + 0.9 } : null, door: door ? { x: door.x, z: door.z } : null, pier: { x: pierEnd.x, z: pierEnd.z }, boat: { x: boat.position.x, z: boat.position.z }, bell: bellAt ? { x: bellAt.x, z: bellAt.z + 1.6 } : null, odda: spot('o', Math.PI), brann: spot('n', Math.PI), kiln: kilnAt ? { x: kilnAt.x, z: kilnAt.z - 0.6 } : null },
+    spots: { hale: spot('h', Math.PI), jun: spot('j', Math.PI / 2), peg: spot('q', Math.PI), tidePost: tp ? { x: tp.x + 1.0, z: tp.z + 0.9 } : null, door: door ? { x: door.x, z: door.z } : null, pier: { x: pierEnd.x, z: pierEnd.z }, boat: { x: boat.position.x, z: boat.position.z }, bell: bellAt ? { x: bellAt.x, z: bellAt.z + 1.6 } : null, odda: spot('o', Math.PI), brann: spot('n', Math.PI), vesper: spot('V', 0), sight1: rem.stones[0] ? rem.stones[0].spot : null, sight2: rem.stones[1] ? rem.stones[1].spot : null, kiln: kilnAt ? { x: kilnAt.x, z: kilnAt.z - 0.6 } : null },
     boat,
     sunDir: new V3(-0.7, 0.56, -0.3).normalize(),
   };
@@ -3068,7 +3142,7 @@ export function buildSeaPlace(root, S, maps) {
     for (let j = 0; j < info.N; j += 2) for (let i = 0; i < info.N; i += 2) {
       const h = info.H[j * info.N + i], k = info.K[j * info.N + i];
       if (h <= -0.2) continue;
-      const kind = k === 'wood' ? 'wood' : k === 'sand' || k === 'wet' ? 'sand' : k === 'stone' || k === 'rock' || k === 'cobble' ? 'stone' : k === 'path' ? 'path' : k === 'street' ? 'path' : 'grass';
+      const kind = k === 'salt' || k === 'pan' ? 'salt' : k === 'wood' ? 'wood' : k === 'sand' || k === 'wet' ? 'sand' : k === 'stone' || k === 'rock' || k === 'cobble' ? 'stone' : k === 'path' ? 'path' : k === 'street' ? 'path' : 'grass';
       const x = cx + (info.H0 + i + 1) / 2, z = cz + (info.H0 + j + 1) / 2;
       cells.push({ x, z, h: Math.max(0.15, h * 0.55), kind });
       occOut.set(key(Math.floor(x / CELL), Math.floor(z / CELL)), Math.max(occOut.get(key(Math.floor(x / CELL), Math.floor(z / CELL))) || 0, h));
@@ -3140,6 +3214,31 @@ export function buildSeaPlace(root, S, maps) {
       for (let a = 0; a < TAU; a += 0.3) occ.set(key(Math.floor((I.x + Math.cos(a) * o.r * 0.6) / CELL), Math.floor((I.z + Math.sin(a) * o.r * 0.6) / CELL)), 2);
     }
     isl.push(o);
+  }
+  // ----- the Remembered Light: Saltglass's lighthouse, standing out at sea once you've put it on the chart -----
+  const remLight = (() => {
+    const L = maps.remLight;
+    if (!L) return null;
+    const grp = new THREE.Group();
+    const rb = new Batch(1260), lg = new Batch(1261);
+    for (let k = 0; k < 18; k++) { const a = (k / 18) * TAU, rr = 3 + r() * 1.8; rb.box(1.6, 0.8 + r() * 1.2, 1.6, pick(['#ece8de', '#e2ddcf', '#d8d2c4'], r), Math.cos(a) * rr, 0.1, Math.sin(a) * rr, { rotY: a }); }
+    rb.box(5, 1.2, 5, '#e6e1d4', 0, 0.2, 0, { top: '#f0ece3' });
+    const top = PROPS.lighthouse(rb, lg, 0, 0.8, 0);
+    grp.add(rb.mesh()); const lm = lg.mesh(MAT.glow); lm.castShadow = false; grp.add(lm);
+    // its beam: once lit it turns, then holds still, pointing west
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(2.2, 34, 20, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff1c4').multiplyScalar(1.4), transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false }));
+    beam.rotation.z = Math.PI / 2; beam.position.set(-17, top.lampY, 0);
+    const pivot = new THREE.Group(); pivot.position.set(0, 0, 0); pivot.add(beam); grp.add(pivot);
+    grp.position.set(L.x, -14, L.z); grp.visible = false; root.add(grp);
+    return { g: grp, pivot, x: L.x, z: L.z, shown: false, k: 0, spin: 0, hold: false };
+  })();
+  function showLight(instant) {
+    if (!remLight || remLight.shown) return;
+    remLight.shown = true; remLight.g.visible = true;
+    if (instant) { remLight.k = 1; remLight.g.position.y = 0; }
+    for (let a = 0; a < TAU; a += 0.4) occ.set(key(Math.floor((remLight.x + Math.cos(a) * 2.5) / CELL), Math.floor((remLight.z + Math.sin(a) * 2.5) / CELL)), 2);
+    mapInfo.places.push({ name: 'The Remembered Light', x: remLight.x / CELL, z: remLight.z / CELL - 3, id: 'remlight' });
+    mapInfo.version = (mapInfo.version || 0) + 1;
   }
   // floating barrels along the routes: hit them for slivers
   const barrels = [];
@@ -3221,6 +3320,13 @@ export function buildSeaPlace(root, S, maps) {
   let revealT = 0, hooks = null;
   function update(dt, t, P) {
     sea.position.set(P.x, 0, P.z);
+    // the Remembered Light rising, then its beam: round and round, until it's been seen; then pointing west
+    if (remLight && remLight.shown) {
+      remLight.k = Math.min(1, remLight.k + dt * 0.25);
+      remLight.g.position.y = -14 * (1 - smoothK(remLight.k));
+      if (remLight.hold) remLight.pivot.rotation.y = lerp(remLight.pivot.rotation.y, 0, Math.min(1, dt * 1.5));
+      else remLight.pivot.rotation.y = t * 0.6;
+    }
     for (const b of barrels) if (!b.on) { b.m.position.y = Math.sin(t * 1.5 + b.ph) * 0.12; b.m.rotation.z = Math.sin(t * 1.1 + b.ph) * 0.15; }
     for (const o of isl) if (o.fog) o.fog.rotation.y = t * 0.05;
     for (const o of isl) if (o.boil && o.boil.visible) { o.boil.material.opacity = 0.3 + Math.sin(t * 4) * 0.08; if (hooks && hooks.sparks && Math.random() < dt * 20) { const a = Math.random() * TAU, d = o.r + 4 + Math.random() * 4; hooks.sparks.spawn({ x: o.x + Math.cos(a) * d, y: 0.2, z: o.z + Math.sin(a) * d, vy: 1.5 + Math.random(), drag: 0.6, life: 1.4, size: 0.35, color: '#f2f6f8', glow: 0.4 }); } }
@@ -3239,6 +3345,7 @@ export function buildSeaPlace(root, S, maps) {
   }
   return {
     name: 'sea', root, sea: true, islands: isl, barrels, currentAt, islandNear, landAt, mapInfo, raise, unlock, portal: () => portal,
+    remLight, showLight, holdBeam: () => { if (remLight) remLight.hold = true; },
     groundAt: () => 0, walkable: (x, z) => !landAt(x, z), terrainOk: (x, z) => !landAt(x, z), solidAt: () => null,
     shotBlocked: (x, y, z) => y < 0 || landAt(x, z), targetAt: (x, y, z, rad = 0.1) => barrels.find((b) => !b.on && Math.hypot(x - b.x, z - b.z) < b.r + rad) || null,
     targets: barrels, findPath: () => null, clearLine: () => true, update, fx: {}, dummies: [], solids: [], seep: null, shardOn: () => false, setSeepPower() {}, setNight() {}, rings: [],

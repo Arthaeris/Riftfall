@@ -1,7 +1,7 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, MARKET, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, BELLROCK, CINDER, KILN, TEMPLE, HEAT, UPGRADES, SEA } from '@rf/data';
+import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, MARKET, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, BELLROCK, CINDER, KILN, TEMPLE, SALTGLASS, HEAT, UPGRADES, SEA } from '@rf/data';
 import { buildPlayer, buildSkyblade, buildGlassblade, buildToolModel, MOLTEN, renderToolArt, buildSailboat, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
 import { createStory } from '@rf/story';
 import { buildCove, buildRift, buildCaves, buildTown, buildSeaPlace } from '@rf/world';
@@ -399,10 +399,12 @@ let cinderW = null, cinderRoot = null, foesCinder = null;
 let kiln = null, kilnRoot = null, foesKiln = null, kilnSaved = null;
 // the Temple: the Reflected Lighthouse, under the mirror pool on the Heights
 let temple = null, templeRoot = null, foesTemple = null, templeSaved = null;
+// Saltglass Flats (a town, with a remembered town in it at noon)
+let saltW = null, saltRoot = null, foesSalt = null;
 // which place is which
-const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : w === market ? 'market' : w === bellW ? 'bell' : w === cinderW ? 'cinder' : w === kiln ? 'kiln' : w === temple ? 'temple' : 'cove');
+const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : w === market ? 'market' : w === bellW ? 'bell' : w === cinderW ? 'cinder' : w === kiln ? 'kiln' : w === temple ? 'temple' : w === saltW ? 'salt' : 'cove');
 const isRift = (w = world) => !!w && (w === rift || w === market);
-const isTown = (w = world) => !!w && (w === brine || w === bellW || w === cinderW);
+const isTown = (w = world) => !!w && (w === brine || w === bellW || w === cinderW || w === saltW);
 const isDungeon = (w = world) => !!w && (w === caves || w === belfry || w === kiln || w === temple);
 const outdoors = (w = world) => w === cove || w === brine || w === seaW || w === bellW || w === cinderW;
 const camDir = new V3(...CONFIG.camera.dir).normalize();
@@ -770,7 +772,7 @@ function swapTo(to) {
   ui.bossBar(null);
   const from = world;
   if (isDungeon(from)) { if (from === caves) cavesSaved = caves.snapshot(); else if (from === kiln) kilnSaved = kiln.snapshot(); else if (from === temple) templeSaved = temple.snapshot(); else belfrySaved = belfry.snapshot(); }
-  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot, marketRoot, bellRoot, cinderRoot, kilnRoot, templeRoot]) if (r) r.visible = false;
+  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot, marketRoot, bellRoot, cinderRoot, kilnRoot, templeRoot, saltRoot]) if (r) r.visible = false;
   boatModel.visible = false;
   ui.setMap(null);   // the Rift's room map (a Rift sets its own again below)
   if (P.boat) { P.boat = null; resetPose(); P.model.legL.rotation.x = P.model.legR.rotation.x = 0; P.iframes = false; }
@@ -831,6 +833,18 @@ function swapTo(to) {
     populateCaves();
     ui.buildMap(kiln.mapInfo, MAP_ROT, 'kiln');
     syncKeys();
+  } else if (to === 'salt') {
+    saltBuilt();
+    saltRoot.visible = true;
+    world = saltW; foes = foesSalt;
+    outdoorLight(30, 110);
+    P.x = saltW.spawn.x; P.z = saltW.spawn.z; P.face = 0;
+    P.y = saltW.groundAt(P.x, P.z);
+    foes.reset();
+    for (const c of saltW.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 7 });
+    remK = inNoon() ? 1 : 0; saltW.setRemembered(remK);
+    ui.buildMap(saltW.mapInfo, MAP_ROT, 'salt');
+    syncKeys();
   } else if (to === 'cinder') {
     cinderBuilt();
     cinderRoot.visible = true;
@@ -857,7 +871,7 @@ function swapTo(to) {
     world = seaW; foes = foesSea;
     outdoorLight(60, 260);
     // out from the dock you left; out of the Market onto the warm water, a little way off from where it was
-    const fromId = from === brine ? 'brinemoor' : from === bellW || from === market ? 'bellrock' : from === cinderW ? 'cinderglass' : 'lanternhold';
+    const fromId = from === brine ? 'brinemoor' : from === bellW || from === market ? 'bellrock' : from === cinderW ? 'cinderglass' : from === saltW ? 'saltglass' : 'lanternhold';
     const isl = SEA.islands.find((o) => o.id === fromId);
     P.x = isl.dock.x; P.z = isl.dock.z + (fromId === 'lanternhold' ? 3 : -4); P.y = 0;
     P.face = fromId === 'lanternhold' ? 0 : Math.PI;
@@ -951,6 +965,10 @@ async function arrived(to, from) {
     if (story.state.step === 'act1Cinder') story.setStep('cinder');
     saveSoon = 0.5;
     return;
+  }
+  if (to === 'salt') {
+    ui.titleCard(SALTGLASS.name, SALTGLASS.region, SALTGLASS.line);
+    if (story.state.step === 'act1Saltglass') story.setStep('saltglass');
   }
   if (to === 'temple') {
     ui.titleCard(TEMPLE.name, TEMPLE.region, TEMPLE.line);
@@ -1101,6 +1119,12 @@ function playtestJump(where) {
     });
   } else if (where === 'tether') {
     giveTool('tether'); ui.toast('Tether (for testing)');
+  } else if (where === 'saltglass') {
+    if (travelling) return;
+    if (!story.past('act1Saltglass')) story.applyState('act1Saltglass');
+    clock.running = true;
+    giveTool('tether'); giveTool('jar'); giveTool('lantern'); setSword('glassblade');
+    seaBuilt(); seaW.unlock('saltglass'); travel('salt');
   } else if (where === 'temple' || where === 'lantern') {
     if (travelling) return;
     if (!story.past('act1Temple')) story.applyState('act1Temple');
@@ -1161,7 +1185,8 @@ function objectiveSpot() {
   if (st === 'forgeHome') return story.people().find((n) => n.id === 'odda') || sp.forge;
   if (st === 'mirrorPool') return sp.pool;
   if (['act1Temple', 'temple', 'templeBoss'].includes(st)) return sp.pool;
-  if (['reportMaren4', 'act1Saltglass'].includes(st)) return maren;
+  if (st === 'reportMaren4' || st === 'act1Reef') return maren;
+  if (['act1Saltglass', 'saltglass', 'noon', 'sightings', 'markLight', 'remLight'].includes(st)) return sp.lantern;
   // the bramble wall first (it closes the Saltworks off), then what the brambles grew round
   if (st === 'saltworks') { const w = cove.burnables.find((c) => c.grp === 'wall' && !c.burnt); return w || cove.salt.at; }
   return null;
@@ -1181,7 +1206,16 @@ function placeGoal() {
     if (['kiln', 'kilnIn', 'kilnBoss'].includes(st)) return cinderW.spots.kiln;
     return cinderW.spots.pier;
   }
+  if (world === saltW) {
+    if (['act1Saltglass', 'saltglass'].includes(st)) return story.people(saltW).find((n) => n.id === 'vesper');
+    if (st === 'noon') return inNoon() ? saltW.rem.stones[0] : saltW.spots.tidePost;
+    if (st === 'sightings') { const s0 = saltW.rem.stones.find((v) => !chartNotes.some((n) => n.id === v.id)); return s0 || null; }
+    return saltW.spots.pier;
+  }
   if (world === seaW) {
+    if (st === 'markLight') return null;
+    if (st === 'remLight') { const L = SALTGLASS.light; return { x: L.x / 2, z: L.z / 2 }; }
+    if (['act1Saltglass', 'saltglass', 'noon', 'sightings'].includes(st)) { const o = SEA.islands.find((v) => v.id === 'saltglass'); return { x: o.dock.x / 2, z: o.dock.z / 2 }; }
     if (['act1Sea', 'market', 'marketBoss'].includes(st)) { const o = SEA.islands.find((v) => v.id === 'bellrock'); return { x: o.x / 2, z: o.z / 2 }; }
     const id = ['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st) ? 'brinemoor' : st === 'bellRock' ? 'bellrock' : ['act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda'].includes(st) ? 'cinderglass' : 'lanternhold';
     const o = SEA.islands.find((v) => v.id === id);
@@ -1257,7 +1291,7 @@ function writeSave() {
     caves: caves ? caves.snapshot() : cavesSaved, inCaves: world === caves,
     // the Glass Sea and on
     belfry: belfry ? belfry.snapshot() : belfrySaved, at: travelling ? travelling.to : placeOf(world), jar: jar.full,
-    kiln: kiln ? kiln.snapshot() : kilnSaved, temple: temple ? temple.snapshot() : templeSaved, salt: { b: cove.burnState(), taken: !!cove.salt.taken }, marks: ui.atlas.marks(), sword: P.sword, upgrades: [...P.upgrades], forgeSeen: !!P.forgeSeen,
+    kiln: kiln ? kiln.snapshot() : kilnSaved, temple: temple ? temple.snapshot() : templeSaved, notes: chartNotes, salt: { b: cove.burnState(), taken: !!cove.salt.taken }, marks: ui.atlas.marks(), sword: P.sword, upgrades: [...P.upgrades], forgeSeen: !!P.forgeSeen,
     chart: seaW ? (() => { let t = ''; for (const v of seaW.mapInfo.seen) t += String.fromCharCode(v); return btoa(t); })() : seaSeen };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); savedAt = Date.now(); ui.savedMark(); } catch (_) { /* private mode: progress lives only as long as the page */ }
 }
@@ -1338,6 +1372,8 @@ async function beginJourney(save) {
   belfrySaved = save.belfry || null;
   kilnSaved = save.kiln || null;
   templeSaved = save.temple || null;
+  chartNotes = save.notes || [];
+  ui.atlas.setNotes('sea', chartNotes);
   if (save.salt) cove.restoreSalt(save.salt.b, save.salt.taken);
   ui.atlas.setMarks(save.marks);
   if (save.sword) setSword(save.sword);
@@ -1371,6 +1407,10 @@ async function beginJourney(save) {
     swapTo('cinder');
     if (at === 'kiln') { const k = cinderW.spots.kiln; P.x = k.x; P.z = k.z - 1.2; P.y = cinderW.groundAt(P.x, P.z); }
     pl = CINDER;
+  } else if (at === 'salt') {
+    seaBuilt();
+    swapTo('salt');
+    pl = SALTGLASS;
   } else if (at === 'temple') { const s0 = cove.spots.pool; P.x = s0.x; P.z = s0.z + 0.6; P.y = cove.groundAt(P.x, P.z); }
   else if (at === 'sea' || at === 'market') { const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); }
   started = true;
@@ -1591,6 +1631,7 @@ async function mirrorScene() {
 }
 // the tide post in Brinemoor: sit a while, and the tide turns (low if it's in, high if it's out)
 async function waitTide() {
+  if (world === saltW) return waitNoon();
   if (story.busy()) return;
   story.state.busy = true;
   ui.setContext(null);
@@ -1918,6 +1959,17 @@ function cinderBuilt() {
   cinderRoot.visible = false;
   cinderRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
 }
+function saltBuilt() {
+  if (saltW) return;
+  saltRoot = new THREE.Group();
+  scene.add(saltRoot);
+  saltW = buildTown(saltRoot, SALTGLASS);
+  foesSalt = makeFoes(saltW, saltRoot);
+  saltW.attach({ P, foes: foesSalt, sound, shake, onEvent: caveEvent, camera });
+  story.addPeople(saltW, saltRoot, ['vesper']);
+  saltRoot.visible = false;
+  saltRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+}
 function templeBuilt() {
   if (temple) return;
   templeRoot = new THREE.Group();
@@ -1945,14 +1997,18 @@ function seaBuilt() {
   brineBuilt();
   bellBuilt();
   cinderBuilt();
+  saltBuilt();
   seaRoot = new THREE.Group();
   scene.add(seaRoot);
-  seaW = buildSeaPlace(seaRoot, SEA, { lanternhold: cove.mapInfo, brinemoor: brine.mapInfo, bellrock: bellW.mapInfo, cinderglass: cinderW.mapInfo });
+  seaW = buildSeaPlace(seaRoot, SEA, { lanternhold: cove.mapInfo, brinemoor: brine.mapInfo, bellrock: bellW.mapInfo, cinderglass: cinderW.mapInfo, saltglass: saltW.mapInfo, remLight: SALTGLASS.light });
   foesSea = makeFoes(seaW, seaRoot);
   seaW.attach({ onEvent: caveEvent, sparks });
   // Bell Rock has already risen in a journey past the Market
   if (story.past('bellRock')) seaW.raise('bellrock', true);
   if (story.past('act1Cinder')) seaW.unlock('cinderglass');
+  if (story.past('act1Saltglass')) seaW.unlock('saltglass');
+  if (story.past('remLight')) seaW.showLight(true);
+  if (story.past('act1Reef')) seaW.holdBeam();
   if (seaSeen) { const b = atob(seaSeen); for (let k = 0; k < Math.min(b.length, seaW.mapInfo.seen.length); k++) seaW.mapInfo.seen[k] = b.charCodeAt(k); }
   seaRoot.visible = false;
 }
@@ -2349,7 +2405,7 @@ function sailUpdate(dt) {
   B.atRift = atRift;
   if (atRift && !B.riftTold) { B.riftTold = true; ui.toast(STORY.marketLines.portal); }
   ui.setContext(B.dockable ? 'dock' : atRift ? 'enter' : null);
-  if (B.dockable && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; travel({ lanternhold: 'cove', bellrock: 'bell', cinderglass: 'cinder' }[B.dockable.id] || 'brine'); }
+  if (B.dockable && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; travel({ lanternhold: 'cove', bellrock: 'bell', cinderglass: 'cinder', saltglass: 'salt' }[B.dockable.id] || 'brine'); }
   else if (atRift && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; B.dockable = { id: 'rift' }; travel('market'); }
   I.attack.pressed = false;
 }
@@ -2758,6 +2814,8 @@ const map3d = (() => {
   function colorOf(I, h, k) {
     if (I.cave) return k === 'rock' ? '#3a3448' : k === 'chasm' ? '#08060e' : k === 'water' ? '#3f7f96' : k === 'molten' ? '#ff7a2a' : k === 'ledge' ? '#9a94a6' : '#77728a';
     if (h <= 0.01) return h < -1.2 ? '#2a6f8f' : h < -0.5 ? '#36869f' : '#5ab0c4';
+    if (k === 'salt') return '#ece8de';
+    if (k === 'pan') return '#cfe0ea';
     if (k === 'sand') return '#ead6a6';
     if (k === 'wood') return '#a6764d';
     if (k === 'street') return '#8a958f';
@@ -2779,7 +2837,7 @@ const map3d = (() => {
       hgt[j * n + i] = Math.round(h * 2) / 2;
       const c = hex(colorOf(I, best, bk));
       // higher ground a touch lighter, like the small map
-      if (!I.cave && best > 0.01 && (bk === 'land' || bk === 'grass' || !['sand', 'wood', 'street', 'path', 'stone'].includes(bk))) c.multiplyScalar(0.82 + Math.min(best, 6) * 0.06);
+      if (!I.cave && best > 0.01 && (bk === 'land' || bk === 'grass' || !['sand', 'wood', 'street', 'path', 'stone', 'salt', 'pan'].includes(bk))) c.multiplyScalar(0.82 + Math.min(best, 6) * 0.06);
       col[j * n + i] = c;
     }
     const pos = [], nor = [], cols = [], idx = [];
@@ -2906,6 +2964,115 @@ const map3d = (() => {
   return { open, view, project, unproject, render, get active() { return !!cur; }, close: () => { cur = null; } };
 })();
 const wantPos = new V3(), wantLook = new V3();
+// ----- Saltglass Flats: the remembered town stands from noon till dusk -----
+let remK = 0, chartNotes = [], lightPending = false;
+const inNoon = () => clockH >= SALTGLASS.noon[0] && clockH < SALTGLASS.noon[1];
+function updateSalt(dt) {
+  const want = inNoon() ? 1 : 0;
+  if (remK !== want) { remK = want > remK ? Math.min(1, remK + dt * 0.35) : Math.max(0, remK - dt * 0.35); saltW.setRemembered(remK); }
+  // the first noon you see, after Vesper has told you about it (or if you simply arrive in it)
+  if (remK >= 1 && ['saltglass', 'noon'].includes(story.state.step) && !story.busy()) rememberedScene();
+  // the wind over the flats: streaks of salt along the ground
+  if (Math.random() < dt * 22) { const a = Math.random() * TAU, d = 4 + Math.random() * 18; sparks.spawn({ x: P.x + Math.cos(a) * d, y: P.y + 0.2 + Math.random() * 1.2, z: P.z + Math.sin(a) * d, vx: 5 + Math.random() * 3, vy: 0, vz: -1.5, life: 0.9, size: 0.06, color: '#ffffff', glow: 0.5, drag: 0.2 }); }
+}
+async function waitNoon() {
+  if (story.busy()) return;
+  if (inNoon()) { ui.toast(STORY.saltLines.already); return; }
+  story.state.busy = true;
+  ui.setContext(null);
+  ui.toast(STORY.saltLines.wait);
+  await curtainTo(1, 0.9);
+  clockH = 11.95; setClock(clockH);
+  remK = 0.2; saltW.setRemembered(remK);
+  sound.sfx('wake');
+  await curtainTo(0, 1.0);
+  story.state.busy = false;
+  saveSoon = 0.5;
+}
+// the remembered town remembering itself, the first time you see it
+async function rememberedScene() {
+  if (story.state.busy) return;
+  story.state.busy = true; story.state.cine = true;
+  ui.setContext(null); ui.show(false); document.body.classList.add('cine');
+  const c = saltW.rem.stones[0], mid = { x: (saltW.rem.stones[0].x + saltW.rem.stones[1].x) / 2, z: c.z };
+  cineView = { pos: new V3(mid.x + 9, 9, mid.z + 16), look: new V3(mid.x, 1.5, mid.z - 2), k: 0.025 };
+  await gwait(1.2);
+  const G = STORY.saltLines.glimpse, md = saltW.rem.mirage.dir;
+  await glimpse([{ text: G[0], pos: new V3(mid.x - 9, 3.5, mid.z - 6) }, { text: G[1], pos: new V3(mid.x, 1.6, mid.z) }, { text: G[2], pos: new V3(md.x * 60, 8, md.z * 60) }, { text: G[3], pos: new V3(mid.x + 9, 4, mid.z + 6) }], 3.6);
+  const C = STORY.saltLines.card; ui.titleCard(C.name, C.region, C.line);
+  await story.say(STORY.saltLines.rise);
+  cineView = null; camBlend = 1.2;
+  document.body.classList.remove('cine'); ui.show(true);
+  story.state.busy = false; story.state.cine = null;
+  story.setStep('sightings');
+  saveSoon = 0.3;
+}
+// a sighting stone: look through it at the mirage, and draw the line on your chart
+async function sight(id) {
+  const st = saltW.rem.stones.find((v) => v.id === id);
+  if (!st || story.busy() || !saltW.rem.solid) return;
+  if (chartNotes.some((n) => n.id === id)) { ui.toast(STORY.saltLines.noted); return; }
+  story.state.busy = true;
+  ui.setContext(null);
+  const md = saltW.rem.mirage.dir;
+  P.face = Math.atan2(md.x, md.z);
+  cineView = { pos: new V3(st.x - md.x * 2.5, 2.6, st.z - md.z * 2.5), look: new V3(st.x + md.x * 60, 6, st.z + md.z * 60), k: 0.04 };
+  sound.sfx('shimmer');
+  await gwait(1.4);
+  await story.say(STORY.saltLines.look);
+  cineView = null; camBlend = 1.2;
+  // the line, on the sea chart: from where this stone stands out at sea, toward the light and on past it
+  const I = SEA.islands.find((v) => v.id === 'saltglass'), L = SALTGLASS.light;
+  const sx = I.x + st.x / 2, sz = I.z + st.z / 2, dx = L.x - sx, dz = L.z - sz;
+  chartNotes.push({ id, label: id === 'west' ? 'From the west stone' : 'From the east stone', x0: sx / 2, z0: sz / 2, x1: (sx + dx * 1.7) / 2, z1: (sz + dz * 1.7) / 2 });
+  ui.atlas.setNotes('sea', chartNotes);
+  sound.sfx('chime');
+  story.state.busy = false;
+  if (chartNotes.length >= 2) { ui.toast(STORY.saltLines.both); if (story.state.step === 'sightings') story.setStep('markLight'); }
+  else ui.toast(STORY.saltLines.noted);
+  saveSoon = 0.3;
+}
+// a mark on the sea chart while you're looking for the light: is it where the lines cross?
+function checkLightMark() {
+  if (story.state.step !== 'markLight' || world !== seaW || lightPending) return;
+  const m = ui.atlas.mark(); if (!m) return;
+  const L = SALTGLASS.light, u = ui.atlas.unit();
+  if (Math.hypot(m.x * u - L.x, m.z * u - L.z) > L.tolerance) { ui.atlas.say(STORY.saltLines.wrong); return; }
+  lightPending = true;
+  ui.atlas.setMarkAt(L.x / u, L.z / u, 'The Remembered Light');
+  ui.atlas.say(STORY.saltLines.right);
+  setTimeout(() => ui.closeMap(), 1400);
+}
+// out at sea: the light rising once it's charted, and arriving at it
+function updateRemLight() {
+  if (lightPending && !ui.atlas.isOpen() && !story.busy()) {
+    lightPending = false;
+    seaW.showLight();
+    story.setStep('remLight');
+    sound.sfx('roar'); shake(0.3);
+    ui.toast(STORY.saltLines.right);
+    saveSoon = 0.3;
+  }
+  const R = seaW.remLight;
+  if (story.state.step === 'remLight' && R && R.shown && R.k > 0.8 && !story.busy() && Math.hypot(P.x - R.x, P.z - R.z) < 16) arriveLight();
+}
+async function arriveLight() {
+  story.state.busy = true;
+  const R = seaW.remLight, C = STORY.saltLines.lightCard;
+  P.boat.speed = 0; P.boat.course = null;
+  cineView = { pos: new V3(R.x + 12, 6, R.z + 14), look: new V3(R.x, 7, R.z), k: 0.02 };
+  ui.titleCard(C.name, C.region, C.line);
+  await gwait(2.4);
+  await story.say(STORY.saltLines.arrive);
+  seaW.holdBeam();
+  cineView = { pos: new V3(R.x + 6, 14, R.z + 10), look: new V3(R.x - 40, 0, R.z), k: 0.02 };
+  await gwait(2.2);
+  cineView = null; camBlend = 1.4;
+  ui.atlas.clearMark();
+  story.state.busy = false;
+  story.setStep('act1Reef');
+  saveSoon = 0.3;
+}
 // ----- the Old Saltworks: brambles the Lantern burns, and the chart case they grew round -----
 function updateSaltworks(dt) {
   const burning = cove.updateSalt(dt);
@@ -3239,6 +3406,8 @@ function tick(dt) {
   updateGlimpse(dt);
   MOLTEN.uTime.value = time;
   if (world === cove && started && !intro) updateSaltworks(dt);
+  if (world === saltW && started && !intro) updateSalt(dt);
+  if (world === seaW && started && !intro) updateRemLight(dt);
   updateBeacon(dt);
   ui.setHeat(P.heat);
   // heat haze over hot ground near you
@@ -3307,7 +3476,7 @@ try {
     onSeaView: () => { if (started && !intro) setCloseView(!closeCam); },
     camStick: () => viewK > 0.5,
     map3d,
-    onMark: () => { saveSoon = 0.6; },
+    onMark: () => { saveSoon = 0.6; checkLightMark(); },
     onWheel: (open) => { wheelSlow = open; },
     onWarp: (id) => warpTo(id),
     onChart: (x, z) => { if (P.boat) { P.boat.course = { x: x * 2, z: z * 2 }; ui.toast('Course set'); } },
@@ -3340,6 +3509,7 @@ try {
     waitTide: () => waitTide(),
     ringBell: () => ringBell(),
     oddaMoves: () => oddaMoves(),
+    sight: (id) => sight(id),
     forgeMenu: () => forgeMenu(),
     shardFall: () => shardFall(),
     mirrorScene: () => mirrorScene(),
@@ -3360,7 +3530,7 @@ try {
   setTimeout(showTitle, 450);
   addEventListener('pagehide', () => writeSave());
   document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, get cinder() { return cinderW; }, get kiln() { return kiln; }, get temple() { return temple; }, get cove() { return cove; }, useLantern, setSword, forgeMenu, shardFall, mirrorScene, oddaMoves, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, setCloseView, get viewK() { return viewK; }, get viewYaw() { return viewYaw; }, set viewYaw(v) { viewYaw = v; }, get viewPitch() { return viewPitch; }, get arm() { return arm; }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, get cinder() { return cinderW; }, get kiln() { return kiln; }, get temple() { return temple; }, get cove() { return cove; }, get salt() { return saltW; }, sight, get chartNotes() { return chartNotes; }, get remK() { return remK; }, rememberedScene, waitNoon, useLantern, setSword, forgeMenu, shardFall, mirrorScene, oddaMoves, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, setCloseView, get viewK() { return viewK; }, get viewYaw() { return viewYaw; }, set viewYaw(v) { viewYaw = v; }, get viewPitch() { return viewPitch; }, get arm() { return arm; }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

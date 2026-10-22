@@ -2613,26 +2613,30 @@ function gameplayCam(out, outLook) {
 const wantPos = new V3(), wantLook = new V3();
 // ----- the close view: low behind you, looking out to the horizon (on foot and at sea) -----
 // viewK blends between the usual view from above (0) and this one (1); the stick steers relative to whichever is showing.
-// On foot it turns to follow where you walk (not when you walk toward it), and a drag on the right side of the screen turns it.
-let closeCam = prefs.view === 'close' || prefs.seaView === 'horizon', viewK = 0, viewYaw = 0;
+// The camera hangs on an arm from your head: turned by yaw and pitch, and shortened at once whenever something is
+// in the way (then let out again slowly). The right-hand stick turns it; left alone, it drifts back behind you.
+let closeCam = prefs.view === 'close' || prefs.seaView === 'horizon', viewK = 0, viewYaw = 0, viewPitch = 0.3, lookIdle = 9;
 const closePos = new V3(), closeLook = new V3(), aimAt = new V3();
-const camFix = { up: 0, pull: 1 };   // smoothed: how far the camera rises over a wall, and how much of its distance it keeps
+const arm = { len: 1, lag: new V3(), has: false };   // len: how much of the arm is out (0..1)
 const closeOn = () => closeCam && started && !intro && !cineView && !story.state.ending;
+const PITCH = { min: -0.25, max: 1.2 };
+const restPitch = () => (P.boat ? 0.2 : isDungeon() ? 0.62 : 0.3);
 function setCloseView(on) {
   closeCam = on; prefs.view = on ? 'close' : 'top'; delete prefs.seaView; savePrefs(prefs);
-  viewYaw = P.face;
+  viewYaw = P.face; viewPitch = restPitch(); arm.has = false;
   sound.sfx('swish');
 }
-// is the straight line from your head to the camera clear of ground, walls and big things?
-function camLineClear(hx, hy, hz, cx, cy, cz) {
+// how far along the arm (0..1) from your head to the camera before it meets ground, a wall or something big
+function armHit(hx, hy, hz, cx, cy, cz) {
   // brushing against something (a post, a tree) shouldn't count as it being in the way
   const solids = !(world.shotBlocked && world.shotBlocked(hx, hy, hz, 0.5));
-  for (let k = 1; k <= 12; k++) {
-    const u = 0.1 + (k / 12) * 0.9, x = hx + (cx - hx) * u, y = hy + (cy - hy) * u, z = hz + (cz - hz) * u;
-    if (world.groundAt(x, z) + 0.7 > y) return u;
-    if (solids && u > 0.2 && world.shotBlocked && world.shotBlocked(x, y, z, u > 0.7 ? 0.45 : 0.25)) return u;
+  const N = 18;
+  for (let k = 1; k <= N; k++) {
+    const u = k / N, x = hx + (cx - hx) * u, y = hy + (cy - hy) * u, z = hz + (cz - hz) * u;
+    if (world.groundAt(x, z) + 0.45 > y) return u;
+    if (solids && u > 0.15 && world.shotBlocked && world.shotBlocked(x, y, z, 0.35)) return u;
   }
-  return 0;
+  return 1;
 }
 let viewBtn = '';
 function updateCloseCam(dt) {
@@ -2642,54 +2646,55 @@ function updateCloseCam(dt) {
   viewK = clamp(viewK + (closeOn() ? dt : -dt) * 1.6, 0, 1);
   const I = ui.input;
   if (viewK > 0) {
-    // drag on the right side of the screen to turn the view
-    if (I.orbit) { viewYaw -= I.orbit * 0.0075; I.orbit = 0; }
+    // the camera stick: sideways turns, up and down tilts (down looks down)
+    if (I.look.active) {
+      const lx = I.look.x, ly = I.look.y, curve = (v) => Math.sign(v) * v * v;
+      viewYaw -= curve(lx) * 2.7 * dt;
+      viewPitch = clamp(viewPitch + curve(ly) * 1.6 * dt, PITCH.min, PITCH.max);
+      lookIdle = 0;
+    } else lookIdle += dt;
+    // left alone for a moment while you're on the move, the view drifts back round behind you (and back to its usual tilt);
+    // standing still, it stays where you put it
+    const moving = !!P.boat || I.move.active || !!P.path;
+    const back = moving ? clamp((lookIdle - 1.2) / 1.5, 0, 1) : 0;
     const diff = Math.atan2(Math.sin(P.face - viewYaw), Math.cos(P.face - viewYaw));
-    if (P.boat) viewYaw += diff * Math.min(1, dt * 1.8);
+    if (P.boat) viewYaw += diff * Math.min(1, dt * 1.8 * back);
     else if (I.move.active || P.path) {
       // follow where you're walking; hold still when you walk back toward the camera
       const ahead = Math.cos(diff);
-      if (ahead > -0.3) viewYaw += diff * Math.min(1, dt * 1.5 * (0.25 + 0.75 * Math.max(0, ahead)));
+      if (ahead > -0.3) viewYaw += diff * Math.min(1, dt * 1.5 * back * (0.25 + 0.75 * Math.max(0, ahead)));
     }
-  } else { I.orbit = 0; viewYaw = P.face; }
+    viewPitch = lerp(viewPitch, restPitch(), Math.min(1, dt * 0.8 * back));
+  } else { viewYaw = P.face; viewPitch = restPitch(); lookIdle = 9; arm.has = false; }
   const k = smooth(viewK);
   if (viewK > 0.5) { camFwd.set(Math.sin(viewYaw), 0, Math.cos(viewYaw)); camRight.crossVectors(camFwd, UP).normalize(); }
   else { camFwd.copy(camFwd0); camRight.copy(camRight0); }
   const fov = lerp(CONFIG.camera.fov, P.boat ? 56 : 55, k);
   if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
-  // nothing past the fog needs drawing, and looking out over the land there's a lot of it
+  // nothing past the fog needs drawing; posts and branches right at the lens are clipped away
   const far = viewK > 0 ? Math.min(600, scene.fog.far + 6) : 600;
-  // and posts and branches right in front of the lens are clipped away rather than filling the screen
-  const near = lerp(0.4, P.boat ? 0.6 : 1.1, k);
+  const near = lerp(0.4, P.boat ? 0.6 : 0.9, k);
   if (Math.abs(camera.far - far) > 1 || Math.abs(camera.near - near) > 0.02) { camera.far = far; camera.near = near; camera.updateProjectionMatrix(); }
-  if (viewK <= 0) { camFix.up = 0; camFix.pull = 1; return 0; }
-  const fx = Math.sin(viewYaw), fz = Math.cos(viewYaw), z = I.zoom;
-  // a little over the right shoulder, so you (or the sail) don't hide what's ahead
-  const rx = -fz, rz = fx;
-  if (P.boat) {
-    const side = 1.5 * z;
-    closePos.set(P.x - fx * 7.4 * z + rx * side, 2.5 + 1.1 * z + P.y * 0.5, P.z - fz * 7.4 * z + rz * side);
-    closeLook.set(P.x + fx * 18 + rx * side * 0.4, 1.3 + P.y * 0.3, P.z + fz * 18 + rz * side * 0.4);
-    camFix.up = 0; camFix.pull = 1;
-    return k;
-  }
-  // in the dark of a dungeon the view sits higher and looks down more, so the floor ahead stays readable
-  const dung = isDungeon();
-  const side = 0.85 * z, back = (dung ? 5.0 : 5.4) * z, up = (dung ? 3.4 : 1.9) * z, ahead = dung ? 4 : 7;
-  const hx = P.x, hy = P.y + 1.4, hz = P.z;
-  const cx = P.x - fx * back + rx * side, cz = P.z - fz * back + rz * side, cy = P.y + 1.2 + up;
-  // walls in the way: first try rising over them, then come in closer
-  let wantUp = 0, wantPull = 1;
-  if (camLineClear(hx, hy, hz, cx, cy, cz)) {
-    let found = false;
-    for (const r of [1.2, 2.4, 3.6]) if (!camLineClear(hx, hy, hz, cx, cy + r, cz)) { wantUp = r; found = true; break; }
-    if (!found) { const u = camLineClear(hx, hy, hz, cx, cy, cz); wantPull = Math.max(0.15, u - 0.12); }
-  }
-  // close in fast when something's in the way, ease back out slowly
-  camFix.up = lerp(camFix.up, wantUp, Math.min(1, dt * (wantUp > camFix.up ? 10 : 2.5)));
-  camFix.pull = lerp(camFix.pull, wantPull, Math.min(1, dt * (wantPull < camFix.pull ? 14 : 2.5)));
-  closePos.set(hx + (cx - hx) * camFix.pull, hy + (cy - hy) * camFix.pull + camFix.up, hz + (cz - hz) * camFix.pull);
-  closeLook.set(P.x + fx * ahead + rx * side * 0.3, P.y + (dung ? 0.6 : 1.15) + camFix.up * 0.25, P.z + fz * ahead + rz * side * 0.3);
+  if (viewK <= 0) return 0;
+  // the arm: from a pivot at your head, back along the view direction, a little over the right shoulder
+  const z = I.zoom, cp = Math.cos(viewPitch), sp = Math.sin(viewPitch);
+  const fx = Math.sin(viewYaw), fz = Math.cos(viewYaw), rx = -fz, rz = fx;
+  const dx = fx * cp, dy = -sp, dz = fz * cp;   // where the camera looks
+  const L = (P.boat ? 7.6 : isDungeon() ? 6.2 : 5.6) * z, side = (P.boat ? 1.5 : 0.8) * z;
+  const hx = P.x + rx * side * 0.5, hy = P.y + (P.boat ? 2.0 : 1.55), hz = P.z + rz * side * 0.5;
+  const cx = hx - dx * L + rx * side * 0.5, cy = hy - dy * L, cz = hz - dz * L + rz * side * 0.5;
+  // snap in the moment something is in the way, then let the arm out again gently
+  const hit = P.boat ? 1 : armHit(hx, hy, hz, cx, cy, cz);
+  const want = hit < 1 ? Math.max(0.08, hit - 0.06) : 1;
+  arm.len = want < arm.len ? want : Math.min(want, arm.len + dt * 1.6);
+  const tx = hx + (cx - hx) * arm.len, ty = hy + (cy - hy) * arm.len, tz = hz + (cz - hz) * arm.len;
+  // a touch of lag so the camera breathes with your movement, but never through a wall
+  if (!arm.has) { arm.lag.set(tx, ty, tz); arm.has = true; }
+  arm.lag.lerp(tmpV.set(tx, ty, tz), Math.min(1, dt * 14));
+  if (arm.len < 1) arm.lag.set(tx, ty, tz);
+  closePos.copy(arm.lag);
+  // look a little above the line from the camera through your head, so the horizon has room
+  closeLook.set(closePos.x + dx * 10, closePos.y + dy * 10 + 1.1, closePos.z + dz * 10);
   return k;
 }
 let camBlend = 0, camDist = CONFIG.camera.dist, cineView = null, camFocus = null;
@@ -2944,6 +2949,7 @@ try {
     onTitle: () => saveAndQuit(),
     onTool: (id) => setTool(id),
     onSeaView: () => { if (started && !intro) setCloseView(!closeCam); },
+    camStick: () => viewK > 0.5,
     onWheel: (open) => { wheelSlow = open; },
     onWarp: (id) => warpTo(id),
     onChart: (x, z) => { if (P.boat) { P.boat.course = { x: x * 2, z: z * 2 }; ui.toast('Course set'); } },
@@ -2996,7 +3002,7 @@ try {
   setTimeout(showTitle, 450);
   addEventListener('pagehide', () => writeSave());
   document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, get cinder() { return cinderW; }, get kiln() { return kiln; }, setSword, forgeMenu, shardFall, mirrorScene, oddaMoves, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, setCloseView, get viewK() { return viewK; }, get viewYaw() { return viewYaw; }, set viewYaw(v) { viewYaw = v; }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, get cinder() { return cinderW; }, get kiln() { return kiln; }, setSword, forgeMenu, shardFall, mirrorScene, oddaMoves, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, setCloseView, get viewK() { return viewK; }, get viewYaw() { return viewYaw; }, set viewYaw(v) { viewYaw = v; }, get viewPitch() { return viewPitch; }, get arm() { return arm; }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

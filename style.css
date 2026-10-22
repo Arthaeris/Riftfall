@@ -115,6 +115,8 @@ body.lefty .pad .pips { transform: translateX(-50%) scaleX(-1); }
   border: 1.5px solid rgba(255, 255, 255, 0.35); background: radial-gradient(circle, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02) 70%);
   transition: opacity 0.18s; }
 .joy.fade { opacity: 0; }
+.camJoy { border-color: rgba(159, 243, 255, 0.4); }
+.camJoy .knob { background: radial-gradient(circle at 35% 30%, rgba(223, 250, 255, 0.75), rgba(159, 243, 255, 0.35)); }
 .joy .knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.35)); box-shadow: 0 4px 14px rgba(10, 6, 30, 0.35); }
 .aimRing { position: absolute; width: 0; height: 0; display: none; }
@@ -216,7 +218,7 @@ details[open] summary.gTitle { margin-bottom: 8px; }
 .dlgMore { position: absolute; right: 18px; bottom: 10px; width: 10px; height: 10px; border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(45deg); opacity: 0; }
 .dlg.more .dlgMore { opacity: 1; animation: bob 1s ease-in-out infinite; }
 @keyframes bob { 50% { transform: translateY(3px) rotate(45deg); } }
-body.talking .pad, body.talking .joy, body.talking .hint { opacity: 0 !important; pointer-events: none !important; }
+body.talking .pad, body.talking .joy, body.talking .camJoy, body.talking .hint { opacity: 0 !important; pointer-events: none !important; }
 body.talking .pad .act { pointer-events: none; }
 /* the sword button when it offers something else (talking) */
 .act.attack.ctx { color: var(--accent-2); border-color: rgba(255, 210, 154, 0.55); box-shadow: 0 0 0 3px rgba(255, 210, 154, 0.18), 0 10px 24px -10px rgba(8, 4, 24, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4); }

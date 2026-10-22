@@ -96,7 +96,7 @@ export function createUI(opts) {
     attack: { down: false, pressed: false, aim: { x: 0, y: 0, active: false } },
     ranged: { down: false, pressed: false, aim: { x: 0, y: 0, active: false } },
     roll: { pressed: false },
-    orbit: 0,         // a drag on the right side of the screen: pixels to turn the close view by
+    look: { x: 0, y: 0, active: false },   // the camera stick (right side, close view only): -1..1 each way
     run: false,       // running (the boot button, or Shift held)
     ability: { pressed: false },
     tap: null,        // a quick tap on the ground: { x, y } on the stage, the game walks you there
@@ -154,6 +154,9 @@ export function createUI(opts) {
   root.appendChild(pad);
   const joy = el('div', 'joy', '<div class="knob"></div>');
   root.appendChild(joy);
+  // the second stick, for the camera: it appears wherever a thumb lands on the right side (away from the buttons)
+  const camJoy = el('div', 'joy camJoy', '<div class="knob"></div>');
+  root.appendChild(camJoy);
   const aimRing = el('div', 'aimRing', '<div class="aimDot"></div>');
   root.appendChild(aimRing);
 
@@ -337,6 +340,13 @@ export function createUI(opts) {
       touches.set(e.pointerId, { kind: 'mouse', st, button: e.button });
       return;
     }
+    // the right side of the screen, in the close view: the camera stick
+    if (onButtonSide(p.x) && opts.camStick && opts.camStick() && ![...touches.values()].some((t) => t.kind === 'cam')) {
+      touches.set(e.pointerId, { kind: 'cam', sx: p.x, sy: p.y, x: p.x, y: p.y });
+      camJoy.style.display = 'block'; camJoy.style.left = p.x + 'px'; camJoy.style.top = p.y + 'px';
+      camJoy.classList.remove('fade'); camJoy.firstChild.style.transform = '';
+      return;
+    }
     const field = [...touches.values()].filter((t) => t.kind === 'field');
     if (field.length === 1 && !pinch) {
       // a second finger: pinch to zoom (the first finger stops steering)
@@ -359,15 +369,18 @@ export function createUI(opts) {
     if (t.kind === 'btn') { moveButton(t, e); return; }
     t.x = p.x; t.y = p.y;
     if (pinch && (pinch.a === t || pinch.b === t)) { updatePinch(); return; }
+    if (t.kind === 'cam') {
+      let dx = t.x - t.sx, dy = t.y - t.sy;
+      const len = Math.hypot(dx, dy);
+      if (len > R * 1.25) { const k = (len - R * 1.25) / len; t.sx += dx * k; t.sy += dy * k; dx = t.x - t.sx; dy = t.y - t.sy; camJoy.style.left = t.sx + 'px'; camJoy.style.top = t.sy + 'px'; }
+      const l2 = Math.hypot(dx, dy), k = l2 > R ? R / l2 : 1;
+      input.look.x = (dx * k) / R; input.look.y = (dy * k) / R; input.look.active = l2 > 5;
+      camJoy.firstChild.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
+      return;
+    }
     if (t.kind !== 'field' || t.pinched) return;
     let dx = t.x - t.sx, dy = t.y - t.sy;
     t.far = Math.max(t.far, Math.hypot(dx, dy));
-    // a drag that starts on the buttons' side turns the view instead
-    if (!t.stick && (t.orbit || (t.far > TAP_MOVE && onButtonSide(t.sx)))) {
-      if (t.orbit) input.orbit += p.x - t.lx;
-      t.orbit = true; t.lx = p.x; input.tap = null;
-      return;
-    }
     // a drag turns into the joystick, which appears where the drag started
     if (!t.stick && t.far > TAP_MOVE && !onButtonSide(t.sx)) {
       t.stick = true;
@@ -393,10 +406,15 @@ export function createUI(opts) {
     if (t.kind === 'btn') endButton(t);
     else if (t.kind === 'mouse') t.st.down = false;
     else if (t.kind === 'pinch2') pinch = null;
+    else if (t.kind === 'cam') {
+      input.look.x = input.look.y = 0; input.look.active = false;
+      camJoy.classList.add('fade');
+      setTimeout(() => { if (![...touches.values()].some((x) => x.kind === 'cam')) camJoy.style.display = 'none'; }, 180);
+    }
     else if (t.kind === 'field') {
       if (pinch && pinch.a === t) { pinch = null; touches.forEach((o, id) => { if (o.kind === 'pinch2') touches.delete(id); }); }
       // a quick tap that didn't wander: walk there
-      if (!t.stick && !t.orbit && !t.pinched && t.far <= TAP_MOVE && performance.now() - t.t0 < TAP_TIME && e.type === 'pointerup') { input.tap = { x: t.x, y: t.y }; hideHint('move'); }
+      if (!t.stick && !t.pinched && t.far <= TAP_MOVE && performance.now() - t.t0 < TAP_TIME && e.type === 'pointerup') { input.tap = { x: t.x, y: t.y }; hideHint('move'); }
       releaseStick(t);
     }
   }
@@ -538,6 +556,7 @@ export function createUI(opts) {
       // let go of anything held
       for (const st of [input.attack, input.ranged]) { st.down = false; st.aim.active = false; st.pressed = false; }
       input.move.x = input.move.y = 0; input.move.active = false; input.roll.pressed = false; input.tap = null;
+      input.look.x = input.look.y = 0; input.look.active = false; camJoy.style.display = 'none';
       touches.clear(); joy.style.display = 'none'; aimRing.style.display = 'none';
       pad.querySelectorAll('.held').forEach((b) => b.classList.remove('held'));
       showLine();

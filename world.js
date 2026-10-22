@@ -2137,7 +2137,9 @@ export function buildCaves(root, D, saved = {}) {
     if (D.mirror) {
       const J = find('J')[0], M = D.mirror;
       twin = { pm: mirrorPerson('#dfe8f4', 0.55, '#9ff3ff'), x: J.x, z: J.z, jx: J.x, jz: J.z, on: false, lx: 0, lz: 0, told: false,
-        ax: wx(M.axis), box: { x0: wx(M.axis + 1) - 0.5, x1: wx(M.x1) + 0.5, z0: wz(M.z0) - 0.5, z1: wz(M.z1) + 0.5 } };
+        ax: wx(M.axis), box: { x0: wx(M.axis + 1) - 0.5, x1: wx(M.x1) + 0.5, z0: wz(M.z0) - 0.5, z1: wz(M.z1) + 0.5 },
+        // the twin's own half of the room: it never leaves it, whatever the walls' heights say
+        tb: { x0: wx(M.x0) - 0.5 + 0.3, z0: wz(M.z0) - 0.5 + 0.3, z1: wz(M.z1) + 0.5 - 0.3 } };
       twin.pm.root.position.set(J.x, J.y, J.z); twin.pm.root.visible = false;
     }
     const Y = find('Y')[0];
@@ -2174,7 +2176,7 @@ export function buildCaves(root, D, saved = {}) {
         // it moves as you do, the other way round across the glass; its own walls stop it
         const dx = -(P.x - twin.lx), dz = P.z - twin.lz;
         twin.lx = P.x; twin.lz = P.z;
-        const ok = (x, z) => x < twin.ax - 0.45 && terrainOk(x, z, hAt(...cellOf(twin.x, twin.z)), 0.28) && !solidAt(x, z, 0.28);
+        const ok = (x, z) => x < twin.ax - 0.45 && x > twin.tb.x0 && z > twin.tb.z0 && z < twin.tb.z1 && terrainOk(x, z, hAt(...cellOf(twin.x, twin.z)), 0.28) && !solidAt(x, z, 0.28);
         const n = Math.ceil(Math.hypot(dx, dz) / 0.15) || 1;
         for (let k = 0; k < n; k++) { const sx = dx / n, sz = dz / n; if (ok(twin.x + sx, twin.z + sz)) { twin.x += sx; twin.z += sz; } else if (ok(twin.x + sx, twin.z)) twin.x += sx; else if (ok(twin.x, twin.z + sz)) twin.z += sz; }
         const pm = twin.pm;
@@ -2294,7 +2296,7 @@ export function buildCaves(root, D, saved = {}) {
     basinWater = wm2;
     solids.push({ x: basinAt.x, z: basinAt.z, r: 0.6, h: 0.7 });
   }
-  const wheelDoors = doorsOf('Q', 'wheel');
+  const wheelDoors = TMP ? [] : doorsOf('Q', 'wheel');   // the Temple's Q is its mirror door, not a wheel door
   // a water wheel set in the wall over the wheel door; it turns when the basin's full
   let wheel = null;
   if (wheelDoors.length) {

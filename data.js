@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.15.4';
+export const VERSION = '0.15.5';
 
 export const CONFIG = {
   // ----- the player -----

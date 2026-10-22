@@ -115,6 +115,20 @@ export function createUI(opts) {
   const pauseBtn = el('button', 'pauseBtn glass', ICON.pause);
   pauseBtn.setAttribute('aria-label', 'Pause');
   hud.appendChild(pauseBtn);
+  // at sea: switch between the view from above and the low view out to the horizon
+  const SEAVIEW = {
+    horizon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 15h20"/><path d="M5 19h14"/><circle cx="12" cy="10" r="3.2"/><path d="M12 3v1.6M5.6 6.2l1.1 1.1M18.4 6.2l-1.1 1.1"/></svg>',
+    top: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
+  };
+  const seaViewBtn = el('button', 'seaViewBtn glass hidden', SEAVIEW.horizon);
+  seaViewBtn.setAttribute('aria-label', 'Switch view');
+  hud.appendChild(seaViewBtn);
+  seaViewBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); opts.onSeaView && opts.onSeaView(); });
+  // mode: null (not sailing), 'top' or 'horizon' (the view showing now); the button shows the other one
+  function setSeaView(mode) {
+    seaViewBtn.classList.toggle('hidden', !mode);
+    if (mode) { seaViewBtn.innerHTML = mode === 'horizon' ? SEAVIEW.top : SEAVIEW.horizon; seaViewBtn.setAttribute('aria-label', mode === 'horizon' ? 'View from above' : 'View the horizon'); }
+  }
   const hint = el('div', 'hint glass');
   hud.appendChild(hint);
   const numbers = el('div', 'numbers');
@@ -402,6 +416,7 @@ export function createUI(opts) {
     if (k === 'j') { input.attack.down = true; input.attack.pressed = true; }
     if (k === 'k') { if (toolCur === 'sling') { input.ranged.down = true; input.ranged.pressed = true; } else input.use = { aim: null }; }
     // Q cycles tools; 1 to 9 pick one
+    if (k === 'v') { opts.onSeaView && opts.onSeaView(); return; }
     if (k === 'q' && toolList.length > 1) { const i = toolList.findIndex((x) => x.id === toolCur); opts.onTool && opts.onTool(toolList[(i + 1) % toolList.length].id); }
     if (/^[1-9]$/.test(k) && toolList[+k - 1]) opts.onTool && opts.onTool(toolList[+k - 1].id);
   });
@@ -789,7 +804,12 @@ export function createUI(opts) {
     isle.classList.toggle('hidden', !state);
     if (!state || !mapBase) return;
     if (mapOpen) { const [a, b2, c] = bigCentre(); drawMap(bigCv, a, b2, c, true); return; }
-    if ((mapTick = (mapTick + 1) % 2) === 0) drawMap(isleCv, state.x, state.z, 3.6, false);
+    if ((mapTick = (mapTick + 1) % 2) === 0) {
+      // the small map can turn with the view (the low view at sea); the big chart stays north-up
+      const r0 = mapRot; if (state.rot !== undefined) mapRot = state.rot;
+      drawMap(isleCv, state.x, state.z, 3.6, false);
+      mapRot = r0;
+    }
   }
   function openMap() {
     if (!mapState || mapOpen) return;
@@ -1124,7 +1144,7 @@ export function createUI(opts) {
   return {
     input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
     titleMenu, closeTitle, endCard, savedMark, fmtTime, buildMap, islandMap, closeMap, mapIsOpen: () => mapOpen,
-    setTools, setToolArt, draftLabels, setHeat, forgeMenu, openTools: () => openWheel(null), closeTools: () => closeWheel(false), setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
+    setTools, setToolArt, draftLabels, setHeat, forgeMenu, setSeaView, openTools: () => openWheel(null), closeTools: () => closeWheel(false), setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

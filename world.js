@@ -3,7 +3,7 @@
    Lanternhold's Keeper's Cove, the first Rift, Gullcliff Caves and the Sunken Belfry (both from buildCaves), Brinemoor, and the Glass Sea. */
 import * as THREE from 'three';
 import { PALETTE, RIFT } from '@rf/data';
-import { Batch, MAT, PROPS, ORCHARD, rng, fbm, noise, col, shade, pick, clamp, lerp, TAU, buildSea, buildSky, buildGrass, buildBoat, buildDummy, buildFish, buildChest, buildHeartGlass, buildKeepsake, buildKitchen, buildSails, buildGate, MARKET_PROPS, CINDER_PROPS, moltenMaterial, MOLTEN, buildSailboat, buildBelfryTower, buildMiniIsland, causticMaterial, CAUSTICS, WIND, SKY_UNIFORMS } from '@rf/art';
+import { buildPlayer, Batch, MAT, PROPS, ORCHARD, rng, fbm, noise, col, shade, pick, clamp, lerp, TAU, buildSea, buildSky, buildGrass, buildBoat, buildDummy, buildFish, buildChest, buildHeartGlass, buildKeepsake, buildKitchen, buildSails, buildGate, MARKET_PROPS, CINDER_PROPS, moltenMaterial, MOLTEN, buildSailboat, buildBelfryTower, buildMiniIsland, causticMaterial, CAUSTICS, WIND, SKY_UNIFORMS } from '@rf/art';
 
 const V3 = THREE.Vector3;
 const N = 140;                // Lanternhold is N x N cells of 1 x 1
@@ -556,10 +556,16 @@ export function buildCove(scene) {
   const brambles = [];
   for (let x = 38.3; x <= 48.3; x += 0.95) brambles.push([x, -2.2]);
   for (let z = -5.6; z < -2.4; z += 0.95) brambles.push([48.3, z]);
+  // each clump its own little mesh, so the Lantern can burn them one by one
+  const burnables = [];
   for (const [x, z] of brambles) {
-    at(x, z); PROPS.bramble(b, x, cellH(x, z), z, r);
+    at(x, z);
+    const bb = new Batch(1680 + burnables.length);
+    PROPS.bramble(bb, 0, 0, 0, r);
+    const m = bb.mesh(); m.position.set(x, cellH(x, z), z); m.matrixAutoUpdate = true; m.castShadow = true; scene.add(m);
     const sd = { x, z, r: 0.55, h: 1.4, bramble: true };
     dynamicSolids.push(sd); take(x, z, 0);
+    burnables.push({ m, sd, x, z, burnt: false, t: 0, grp: 'wall' });
   }
   // ----- Knot Hill: the sealed stone, ringed by standing stones -----
   const knotY = cellH(ISLE.knot.x, ISLE.knot.z);
@@ -790,6 +796,54 @@ export function buildCove(scene) {
   function setMirror(on) {
     if (on && !mirrorMat) mirrorMat = mirrorPicture();
     pool.userData.water.material = on ? mirrorMat : waterMat;
+  }
+  // ----- the Old Saltworks: brambles grown up round something, the night the sky cracked. Nothing cuts them; fire might -----
+  const salt = (() => {
+    let at = null;
+    for (const [dx, dz] of [[0, 0], [-3, -2], [2, -3], [-4, 2], [3, 2], [-2, 4], [4, -1], [-5, -3]]) {
+      const x = 53 + dx, z = 16 + dz;
+      if (cellH(x, z) > 0.4 && flatAround(x, z, 3) && freeAround(x, z, 3, 3)) { at = { x: x + 0.5, z: z + 0.5, y: cellH(x, z) }; break; }
+    }
+    if (!at) at = { x: 50.5, z: 14.5, y: cellH(50.5, 14.5) };
+    take(at.x, at.z, 4);
+    const clumps = [], rr = rng(77);
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * TAU, rad = 2.5 + rr() * 0.4, x = at.x + Math.cos(a) * rad, z = at.z + Math.sin(a) * rad;
+      const bb = new Batch(1700 + k);
+      for (let n = 0; n < 7; n++) bb.box(0.18 + rr() * 0.2, 0.7 + rr() * 1.1, 0.18 + rr() * 0.2, pick(['#2a1f2e', '#33263a', '#3a2a3a', '#241a28'], rr), (rr() - 0.5) * 1.1, 0.5, (rr() - 0.5) * 1.1, { rotZ: (rr() - 0.5) * 1.2, rotX: (rr() - 0.5) * 1.2 });
+      for (let n = 0; n < 4; n++) bb.box(0.08, 0.08, 0.08, '#ff9fe0', (rr() - 0.5) * 1, 0.5 + rr() * 1, (rr() - 0.5) * 1, { glow: 1.4, jitter: 0 });
+      const m = bb.mesh(); m.position.set(x, cellH(x, z), z); m.matrixAutoUpdate = true; scene.add(m);
+      const sd = { x, z, r: 0.75, h: 2, bramble: true };
+      dynamicSolids.push(sd);
+      const c = { m, sd, x, z, burnt: false, t: 0, grp: 'ring' };
+      clumps.push(c); burnables.push(c);
+    }
+    // what they were growing round: a keeper's chart case, its seal still whole
+    const pb = new Batch(1720);
+    pb.box(0.9, 0.5, 0.6, '#6b4a33', 0, 0.25, 0, { top: '#7a5236' }); pb.box(0.95, 0.12, 0.65, '#c9a24a', 0, 0.42, 0); pb.box(0.3, 0.3, 0.06, '#c94a3f', 0, 0.3, 0.32, { glow: 0.6 });
+    const page = pb.mesh(); page.position.set(at.x, at.y, at.z); page.matrixAutoUpdate = true; scene.add(page);
+    return { at, clumps, page, taken: false, get burnt() { return clumps.every((c) => c.burnt); } };
+  })();
+  // a flame reaching (x, z): any bramble in reach catches; returns how many
+  const burnOne = (c) => { c.burnt = true; c.t = 0; const i = dynamicSolids.indexOf(c.sd); if (i >= 0) dynamicSolids.splice(i, 1); };
+  function burnBrambles(x, z, rad) {
+    let n = 0;
+    for (const c of burnables) if (!c.burnt && Math.hypot(c.x - x, c.z - z) < rad + 0.8) { burnOne(c); n++; }
+    return n;
+  }
+  // fire runs along a bramble wall from clump to clump; returns the clumps burning right now (for the flames)
+  function updateSalt(dt) {
+    const burning = [];
+    for (const c of burnables) {
+      if (!c.burnt && burnables.some((o) => o.grp === c.grp && o.burnt && o.t > 0.22 && o.t < 0.6 && Math.hypot(o.x - c.x, o.z - c.z) < 1.7)) burnOne(c);
+      if (c.burnt && c.t < 1.2) { c.t += dt; const k = clamp(1 - c.t / 0.9, 0, 1); c.m.scale.set(1, Math.max(0.01, k), 1); c.m.visible = k > 0.01; if (c.t < 0.9) burning.push(c); }
+    }
+    return burning;
+  }
+  const burnState = () => burnables.filter((c) => c.burnt).length ? burnables.map((c) => (c.burnt ? 1 : 0)).join('') : '';
+  function restoreSalt(bs, taken) {
+    if (bs) burnables.forEach((c, k) => { if (bs[k] === '1') { burnOne(c); c.t = 9; c.m.visible = false; } });
+    if (taken) { salt.taken = true; salt.page.visible = false; }
   }
   take(5.6, -20.8, 3);
   // Ennis the lamplighter keeps to the harbour, by the first waystone
@@ -1260,7 +1314,7 @@ export function buildCove(scene) {
     takeKeepsake(id) { const k = keepsakes.find((v) => v.id === id); if (k && !k.taken) { k.taken = true; k.m.visible = false; } return k; },
     showKitchen() { if (kitchen.visible) return; kitchen.visible = true; dynamicSolids.push(...kitchenSolids); },
     forge, forgeAt, showForge() { if (forge.visible) return; forge.visible = true; dynamicSolids.push(...forgeSolids); },
-    pool, poolAt, setMirror,
+    pool, poolAt, setMirror, salt, burnBrambles, updateSalt, restoreSalt, burnState, burnables,
     porch, porchAt, showPorch() { if (porch.visible) return; porch.visible = true; dynamicSolids.push(...porchSolids); },
     spots: {
       maren: { x: cotX - 0.4, z: cotZ + 2.9, face: 0 },
@@ -1824,7 +1878,7 @@ export function buildCaves(root, D, saved = {}) {
   for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) if (ch(i, j) === 'F') crateCells.add(j * Wd + i);
   const crateTop = () => Math.max(-1.0, wl + 0.58);   // a crate floats half out of the water, or sits on the sunken floor
   // theme: the caves are violet stone; the Belfry is green-grey stone, bronze and old water
-  const BEL = D.theme === 'belfry', KIL = D.theme === 'kiln';
+  const BEL = D.theme === 'belfry', KIL = D.theme === 'kiln', TMP = D.theme === 'temple';
   const hAt = (i, j) => (i < 0 || j < 0 || i >= Wd || j >= Hd ? 1.9 : crateCells.has(j * Wd + i) ? crateTop() : H[j * Wd + i]);
   const cellH = (x, z) => { const [i, j] = cellOf(x, z); return hAt(i, j); };
   // every special cell, by kind
@@ -1842,11 +1896,11 @@ export function buildCaves(root, D, saved = {}) {
   // ----- the terrain: tops, and sides where a neighbour is lower -----
   const tb = new Batch(901);
   const tc = new THREE.Color(), warm = new THREE.Color(BEL ? '#ffc88a' : '#ffb46b');
-  const FLOOR = KIL ? ['#5a4440', '#62483f', '#54403c', '#5e4642'] : BEL ? ['#5f6e6a', '#667570', '#5a6864', '#62716c'] : ['#6a6478', '#726b80', '#645e72', '#6e687c'];
-  const LEDGE = KIL ? ['#7a5a4a', '#82604e', '#725446'] : BEL ? ['#7d8a84', '#86928c', '#76847e'] : ['#847d92', '#8c859a', '#7d768c'];
-  const ROCK_TOP = KIL ? ['#2a1e1c', '#30221e', '#261a18'] : BEL ? ['#26302e', '#2b3532', '#232c2a'] : ['#33303e', '#383444', '#2f2c3a'];
+  const FLOOR = TMP ? ['#aeb8cc', '#b6c0d4', '#a8b2c6', '#b2bcd0'] : KIL ? ['#5a4440', '#62483f', '#54403c', '#5e4642'] : BEL ? ['#5f6e6a', '#667570', '#5a6864', '#62716c'] : ['#6a6478', '#726b80', '#645e72', '#6e687c'];
+  const LEDGE = TMP ? ['#c8d0e0', '#d0d8e6', '#c2cadc'] : KIL ? ['#7a5a4a', '#82604e', '#725446'] : BEL ? ['#7d8a84', '#86928c', '#76847e'] : ['#847d92', '#8c859a', '#7d768c'];
+  const ROCK_TOP = TMP ? ['#1c1a30', '#211f37', '#18162a'] : KIL ? ['#2a1e1c', '#30221e', '#261a18'] : BEL ? ['#26302e', '#2b3532', '#232c2a'] : ['#33303e', '#383444', '#2f2c3a'];
   const ROCK_SIDE = KIL ? ['#6a3a2e', '#723e30', '#5e342a'] : BEL ? ['#4a5a56', '#52625e', '#44544f'] : ['#5a5468', '#625b70', '#544e62'];
-  const SUNK = ['#4a5a56', '#52605c', '#465450'];
+  const SUNK = TMP ? ['#a2acc2', '#aab4ca', '#9ca6bc'] : ['#4a5a56', '#52605c', '#465450'];
   for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) {
     const h = H[j * Wd + i], kind = K[j * Wd + i];
     if (kind === 'chasm') continue;
@@ -1865,7 +1919,8 @@ export function buildCaves(root, D, saved = {}) {
       const lo = Math.max(nh, -5);
       for (let y = h; y > lo + 0.001; y -= 0.5) {
         const y0 = Math.max(lo, y - 0.5);
-        const sc = kind === 'rock' ? ROCK_SIDE[(Math.floor(y * 2) + i + j) % 3] : BEL ? '#3e4a47' : KIL ? '#3a2a26' : '#3a3644';
+        // the Temple's walls are the inside of a lighthouse: white and red bands
+        const sc = kind === 'rock' && TMP ? ((Math.floor(y + 6) % 3 === 1) ? '#b8443a' : '#e2dbcf') : kind === 'rock' ? ROCK_SIDE[(Math.floor(y * 2) + i + j) % 3] : TMP ? '#8a90a8' : BEL ? '#3e4a47' : KIL ? '#3a2a26' : '#3a3644';
         // deeper into a chasm it all fades to black
         const fade = clamp(1 + y0 / 4.5, 0.08, 1);
         const sl = (kind === 'rock' ? lightAt(cx + di, cz + dj) : lit) * fade;
@@ -1912,8 +1967,8 @@ export function buildCaves(root, D, saved = {}) {
     props.box(0.5, 0.25, 0.5, '#5d5a66', 0, 0.12, 0); props.box(0.16, 1.4, 0.16, '#3a3a44', 0, 0.8, 0);
     props.box(0.44, 0.12, 0.44, '#2c2c36', 0, 1.5, 0);
     props.pop();
-    glow.box(0.26, 0.34, 0.26, KIL ? '#ff7a2a' : '#ff9a3c', t.x, t.y + 1.72, t.z, { glow: 3.4, jitter: 0, rotY: 0.6 });
-    glow.box(0.14, 0.24, 0.14, '#ffd36b', t.x, t.y + 1.86, t.z, { glow: 4.2, jitter: 0, rotY: 1.2 });
+    glow.box(0.26, 0.34, 0.26, TMP ? '#bff6ff' : KIL ? '#ff7a2a' : '#ff9a3c', t.x, t.y + 1.72, t.z, { glow: 3.4, jitter: 0, rotY: 0.6 });
+    glow.box(0.14, 0.24, 0.14, TMP ? '#ffffff' : '#ffd36b', t.x, t.y + 1.86, t.z, { glow: 4.2, jitter: 0, rotY: 1.2 });
     solids.push({ x: t.x, z: t.z, r: 0.3, h: 2 });
   }
   for (const p of find('r')) {
@@ -1951,7 +2006,7 @@ export function buildCaves(root, D, saved = {}) {
       for (let k = 0; k <= n; k++) { const t = -0.5 + k / n; bb.box(0.1, 2.0, 0.1, '#3a3a44', along ? t * w : 0, 1.0, along ? 0 : t * d); }
       bb.box(along ? w : 0.2, 0.16, along ? 0.2 : d, '#2c2c36', 0, 1.95, 0); bb.box(along ? w : 0.2, 0.16, along ? 0.2 : d, '#2c2c36', 0, 0.7, 0);
     } else {
-      const col2 = kind === 'boss' ? (BEL ? '#4a5a5a' : '#5a4a6a') : kind === 'key' ? '#6b4a33' : kind === 'wheel' ? '#5d3d26' : '#5d5a66';
+      const col2 = kind === 'mirror' ? '#cdd8ea' : kind === 'boss' ? (BEL ? '#4a5a5a' : '#5a4a6a') : kind === 'key' ? '#6b4a33' : kind === 'wheel' ? '#5d3d26' : '#5d5a66';
       if (kind === 'wheel') for (let k = 0; k < 4; k++) bb.box(w + 0.04, 0.12, d + 0.04, '#3a3a44', 0, 0.3 + k * 0.5, 0);
       bb.box(w, 2.0, d, col2, 0, 1.0, 0, { top: shade(col2, 1.15) });
       if (kind === 'key') { bb.box(w * 0.98, 0.14, d * 0.98, '#c9a24a', 0, 0.5, 0); bb.box(w * 0.98, 0.14, d * 0.98, '#c9a24a', 0, 1.6, 0); bb.box(Math.min(w, d) < 1.2 ? w + 0.08 : 0.36, 0.44, Math.min(w, d) < 1.2 ? d + 0.08 : 0.36, '#e0b85a', 0, 1.1, 0); }
@@ -2032,6 +2087,142 @@ export function buildCaves(root, D, saved = {}) {
   const keepsakes = [];
   const ksKind = D.keepsake || 'cup';
   for (const p of find('c')) { const m = buildKeepsake(ksKind); m.position.set(p.x, p.y, p.z); root.add(m); keepsakes.push({ id: ksKind, kind: ksKind, x: p.x, z: p.z, y: p.y, m, taken: false }); }
+  // ----- the Temple's workings: lamps and braziers, the glass and your twin behind it, and your reflection -----
+  const lamps = [];
+  let twin = null, hunter = null;
+  const plates = [], mirrorDoors = TMP ? doorsOf('Q', 'mirror') : [];
+  const HUNT = D.hunter || {};
+  const glassMat = (col, op) => new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.18, roughness: 0.15, metalness: 0.55, transparent: true, opacity: op });
+  // a person made of mirror: your own shape, in silver (your twin) or dark glass (your reflection)
+  function mirrorPerson(col, op, eye) {
+    const pm = buildPlayer();
+    const mat = glassMat(col, op);
+    pm.root.traverse((o) => { if (o.isMesh) { o.material = mat; o.castShadow = false; } });
+    if (eye) for (const e of pm.eyes || []) e.traverse((o) => { if (o.isMesh) o.material = new THREE.MeshBasicMaterial({ color: new THREE.Color(eye).multiplyScalar(2.2) }); });
+    root.add(pm.root);
+    return pm;
+  }
+  if (TMP) {
+    // lamps: a stone stand and a bowl; lit, a cold white flame and a ring of light on the floor that your reflection won't cross
+    const lampBits = [['N', false, false], ['U', true, false], ['V', false, true]];
+    for (const [c, lit, brazier] of lampBits) for (const p of find(c)) {
+      const sb = brazier ? 1.25 : 1;
+      props.push(p.x, p.y, p.z);
+      props.box(0.62 * sb, 0.3, 0.62 * sb, '#9a96a6', 0, 0.15, 0, { top: '#b0acbb' }); props.box(0.26 * sb, 0.9, 0.26 * sb, '#7d7a8a', 0, 0.75, 0);
+      props.box(0.78 * sb, 0.18, 0.78 * sb, '#c9a24a', 0, 1.25, 0); props.box(0.6 * sb, 0.14, 0.6 * sb, '#2a2838', 0, 1.36, 0);
+      props.pop();
+      const fb = new Batch(1300 + lamps.length);
+      fb.box(0.34 * sb, 0.46 * sb, 0.34 * sb, '#bff6ff', 0, 0.23 * sb, 0, { glow: 3.2, jitter: 0, rotY: 0.6 });
+      fb.box(0.18 * sb, 0.36 * sb, 0.18 * sb, '#ffffff', 0, 0.42 * sb, 0, { glow: 4.5, jitter: 0, rotY: 1.2 });
+      const flame = fb.mesh(MAT.glow); flame.castShadow = false; flame.matrixAutoUpdate = true; flame.position.set(p.x, p.y + 1.43, p.z); root.add(flame);
+      const ring = new THREE.Mesh(new THREE.CircleGeometry(HUNT.lampR || 3.4, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color('#bff6ff'), transparent: true, opacity: 0.08, depthWrite: false, blending: THREE.AdditiveBlending }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(p.x, p.y + 0.03, p.z); root.add(ring);
+      solids.push({ x: p.x, z: p.z, r: 0.4 * sb, h: 1.5 });
+      const L = { x: p.x, z: p.z, y: p.y, lit, brazier, t: 0, flame, ring, k: lit ? 1 : 0, i: lamps.length };
+      lamps.push(L);
+      targets.push({ id: 'lamp', lamp: L, x: p.x, y: p.y + 1.4, z: p.z, r: 0.55, h: 1.2, get on() { return L.lit; }, onHit: () => lightLamp(L) });
+    }
+    // the glass down the middle of the mirror room
+    const gb = new Batch(1290);
+    for (const p of find('Z')) { gb.box(0.18, 2.6, 1.0, '#dfe8f4', p.x, p.y + 1.3, p.z, { jitter: 0 }); solids.push({ x: p.x, z: p.z, r: 0.5, h: 4 }); }
+    const gm = gb.mesh(); gm.material = glassMat('#cfe0f4', 0.35); gm.castShadow = false; root.add(gm);
+    // the plates
+    for (const p of find('q')) {
+      const pb = new Batch(1295 + plates.length);
+      pb.box(0.86, 0.12, 0.86, '#c9a24a', 0, 0.06, 0, { top: '#e0b85a' }); pb.box(0.5, 0.13, 0.5, '#bff6ff', 0, 0.07, 0, { glow: 0.8, jitter: 0 });
+      const m = pb.mesh(); m.matrixAutoUpdate = true; m.position.set(p.x, p.y, p.z); root.add(m);
+      plates.push({ x: p.x, z: p.z, m, down: false, twin: p.i < (D.mirror ? D.mirror.axis : 0) });
+    }
+    if (D.mirror) {
+      const J = find('J')[0], M = D.mirror;
+      twin = { pm: mirrorPerson('#dfe8f4', 0.55, '#9ff3ff'), x: J.x, z: J.z, jx: J.x, jz: J.z, on: false, lx: 0, lz: 0, told: false,
+        ax: wx(M.axis), box: { x0: wx(M.axis + 1) - 0.5, x1: wx(M.x1) + 0.5, z0: wz(M.z0) - 0.5, z1: wz(M.z1) + 0.5 } };
+      twin.pm.root.position.set(J.x, J.y, J.z); twin.pm.root.visible = false;
+    }
+    const Y = find('Y')[0];
+    if (Y) hunter = { pm: mirrorPerson('#2a2846', 0.82, '#ff9fe0'), awake: false, wake: Y, path: [], tNow: 0, delay: HUNT.delay || 3.6, rec: 0, x: 0, z: 0, y: 0, vis: 0, off: false };
+    if (hunter) hunter.pm.root.visible = false;
+  }
+  function lightLamp(L, quiet) {
+    if (L.lit && !L.brazier) return false;
+    L.lit = true; L.t = L.brazier ? (state.burnFor || 9) : 0;
+    if (!quiet && hooks) { hooks.sound.sfx('beacon'); hooks.onEvent('lamp', L); }
+    return true;
+  }
+  // a lit lamp (or brazier) whose light reaches (x, z)
+  const lampAt = (x, z, pad = 0) => lamps.find((L) => L.lit && Math.hypot(x - L.x, z - L.z) < (HUNT.lampR || 3.4) + pad) || null;
+  function resetHunter() {
+    if (!hunter) return;
+    hunter.path.length = 0; hunter.tNow = 0; hunter.delay = HUNT.delay || 3.6; hunter.vis = 0; hunter.pm.root.visible = false;
+  }
+  function updateTemple(dt, t, P) {
+    for (const L of lamps) {
+      if (L.brazier && L.lit) { L.t -= dt; if (L.t <= 0) { L.lit = false; if (hooks) hooks.sound.sfx('hiss'); } }
+      L.k = lerp(L.k, L.lit ? 1 : 0, Math.min(1, dt * 6));
+      L.flame.visible = L.k > 0.05;
+      const fl = (0.85 + Math.sin(t * 13 + L.i) * 0.1) * L.k * (L.brazier && L.lit && L.t < 2 ? 0.6 + Math.sin(t * 20) * 0.4 : 1);
+      L.flame.scale.set(fl, fl * (1 + Math.sin(t * 9 + L.i) * 0.12), fl); L.flame.rotation.y = t * 0.7;
+      L.ring.material.opacity = 0.09 * L.k + (L.lit ? Math.sin(t * 2 + L.i) * 0.015 : 0);
+    }
+    // the plates and your twin
+    if (twin) {
+      const b = twin.box, inside = P.x > b.x0 && P.x < b.x1 && P.z > b.z0 && P.z < b.z1;
+      if (inside && !twin.on) { twin.on = true; twin.x = twin.jx; twin.z = twin.jz; twin.lx = P.x; twin.lz = P.z; twin.pm.root.visible = true; if (!twin.told && hooks) { twin.told = true; hooks.onEvent('twin'); } }
+      if (!inside && twin.on) { twin.on = false; }
+      if (twin.on) {
+        // it moves as you do, the other way round across the glass; its own walls stop it
+        const dx = -(P.x - twin.lx), dz = P.z - twin.lz;
+        twin.lx = P.x; twin.lz = P.z;
+        const ok = (x, z) => x < twin.ax - 0.45 && terrainOk(x, z, hAt(...cellOf(twin.x, twin.z)), 0.28) && !solidAt(x, z, 0.28);
+        const n = Math.ceil(Math.hypot(dx, dz) / 0.15) || 1;
+        for (let k = 0; k < n; k++) { const sx = dx / n, sz = dz / n; if (ok(twin.x + sx, twin.z + sz)) { twin.x += sx; twin.z += sz; } else if (ok(twin.x + sx, twin.z)) twin.x += sx; else if (ok(twin.x, twin.z + sz)) twin.z += sz; }
+        const pm = twin.pm;
+        pm.root.position.set(twin.x, cellH(twin.x, twin.z), twin.z);
+        pm.root.rotation.y = -P.face;
+        if (P.model) { pm.legL.rotation.x = P.model.legL.rotation.x; pm.legR.rotation.x = P.model.legR.rotation.x; pm.armL.rotation.x = P.model.armR.rotation.x; pm.armR.rotation.x = P.model.armL.rotation.x; }
+      }
+      twin.pm.root.visible = twin.on;
+      const tx = twin.on ? twin.x : 1e9, tz = twin.on ? twin.z : 1e9;
+      let all = plates.length > 0;
+      for (const pl of plates) {
+        const down = pl.twin ? Math.hypot(tx - pl.x, tz - pl.z) < 0.6 : Math.hypot(P.x - pl.x, P.z - pl.z) < 0.6;
+        if (down !== pl.down) { pl.down = down; if (hooks) hooks.sound.sfx(down ? 'click' : 'tick'); }
+        pl.m.position.y = lerp(pl.m.position.y, (down ? -0.08 : 0) + cellH(pl.x, pl.z), Math.min(1, dt * 12));
+        if (!down) all = false;
+      }
+      if (all && mirrorDoors.some((d) => !d.open)) { for (const d of mirrorDoors) openDoor(d); if (hooks) hooks.onEvent('mirrorOpen'); }
+    }
+    // your reflection: it walks your path a few seconds behind; it won't walk into lamplight
+    const H2 = hunter;
+    if (H2 && !state.bossDone) {
+      const arena = bossAt && P.z < bossAt.z + 7.5;
+      if (!H2.awake && Math.hypot(P.x - H2.wake.x, P.z - H2.wake.z) < 1.6) { H2.awake = true; H2.path.length = 0; H2.tNow = 0; if (hooks) hooks.onEvent('wake'); }
+      if (H2.awake && !arena && P.state !== 'dead') {
+        H2.tNow += dt;
+        H2.rec -= dt;
+        if (H2.rec <= 0) { H2.rec = 0.05; H2.path.push({ t: H2.tNow, x: P.x, z: P.z, y: P.y, f: P.face }); if (H2.path.length > 900) H2.path.shift(); }
+        // lamplight on where it's about to step pushes it back along the way; out of it, it closes the gap again
+        const at = (tt) => { const pth = H2.path; if (!pth.length) return null; let lo = 0, hi = pth.length - 1; if (tt <= pth[0].t) return pth[0]; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (pth[mid].t <= tt) lo = mid; else hi = mid - 1; } return pth[lo]; };
+        const s0 = at(H2.tNow - H2.delay);
+        if (s0 && lampAt(s0.x, s0.z)) H2.delay += dt * 2.2;
+        else H2.delay = Math.max(HUNT.delay || 3.6, H2.delay - dt * 0.35);
+        const s = at(H2.tNow - H2.delay);
+        const show = !!s && H2.tNow > H2.delay;
+        H2.vis = lerp(H2.vis, show ? 1 : 0, Math.min(1, dt * 3));
+        if (s) {
+          H2.x = s.x; H2.z = s.z; H2.y = s.y;
+          const pm = H2.pm;
+          pm.root.visible = H2.vis > 0.05;
+          pm.root.position.set(s.x, s.y, s.z); pm.root.rotation.y = s.f;
+          const ph = t * 9, mv = 0.6;
+          pm.legL.rotation.x = Math.sin(ph) * mv; pm.legR.rotation.x = -Math.sin(ph) * mv; pm.armL.rotation.x = -Math.sin(ph) * 0.5; pm.armR.rotation.x = Math.sin(ph) * 0.5;
+          if (show && Math.random() < dt * 8 && hooks) hooks.fx && hooks.fx.spark && hooks.fx.spark(s.x, s.y + 0.1, s.z);
+          // it caught you: it hurts, and it falls further back
+          if (show && Math.hypot(P.x - s.x, P.z - s.z) < (HUNT.catchR || 0.85) && hooks) { hooks.onEvent('caught', { x: s.x, z: s.z }); H2.delay += HUNT.push || 2.6; }
+        }
+      } else if (arena && H2.awake) { H2.vis = lerp(H2.vis, 0, Math.min(1, dt * 3)); H2.pm.root.visible = H2.vis > 0.05; }
+    } else if (H2) H2.pm.root.visible = false;
+  }
   // ----- the Belfry's workings: the Tide Bell, floating crates, burning oil, the basin and its wheel door -----
   const crates = [];
   for (const k of crateCells) {
@@ -2168,7 +2359,8 @@ export function buildCaves(root, D, saved = {}) {
   // the way out after the guardian: a column of light in her chamber
   const exitLight = (() => {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.2, 9, 16, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color('#9ff3ff').multiplyScalar(1.4), transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
-    m.position.set(bossAt.x, 4.5, bossAt.z + 5); m.visible = false; root.add(m);
+    // the way out: in the Temple, off to one side of the hall (its door is where the light would otherwise stand)
+    m.position.set(bossAt.x + (TMP ? 3.5 : 0), 4.5, bossAt.z + (TMP ? 4.5 : 5)); m.visible = false; root.add(m);
     return m;
   })();
   // a lantern you carry: the one light that follows you about
@@ -2283,7 +2475,7 @@ export function buildCaves(root, D, saved = {}) {
   // ----- the rooms coming alive -----
   let hooks = null;
   const amb = D.ambush, inAmb = (x, z) => x > wx(amb.x0) - 0.5 && x < wx(amb.x1) + 0.5 && z > wz(amb.z0) - 0.5 && z < wz(amb.z1) + 0.5;
-  const state = { ambushDone: false, sealed: false, keys: 0, bigKey: false, bossDone: false, opened: {}, doorsOpen: {}, seen: new Uint8Array(Wd * Hd), level: WT ? WT.start : null, doused: false, basin: false };
+  const state = { ambushDone: false, sealed: false, keys: 0, bigKey: false, bossDone: false, opened: {}, doorsOpen: {}, seen: new Uint8Array(Wd * Hd), level: WT ? WT.start : null, doused: false, basin: false, burnFor: 9 };
   // a journey saved earlier puts the caves back as they were
   function restore(sv) {
     if (!sv) return;
@@ -2298,13 +2490,16 @@ export function buildCaves(root, D, saved = {}) {
     if (sv.seen) { const b = atob(sv.seen); for (let k = 0; k < Math.min(b.length, state.seen.length); k++) state.seen[k] = b.charCodeAt(k); }
     if (sv.cup) for (const kp of keepsakes) { kp.taken = true; kp.m.visible = false; }
     if (state.bossDone) exitLight.visible = true;
+    // the Temple's lamps you lit stay lit
+    if (sv.lit) for (const k of sv.lit) if (lamps[k] && !lamps[k].brazier) { lamps[k].lit = true; lamps[k].k = 1; }
+    if (sv.hunterAwake && hunter) hunter.awake = true;
   }
   function snapshot() {
     const doorsOpen = {};
     doors.forEach((dr, k) => { if (dr.open && dr.kind !== 'bars') doorsOpen[k] = 1; });
     if (leverT && leverT.on) doorsOpen.lever = 1;
     let seen = ''; for (let k = 0; k < state.seen.length; k++) seen += String.fromCharCode(state.seen[k]);
-    return { ambushDone: state.ambushDone, keys: state.keys, bigKey: state.bigKey, bossDone: state.bossDone, opened: state.opened, doorsOpen, seen: btoa(seen), cup: keepsakes.every((k) => k.taken), visited: !!state.visited, level: state.level, doused: state.doused, basin: state.basin, slabs: state.slabs || [] };
+    return { ambushDone: state.ambushDone, keys: state.keys, bigKey: state.bigKey, bossDone: state.bossDone, opened: state.opened, doorsOpen, seen: btoa(seen), cup: keepsakes.every((k) => k.taken), visited: !!state.visited, level: state.level, doused: state.doused, basin: state.basin, slabs: state.slabs || [], lit: lamps.filter((L) => L.lit && !L.brazier).map((L) => L.i), hunterAwake: !!(hunter && hunter.awake) };
   }
   function attach(h) { hooks = h; }
   // the creatures placed in the map, made when you arrive
@@ -2319,6 +2514,7 @@ export function buildCaves(root, D, saved = {}) {
   let revealT = 0;
   function update(dt, t, P) {
     carry.position.set(P.x, P.y + 1.6, P.z + 0.3);
+    if (TMP) updateTemple(dt, t, P);
     // the water following the Tide Bell, the crates riding it
     if (WT) {
       if (wl !== wlTo) { wl = wlTo > wl ? Math.min(wlTo, wl + dt * 0.9) : Math.max(wlTo, wl - dt * 0.9); }
@@ -2415,11 +2611,13 @@ export function buildCaves(root, D, saved = {}) {
     dummies: [], solids: dyn, seep: null, shardOn: () => false, setSeepPower() {}, setNight() {},
     spawn: { x: start.x, z: start.z, y: start.y },
     sunDir: new V3(0.3, 1, 0.45).normalize(),
-    get chests_open() { return chests.filter((c) => c.open).length; }, chests, exitLight, boss: bossAt, rings, ringLanding, chestNear, openChest, breakPot, guardianDown, populate, attach, restore, snapshot, state, mapInfo, keepsakes,
+    get chests_open() { return chests.filter((c) => c.open).length; }, chests, exitLight,
+    lamps, lightLamp, lampAt, resetHunter, get hunter() { return hunter; }, get twin() { return twin; }, plates, setBurn: (sec) => { state.burnFor = sec; }, boss: bossAt, rings, ringLanding, chestNear, openChest, breakPot, guardianDown, populate, attach, restore, snapshot, state, mapInfo, keepsakes,
     sealed: () => state.sealed,
     contain: (x, z) => !state.sealed || inAmb(x, z),
     onFell() { if (state.sealed) { state.sealed = false; for (const dr of combatDoors) openDoor(dr, true); } },
-    light: KIL ? { hemiSky: '#ffb08a', hemiGround: '#2a1410', hemiI: 1.3, sun: '#ffc8a0', sunI: 1.0, fog: '#1e0e0a', fogNear: 22, fogFar: 58, grade: [1.06, 0.98, 0.94], exposure: 1.1 }
+    light: TMP ? { hemiSky: '#c8d4f0', hemiGround: '#1a1830', hemiI: 1.45, sun: '#e0e8ff', sunI: 1.1, fog: '#0c0b1c', fogNear: 20, fogFar: 56, grade: [0.97, 0.99, 1.05], exposure: 1.15 }
+      : KIL ? { hemiSky: '#ffb08a', hemiGround: '#2a1410', hemiI: 1.3, sun: '#ffc8a0', sunI: 1.0, fog: '#1e0e0a', fogNear: 22, fogFar: 58, grade: [1.06, 0.98, 0.94], exposure: 1.1 }
       : BEL ? { hemiSky: '#a8d0d0', hemiGround: '#1e2a2a', hemiI: 1.3, sun: '#c8e4e0', sunI: 1.0, fog: '#0e1a1c', fogNear: 22, fogFar: 58, grade: [0.97, 1.0, 1.02], exposure: 1.12 }
       : { hemiSky: '#a8b0d8', hemiGround: '#2a2434', hemiI: 1.25, sun: '#c8d4f0', sunI: 1.0, fog: '#14111f', fogNear: 22, fogFar: 58, grade: [0.98, 0.98, 1.04], exposure: 1.12 },
   };

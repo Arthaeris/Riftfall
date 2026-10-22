@@ -1,7 +1,7 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, MARKET, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, BELLROCK, CINDER, KILN, HEAT, UPGRADES, SEA } from '@rf/data';
+import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, MARKET, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, BELLROCK, CINDER, KILN, TEMPLE, HEAT, UPGRADES, SEA } from '@rf/data';
 import { buildPlayer, buildSkyblade, buildGlassblade, buildToolModel, MOLTEN, renderToolArt, buildSailboat, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
 import { createStory } from '@rf/story';
 import { buildCove, buildRift, buildCaves, buildTown, buildSeaPlace } from '@rf/world';
@@ -397,11 +397,13 @@ let bellW = null, bellRoot = null, foesBell = null;
 // Cinderglass (a town) and the Kiln (a dungeon)
 let cinderW = null, cinderRoot = null, foesCinder = null;
 let kiln = null, kilnRoot = null, foesKiln = null, kilnSaved = null;
+// the Temple: the Reflected Lighthouse, under the mirror pool on the Heights
+let temple = null, templeRoot = null, foesTemple = null, templeSaved = null;
 // which place is which
-const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : w === market ? 'market' : w === bellW ? 'bell' : w === cinderW ? 'cinder' : w === kiln ? 'kiln' : 'cove');
+const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : w === market ? 'market' : w === bellW ? 'bell' : w === cinderW ? 'cinder' : w === kiln ? 'kiln' : w === temple ? 'temple' : 'cove');
 const isRift = (w = world) => !!w && (w === rift || w === market);
 const isTown = (w = world) => !!w && (w === brine || w === bellW || w === cinderW);
-const isDungeon = (w = world) => !!w && (w === caves || w === belfry || w === kiln);
+const isDungeon = (w = world) => !!w && (w === caves || w === belfry || w === kiln || w === temple);
 const outdoors = (w = world) => w === cove || w === brine || w === seaW || w === bellW || w === cinderW;
 const camDir = new V3(...CONFIG.camera.dir).normalize();
 const camFwd = new V3(-camDir.x, 0, -camDir.z).normalize();
@@ -462,6 +464,9 @@ function setupPlayer() {
   jarG.visible = false;
   m.handL.add(jarG);
   held.jarG = jarG;
+  // the Lantern hangs from your hand by its ring
+  const lan = buildToolModel('lantern'); lan.root.position.y = -0.55; lan.root.scale.setScalar(0.9); lan.root.visible = false;
+  m.handL.add(lan.root); held.lantern = lan;
   const sling = held.sling;
   P.model = m; P.blade = blade; P.sling = sling; P.spin = spin; P.held = held;
   P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.spawn.y;
@@ -722,7 +727,7 @@ function makeFoes(w, root) {
     onSeepClear: () => story.onSeepClear(),
     pullPlayer: (dx, dz) => { if (P.state !== 'dead' && !P.iframes) tryMove(dx, dz); },
     bossBar: (name, frac) => ui.bossBar(name, frac),
-    onGuardianDown: (f) => (['barnaclemother', 'bellringer', 'golem'].includes(f.kind) ? caveBossDown(f) : riftEvent('guardianDown', f)),
+    onGuardianDown: (f) => (['barnaclemother', 'bellringer', 'golem', 'reflection'].includes(f.kind) ? caveBossDown(f) : riftEvent('guardianDown', f)),
     onKill: () => { stats.calmed++; },
     // the Seep only wakes while the story needs it; afterwards the stone circle stays quiet
     seepAwake: () => ['toShard', 'seep'].includes(story.state.step),
@@ -764,8 +769,8 @@ function swapTo(to) {
   foes.reset();
   ui.bossBar(null);
   const from = world;
-  if (isDungeon(from)) { if (from === caves) cavesSaved = caves.snapshot(); else if (from === kiln) kilnSaved = kiln.snapshot(); else belfrySaved = belfry.snapshot(); }
-  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot, marketRoot, bellRoot, cinderRoot, kilnRoot]) if (r) r.visible = false;
+  if (isDungeon(from)) { if (from === caves) cavesSaved = caves.snapshot(); else if (from === kiln) kilnSaved = kiln.snapshot(); else if (from === temple) templeSaved = temple.snapshot(); else belfrySaved = belfry.snapshot(); }
+  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot, marketRoot, bellRoot, cinderRoot, kilnRoot, templeRoot]) if (r) r.visible = false;
   boatModel.visible = false;
   ui.setMap(null);   // the Rift's room map (a Rift sets its own again below)
   if (P.boat) { P.boat = null; resetPose(); P.model.legL.rotation.x = P.model.legR.rotation.x = 0; P.iframes = false; }
@@ -807,6 +812,16 @@ function swapTo(to) {
     applyLight(market.light);
     P.x = market.spawn.x; P.z = market.spawn.z; P.y = 0; P.face = Math.PI;
     ui.setMap(market.mapState());
+  } else if (to === 'temple') {
+    templeBuilt();
+    templeRoot.visible = true;
+    world = temple; foes = foesTemple;
+    applyLight(temple.light);
+    P.x = temple.spawn.x; P.z = temple.spawn.z - 0.5; P.y = temple.spawn.y; P.face = Math.PI;
+    populateCaves();
+    temple.resetHunter();
+    ui.buildMap(temple.mapInfo, MAP_ROT, 'temple');
+    syncKeys();
   } else if (to === 'kiln') {
     kilnBuilt();
     kilnRoot.visible = true;
@@ -892,6 +907,9 @@ function swapTo(to) {
     if (from === caves) {
       // out of the cave mouth, onto the shore under the cliffs
       P.x = cove.mouth.x; P.z = cove.mouth.z + 1.7; P.y = cove.groundAt(P.x, P.z); P.face = 0;
+    } else if (from === temple) {
+      // up out of the mirror, beside the pool on the Heights
+      const s0 = cove.spots.pool; P.x = s0.x; P.z = s0.z + 0.6; P.y = cove.groundAt(P.x, P.z); P.face = 0;
     } else if (from === seaW) {
       // tied up at the dock, stepping off onto the planks
       const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); P.face = Math.PI;
@@ -933,6 +951,11 @@ async function arrived(to, from) {
     if (story.state.step === 'act1Cinder') story.setStep('cinder');
     saveSoon = 0.5;
     return;
+  }
+  if (to === 'temple') {
+    ui.titleCard(TEMPLE.name, TEMPLE.region, TEMPLE.line);
+    if (story.state.step === 'act1Temple') story.setStep('temple');
+    if (!temple.state.visited) { temple.state.visited = true; await story.say(STORY.templeLines.enter); }
   }
   if (to === 'kiln') {
     ui.titleCard(KILN.name, KILN.region, KILN.line);
@@ -1078,6 +1101,13 @@ function playtestJump(where) {
     });
   } else if (where === 'tether') {
     giveTool('tether'); ui.toast('Tether (for testing)');
+  } else if (where === 'temple' || where === 'lantern') {
+    if (travelling) return;
+    if (!story.past('act1Temple')) story.applyState('act1Temple');
+    clock.running = true;
+    giveTool('tether'); giveTool('jar'); setSword('glassblade');
+    if (where === 'temple') { if (world !== cove) travel('cove'); else travel('temple'); }
+    else { giveTool('lantern'); if (!story.past('saltworks')) story.applyState('saltworks'); if (world !== cove) travel('cove'); else { const a = cove.salt.at; P.x = a.x - 5; P.z = a.z; P.y = cove.groundAt(P.x, P.z); } }
   } else if (where === 'cinder' || where === 'kiln' || where === 'forge') {
     if (travelling) return;
     if (!story.past('act1Cinder')) { story.applyState('act1Cinder'); clock.running = true; }
@@ -1130,7 +1160,10 @@ function objectiveSpot() {
   if (['act1Sea', 'market', 'marketBoss', 'bellRock', 'act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda'].includes(st)) return sp.lantern;
   if (st === 'forgeHome') return story.people().find((n) => n.id === 'odda') || sp.forge;
   if (st === 'mirrorPool') return sp.pool;
-  if (st === 'act1Temple') return maren;
+  if (['act1Temple', 'temple', 'templeBoss'].includes(st)) return sp.pool;
+  if (['reportMaren4', 'act1Saltglass'].includes(st)) return maren;
+  // the bramble wall first (it closes the Saltworks off), then what the brambles grew round
+  if (st === 'saltworks') { const w = cove.burnables.find((c) => c.grp === 'wall' && !c.burnt); return w || cove.salt.at; }
   return null;
 }
 // where the story wants you, in a town or on the sea
@@ -1224,7 +1257,7 @@ function writeSave() {
     caves: caves ? caves.snapshot() : cavesSaved, inCaves: world === caves,
     // the Glass Sea and on
     belfry: belfry ? belfry.snapshot() : belfrySaved, at: travelling ? travelling.to : placeOf(world), jar: jar.full,
-    kiln: kiln ? kiln.snapshot() : kilnSaved, marks: ui.atlas.marks(), sword: P.sword, upgrades: [...P.upgrades], forgeSeen: !!P.forgeSeen,
+    kiln: kiln ? kiln.snapshot() : kilnSaved, temple: temple ? temple.snapshot() : templeSaved, salt: { b: cove.burnState(), taken: !!cove.salt.taken }, marks: ui.atlas.marks(), sword: P.sword, upgrades: [...P.upgrades], forgeSeen: !!P.forgeSeen,
     chart: seaW ? (() => { let t = ''; for (const v of seaW.mapInfo.seen) t += String.fromCharCode(v); return btoa(t); })() : seaSeen };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); savedAt = Date.now(); ui.savedMark(); } catch (_) { /* private mode: progress lives only as long as the page */ }
 }
@@ -1292,6 +1325,7 @@ async function beginJourney(save) {
   if (save.caves && save.caves.bossDone && before(save.step, 'reportOil')) save.step = 'reportOil';
   if (save.belfry && save.belfry.bossDone && before(save.step, 'reportHale')) save.step = 'reportHale';
   if (save.kiln && save.kiln.bossDone && before(save.step, 'reportOdda')) save.step = 'reportOdda';
+  if (save.temple && save.temple.bossDone && before(save.step, 'reportMaren4')) save.step = 'reportMaren4';
   const step = story.applyState(save.step, save.hits || 0);
   // tools, waystones, keepsakes, memories, the clock, the caves
   tools.owned = save.tools || ['sling']; tools.cur = tools.owned.includes(save.tool) ? save.tool : 'sling'; syncTools();
@@ -1303,6 +1337,8 @@ async function beginJourney(save) {
   cavesSaved = save.caves || null;
   belfrySaved = save.belfry || null;
   kilnSaved = save.kiln || null;
+  templeSaved = save.temple || null;
+  if (save.salt) cove.restoreSalt(save.salt.b, save.salt.taken);
   ui.atlas.setMarks(save.marks);
   if (save.sword) setSword(save.sword);
   P.upgrades = new Set(save.upgrades || []);
@@ -1335,7 +1371,8 @@ async function beginJourney(save) {
     swapTo('cinder');
     if (at === 'kiln') { const k = cinderW.spots.kiln; P.x = k.x; P.z = k.z - 1.2; P.y = cinderW.groundAt(P.x, P.z); }
     pl = CINDER;
-  } else if (at === 'sea' || at === 'market') { const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); }
+  } else if (at === 'temple') { const s0 = cove.spots.pool; P.x = s0.x; P.z = s0.z + 0.6; P.y = cove.groundAt(P.x, P.z); }
+  else if (at === 'sea' || at === 'market') { const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); }
   started = true;
   snapCamera();
   ui.show(true);
@@ -1677,8 +1714,40 @@ function useJar(aim) {
   if (r1.basin) { ui.toast(STORY.belfryLines.basin); sound.sfx('doorOpen'); shake(0.3); saveSoon = 1; }
   void r2;
 }
+// the Lantern of Seeing: a burst of cold white flame in front of you. It lights lamps and braziers,
+// burns brambles, and your reflection shies back from it
+let lanternCd = 0;
+function useLantern(aim) {
+  if (lanternCd > 0 || P.state !== 'move') return;
+  const T = TOOLS.lantern;
+  lanternCd = T.cooldown;
+  let dir = aim && Math.hypot(aim.x, aim.y) > 0.2 ? screenToWorld(aim.x, aim.y) : null;
+  // no aim: the nearest unlit lamp in reach, or straight ahead
+  if (!dir && world.lamps) {
+    let best = null, bd = T.reach * 1.6;
+    for (const L of world.lamps) { const d = Math.hypot(L.x - P.x, L.z - P.z); if ((!L.lit || L.brazier) && d < bd) { bd = d; best = L; } }
+    if (best) { const d = Math.hypot(best.x - P.x, best.z - P.z) || 1; dir = { x: (best.x - P.x) / d, z: (best.z - P.z) / d }; }
+  }
+  if (!dir) dir = { x: Math.sin(P.face), z: Math.cos(P.face) };
+  P.face = Math.atan2(dir.x, dir.z);
+  sound.sfx('shimmer'); sound.sfx('beacon');
+  P.model.armL.rotation.x = -1.7;
+  for (let i = 0; i < 34; i++) {
+    const a = P.face + (Math.random() - 0.5) * T.cone * 2, sp = 3 + Math.random() * 5;
+    sparks.spawn({ x: P.x + dir.x * 0.6, y: P.y + 1.0, z: P.z + dir.z * 0.6, vx: Math.sin(a) * sp, vy: (Math.random() - 0.3) * 1.5, vz: Math.cos(a) * sp, drag: 2.5, life: 0.55, size: 0.16, color: i % 3 ? '#bff6ff' : '#ffffff', glow: 3 });
+  }
+  const inCone = (x, z, reach) => { const dx = x - P.x, dz = z - P.z, d = Math.hypot(dx, dz); return d < reach && (d < 0.8 || (dx * dir.x + dz * dir.z) / d > Math.cos(T.cone)); };
+  let did = false;
+  for (const L of world.lamps || []) if (inCone(L.x, L.z, T.reach + 0.6) && world.lightLamp(L)) did = true;
+  if (world === cove) for (let k = 0.6; k <= T.reach; k += 0.6) if (cove.burnBrambles(P.x + dir.x * k, P.z + dir.z * k, 0.7)) { did = true; sound.sfx('hiss'); ui.toast(STORY.saltworksLines.burn); saveSoon = 1.5; break; }
+  // your reflection shies back from it
+  const h = world.hunter;
+  if (h && h.awake && h.vis > 0.3 && Math.hypot(h.x - P.x, h.z - P.z) < T.reach + 1.5) { h.delay += 2; did = true; }
+  return did;
+}
 function useTool(aim) {
   if (tools.cur === 'jar') { useJar(aim); return; }
+  if (tools.cur === 'lantern') { useLantern(aim); return; }
   if (tools.cur === 'tether') {
     if (hook || tetherCd > 0 || P.state !== 'move') return;
     let dir = tetherDir(aim);
@@ -1695,6 +1764,7 @@ function useTool(aim) {
 }
 function updateHook(dt) {
   tetherCd = Math.max(0, tetherCd - dt);
+  lanternCd = Math.max(0, lanternCd - dt);
   if (!hook) { if (P.state !== 'tether') tether.g.visible = false; return; }
   const T = TOOLS.tether, h = hook;
   const hx = P.x + Math.sin(P.face) * 0.35, hz = P.z + Math.cos(P.face) * 0.35, hy = P.y + 1.0;
@@ -1848,6 +1918,17 @@ function cinderBuilt() {
   cinderRoot.visible = false;
   cinderRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
 }
+function templeBuilt() {
+  if (temple) return;
+  templeRoot = new THREE.Group();
+  scene.add(templeRoot);
+  temple = buildCaves(templeRoot, TEMPLE);
+  temple.restore(templeSaved);
+  foesTemple = makeFoes(temple, templeRoot);
+  temple.attach({ P, foes: foesTemple, sound, shake, onEvent: caveEvent, onMap: () => {} });
+  templeRoot.visible = false;
+  templeRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+}
 function kilnBuilt() {
   if (kiln) return;
   kilnRoot = new THREE.Group();
@@ -1904,13 +1985,19 @@ function checkCaveBoss() {
   const b = W.boss;
   if (Math.hypot(P.x - b.x, P.z - b.z) > 9.5) return;
   bossSpawned = true;
-  const bel = W === belfry, kil = W === kiln;
-  const f = foes.spawn(kil ? 'golem' : bel ? 'bellringer' : 'barnaclemother', b.x, b.z);
+  const bel = W === belfry, kil = W === kiln, tmp = W === temple;
+  const f = foes.spawn(tmp ? 'reflection' : kil ? 'golem' : bel ? 'bellringer' : 'barnaclemother', b.x, b.z);
   if (f.crack) { W.root.remove(f.crack); f.crack = null; }
-  if (bel || kil) { f.state = 'up'; f.hittable = true; f.m.root.visible = true; }
+  if (bel || kil || tmp) { f.state = 'up'; f.hittable = true; f.m.root.visible = true; }
   f.room = { x0: b.x - 9, x1: b.x + 9, z0: b.z - 9, z1: b.z + 9 };
-  story.setStep(kil ? 'kilnBoss' : bel ? 'belfryBoss' : 'cavesBoss');
-  bossEntrance(kil ? {
+  story.setStep(tmp ? 'templeBoss' : kil ? 'kilnBoss' : bel ? 'belfryBoss' : 'cavesBoss');
+  bossEntrance(tmp ? {
+    find: () => foes.list.find((o) => o.kind === 'reflection' && o.alive),
+    wide: { pos: new V3(b.x + 7, 1.0, b.z + 6), look: new V3(b.x, 1.6, b.z) },
+    close: (o) => ({ pos: new V3(o.x + 1.6, 1.9, o.z + 3.4), look: new V3(o.x, 1.4, o.z) }),
+    card: STORY.templeLines.bossCard, lines: STORY.templeLines.boss,
+    after: () => ui.toast(STORY.templeLines.bossHint),
+  } : kil ? {
     find: () => foes.list.find((o) => o.kind === 'golem' && o.alive),
     wide: { pos: new V3(b.x + 6, 1.2, b.z + 7), look: new V3(b.x, 3, b.z) },
     close: (o) => ({ pos: new V3(o.x + 2.5, 3.0, o.z + 6.5), look: new V3(o.x, 2.8, o.z) }),
@@ -1939,6 +2026,24 @@ async function caveEvent(name, arg) {
   else if (name === 'shortcut') { sound.sfx('doorOpen'); ui.toast('A shortcut opens'); }
   else if (name === 'keepsake') await foundKeepsake(arg);
   else if (name === 'exit') { if (!travelling) travel(world === belfry ? 'brine' : world === kiln ? 'cinder' : 'cove'); }
+  // the Temple: your reflection, its lamps, the mirror room
+  else if (name === 'wake') {
+    story.state.busy = true;
+    await story.say(STORY.templeLines.wake);
+    story.state.busy = false;
+    ui.toast(STORY.templeLines.wakeHint);
+  }
+  else if (name === 'caught') {
+    if (hurtPlayer(2, arg.x, arg.z)) { ui.number(STORY.templeLines.caught, view.w / 2, view.h * 0.42, false); sound.sfx('shimmer'); }
+    for (let i = 0; i < 20; i++) { const a = Math.random() * TAU; sparks.spawn({ x: arg.x, y: P.y + 1, z: arg.z, vx: Math.cos(a) * 3, vy: Math.random() * 3, vz: Math.sin(a) * 3, drag: 3, life: 0.6, size: 0.12, color: i % 2 ? '#2a2846' : '#ff9fe0', glow: 1.6 }); }
+  }
+  else if (name === 'lamp') {
+    const L = arg;
+    for (let i = 0; i < 18; i++) { const a = Math.random() * TAU; sparks.spawn({ x: L.x, y: L.y + 1.6, z: L.z, vx: Math.cos(a) * 1.6, vy: 1 + Math.random() * 2.5, vz: Math.sin(a) * 1.6, grav: 2, life: 0.8, size: 0.12, color: i % 2 ? '#bff6ff' : '#ffffff', glow: 2.6 }); }
+    if (!L.brazier) { ui.toast(STORY.templeLines.lamp); saveSoon = 1; }
+  }
+  else if (name === 'twin') ui.toast(STORY.templeLines.twin);
+  else if (name === 'mirrorOpen') { sound.sfx('unlock'); ui.toast(STORY.templeLines.mirrorOpen); saveSoon = 1; }
   else if (name === 'tide') { ui.toast(arg === 'high' ? STORY.belfryLines.tideHigh : STORY.belfryLines.tideLow); saveSoon = 1.5; }
   else if (name === 'wheelHint') ui.toast('A water wheel, its channel bone dry. The basin beside it is empty.');
   else if (name === 'fireHint') { if (!P.fireHinted) { P.fireHinted = true; ui.toast('Burning oil blocks the way'); } }
@@ -1958,6 +2063,10 @@ async function openChest(c) {
     giveTool('tether');
     await ui.itemGet(STORY.tether.name, STORY.tether.line, null);
     ui.showHint('tool', 'Hold the tool button to choose a tool', 6000);
+  } else if (c.item === 'lantern') {
+    giveTool('lantern');
+    await ui.itemGet(STORY.templeLines.lantern.name, STORY.templeLines.lantern.line, null);
+    ui.showHint('tool', 'Hold the tool button to choose the Lantern', 6000);
   } else if (c.item === 'glassblade') {
     setSword('glassblade');
     await ui.itemGet(STORY.kilnLines.blade.name, STORY.kilnLines.blade.line, null);
@@ -1994,6 +2103,7 @@ async function caveBossDown(f) {
   // so a fall, a quit or a closed tab in the middle of the scene can't lose them
   if (f.kind === 'bellringer') return belfryBossDown(f);
   if (f.kind === 'golem') return kilnBossDown(f);
+  if (f.kind === 'reflection') return templeBossDown(f);
   if (caves.state.bossDone) return;
   caves.guardianDown();
   P.maxHp += 2; P.hp = P.maxHp;
@@ -2027,6 +2137,24 @@ async function belfryBossDown(f) {
   holdUp(false);
   P.safe = 0.5;
   ui.toast('A shaft of light leads up and out');
+  saveSoon = 0.3;
+}
+// your Reflection lets go of you: a heart, and the lantern in the mirror
+async function templeBossDown(f) {
+  if (temple.state.bossDone) return;
+  temple.guardianDown();
+  P.maxHp += 2; P.hp = P.maxHp;
+  story.setStep('reportMaren4');
+  writeSave();
+  P.safe = 99;
+  const L = STORY.templeLines;
+  await gwait(1.4);
+  await story.say(L.down);
+  holdUp(true);
+  await ui.itemGet(L.heart.name, L.heart.line, null);
+  holdUp(false);
+  P.safe = 0.5;
+  ui.toast('The chest at the head of the hall has opened its lid a crack');
   saveSoon = 0.3;
 }
 // the Kiln Golem kneels: a heart, and the mountain goes back to sleep
@@ -2069,6 +2197,7 @@ async function bossEntrance(o) {
   ui.show(true);
   bossIntro = null;
   P.safe = 1.2;
+  if (o.after) o.after();
 }
 
 // ----- getting hurt, falling, waking by the fire -----
@@ -2125,6 +2254,8 @@ function deadUpdate(dt) {
     if (world === brine) { foes.reset(); for (const c of brine.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 6 }); }
     if (world === market) { guardianSeen = false; if (story.state.step === 'marketBoss') story.setStep('market', true); }
     if (story.state.step === 'kilnBoss') story.setStep('kilnIn', true);
+    if (story.state.step === 'templeBoss') story.setStep('temple', true);
+    if (world === temple) temple.resetHunter();
     if (world === cinderW) { foes.reset(); for (const c of cinderW.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 7 }); }
     P.heat = 0;
     P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.groundAt(P.x, P.z);
@@ -2775,6 +2906,27 @@ const map3d = (() => {
   return { open, view, project, unproject, render, get active() { return !!cur; }, close: () => { cur = null; } };
 })();
 const wantPos = new V3(), wantLook = new V3();
+// ----- the Old Saltworks: brambles the Lantern burns, and the chart case they grew round -----
+function updateSaltworks(dt) {
+  const burning = cove.updateSalt(dt);
+  for (const c of burning) if (Math.random() < dt * 30) sparks.spawn({ x: c.x + (Math.random() - 0.5) * 0.9, y: cove.groundAt(c.x, c.z) + Math.random() * 1.2, z: c.z + (Math.random() - 0.5) * 0.9, vy: 1.5 + Math.random() * 2, life: 0.7, size: 0.16, color: Math.random() < 0.5 ? '#bff6ff' : '#ffb04a', glow: 2.4, drag: 0.6 });
+  const S2 = cove.salt;
+  if (P.state !== 'move' || story.busy()) return;
+  // brambles you can't get through: say what might
+  if (!P.brambleTold && cove.burnables.some((c) => !c.burnt && Math.hypot(c.x - P.x, c.z - P.z) < 1.6)) { P.brambleTold = true; ui.toast(STORY.saltworksLines.brambles); }
+  if (!S2.taken && S2.burnt && Math.hypot(S2.at.x - P.x, S2.at.z - P.z) < 1.5) {
+    S2.taken = true; S2.page.visible = false;
+    (async () => {
+      story.state.busy = true;
+      sound.sfx('treasure'); holdUp(true);
+      await ui.itemGet(STORY.saltworksLines.chest.name, STORY.saltworksLines.chest.line, null);
+      holdUp(false);
+      story.state.busy = false;
+      if (!story.past('act1Saltglass')) story.setStep('act1Saltglass');
+      saveSoon = 0.3;
+    })();
+  }
+}
 // ----- your mark from the map, standing in the world: a pillar of light you can see from far off -----
 const beacon = (() => {
   const g = new THREE.Group();
@@ -3086,6 +3238,7 @@ function tick(dt) {
   if (bellW) bellW.setTide(clock.running ? tideAt(clockH) : -0.08);
   updateGlimpse(dt);
   MOLTEN.uTime.value = time;
+  if (world === cove && started && !intro) updateSaltworks(dt);
   updateBeacon(dt);
   ui.setHeat(P.heat);
   // heat haze over hot ground near you
@@ -3100,6 +3253,8 @@ function tick(dt) {
   H2.sling.root.visible = tools.cur === 'sling' || !!P.boat;
   H2.tether.root.visible = tools.cur === 'tether' && !P.boat;
   H2.jarG.visible = tools.cur === 'jar' && !P.boat && P.state !== 'dead';
+  H2.lantern.root.visible = tools.cur === 'lantern' && !P.boat && P.state !== 'dead';
+  if (H2.lantern.root.visible) H2.lantern.root.rotation.z = Math.sin(time * 3) * 0.08;
   H2.jar.root.visible = !jar.full; H2.jarFull.root.visible = jar.full;
   jar.tilt = Math.max(0, jar.tilt - dt * 2.5);
   H2.jarG.rotation.set(jar.tilt * 1.4, 0, 0);
@@ -3161,7 +3316,7 @@ try {
   });
   setupPlayer();
   // pictures of the tools for the tool button and the tool panel, rendered from their models
-  ui.setToolArt(renderToolArt(['sling', 'tether', 'jar', 'jarFull']));
+  ui.setToolArt(renderToolArt(['sling', 'tether', 'jar', 'jarFull', 'lantern']));
   story = createStory({
     scene: coveRoot, world, foes, P, ui, sound, sparks, bits, shake,
     flash: (r, g, b, k) => { Object.assign(cineFlash, { r, g, b, k }); },
@@ -3205,7 +3360,7 @@ try {
   setTimeout(showTitle, 450);
   addEventListener('pagehide', () => writeSave());
   document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, get cinder() { return cinderW; }, get kiln() { return kiln; }, setSword, forgeMenu, shardFall, mirrorScene, oddaMoves, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, setCloseView, get viewK() { return viewK; }, get viewYaw() { return viewYaw; }, set viewYaw(v) { viewYaw = v; }, get viewPitch() { return viewPitch; }, get arm() { return arm; }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, get cinder() { return cinderW; }, get kiln() { return kiln; }, get temple() { return temple; }, get cove() { return cove; }, useLantern, setSword, forgeMenu, shardFall, mirrorScene, oddaMoves, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, setCloseView, get viewK() { return viewK; }, get viewYaw() { return viewYaw; }, set viewYaw(v) { viewYaw = v; }, get viewPitch() { return viewPitch; }, get arm() { return arm; }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

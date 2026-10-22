@@ -57,7 +57,7 @@ export function createStory(ctx) {
     scene.add(m);
     return m;
   })();
-  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil', 'reportMaren2', 'reportMaren3', 'act1Temple'].includes(S.step) && !(S.step === 'act1Temple' && S.templeTold);
+  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil', 'reportMaren2', 'reportMaren3', 'act1Temple', 'reportMaren4', 'act1Saltglass'].includes(S.step) && !(S.step === 'act1Temple' && S.templeTold) && !(S.step === 'act1Saltglass' && S.saltTold);
   // whoever the story wants you to talk to next wears the marker
   const newsWho = () => (S.step === 'findTobin' ? 'tobin' : ['brinemoor', 'reportHale'].includes(S.step) ? 'hale' : ['cinder', 'reportOdda', 'forgeHome'].includes(S.step) ? 'odda' : hasNews() ? 'maren' : null);
   const O = STORY.order, past = (step) => O.indexOf(S.step) >= O.indexOf(step);
@@ -223,7 +223,9 @@ export function createStory(ctx) {
     else if (S.step === 'reportOil') setStep('boathouse');
     else if (S.step === 'reportMaren2') setStep('act1Sea');
     else if (S.step === 'reportMaren3') setStep('act1Cinder');
-    else if (S.step === 'act1Temple' && !S.templeTold) { S.templeTold = true; ui.toast(STORY.roundEnd); }
+    else if (S.step === 'act1Temple' && !S.templeTold) { S.templeTold = true; }
+    else if (S.step === 'reportMaren4') setStep('saltworks');
+    else if (S.step === 'act1Saltglass' && !S.saltTold) { S.saltTold = true; ui.toast(STORY.roundEnd); }
   }
   // Act 1 begins: Maren hands over the key, the keepers' gate opens, and the clock starts to run
   async function openGate() {
@@ -646,6 +648,7 @@ export function createStory(ctx) {
     if (['belfryIn', 'belfryBoss'].includes(step)) step = 'belfry';
     if (['market', 'marketBoss'].includes(step)) step = 'act1Sea';
     if (['kilnIn', 'kilnBoss'].includes(step)) step = 'kiln';    // the Market regrows: a journey saved inside it resumes at sea
+    if (step === 'templeBoss') step = 'temple';
     if (at(step) < 0) step = 'findMaren';
     S.riftIn = undefined; S.cine = null; S.hits = hits;
     if (at(step) > at('beacon')) world.beacon.light();
@@ -701,7 +704,7 @@ export function createStory(ctx) {
     const door = world.spots.cottageDoor;
     S.nearDoor = S.step === 'rest' && !S.busy && P.state === 'move' && Math.hypot(P.x - door.x, P.z - door.z) < 1.7;
     // Act 1: the waystones, the cave mouth, keepsakes lying about, and the memory they make
-    S.nearStone = null; S.nearMouth = false; S.nearRemember = false; S.nearBoat = false;
+    S.nearStone = null; S.nearMouth = false; S.nearRemember = false; S.nearBoat = false; S.nearPool = false;
     S.nearTide = S.nearBelfry = S.nearPier = S.nearBell = false;
     if (!S.busy && P.state === 'move' && past('free')) {
       for (const w of world.waystones) if (!w.lit && Math.hypot(P.x - w.x, P.z - w.z) < 1.8) S.nearStone = w;
@@ -710,6 +713,8 @@ export function createStory(ctx) {
       S.nearRemember = !!ctx.keepsakesReady() && Math.hypot(P.x - d.x, P.z - d.z) < 1.7;
       for (const k of world.keepsakes) if (!k.taken && Math.hypot(P.x - k.x, P.z - k.z) < 0.85) { world.takeKeepsake(k.id); ctx.foundKeepsake(k); }
       if (S.step === 'mirrorPool' && !S.busy && Math.hypot(P.x - world.spots.pool.x, P.z - world.spots.pool.z) < 2.6) ctx.mirrorScene();
+      // the mirror pool, once it's a mirror: step in, and down
+      S.nearPool = past('act1Temple') && Math.hypot(P.x - world.spots.pool.x, P.z - world.spots.pool.z) < 2.0;
       S.nearBoat = past('setSail') && !!world.spots.lantern && Math.hypot(P.x - world.spots.lantern.x, P.z - world.spots.lantern.z) < 2.6;
       // the boathouse, across the ravine
       if (S.step === 'boathouse' && Math.hypot(P.x - world.spots.boathouse.x, P.z - world.spots.boathouse.z) < 4.5) reachBoathouse();
@@ -719,13 +724,14 @@ export function createStory(ctx) {
     S.nearFire = !S.busy && P.state === 'move' && P.hp < P.maxHp && !ctx.foes.seep.sealed && Math.hypot(P.x - fire.x, P.z - fire.z) < 2.4;
     // the sword button offers "Talk" when someone is close and nothing is fighting you
     const n = !S.busy && P.state === 'move' && !ctx.foes.seep.sealed ? nearestTalker() : null;
-    ui.setContext(S.nearShard || S.nearMouth ? 'enter' : S.nearDoor ? 'sleep' : S.nearRemember ? 'remember' : n ? 'talk' : S.nearBoat ? 'sail' : S.nearStone ? 'light' : S.nearFire ? 'rest' : null);
+    ui.setContext(S.nearShard || S.nearMouth || (S.nearPool && !n) ? 'enter' : S.nearDoor ? 'sleep' : S.nearRemember ? 'remember' : n ? 'talk' : S.nearBoat ? 'sail' : S.nearStone ? 'light' : S.nearFire ? 'rest' : null);
     S.near = n;
   }
   function tryTalk() {
     if (S.nearShard && !S.busy) { S.nearShard = false; ctx.travel('rift'); return true; }
     if (S.nearDoor && !S.busy) { sleep(); return true; }
     if (S.nearMouth && !S.near && !S.busy) { if (S.step === 'gullcliff') setStep('caves'); ctx.travel('caves'); return true; }
+    if (S.nearPool && !S.near && !S.busy) { ctx.travel('temple'); return true; }
     if (S.nearRemember && !S.busy) { remember(); return true; }
     if (S.nearStone && !S.near && !S.busy) { ctx.lightStone(S.nearStone); return true; }
     if (S.nearFire && !S.near && !S.busy) { restAtFire(); return true; }

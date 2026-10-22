@@ -1365,7 +1365,7 @@ export function createUI(opts) {
         </div>
         <details class="group playtest">
           <summary class="gTitle">Playtest shortcuts</summary>
-          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button><button data-jump="market">The Market</button><button data-jump="bellrock">Bell Rock</button><button data-jump="cinder">Cinderglass</button><button data-jump="kiln">The Kiln</button><button data-jump="forge">The forge</button></div>
+          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button><button data-jump="market">The Market</button><button data-jump="bellrock">Bell Rock</button><button data-jump="cinder">Cinderglass</button><button data-jump="kiln">The Kiln</button><button data-jump="forge">The forge</button><button data-jump="temple">The Temple</button><button data-jump="lantern">The Lantern</button></div>
           <p class="sub">For testing only: these skip story steps.</p>
         </details>
       </section>

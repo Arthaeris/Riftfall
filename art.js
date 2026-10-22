@@ -1261,6 +1261,18 @@ export function buildFoe(kind) {
     out.mirror = pivot(body, 0, 1.85, 0.05);
     K.box(out.mirror, 0.7, 0.7, 0.1, '#c9a24a', 0, 0, 0); out.glass = K.box(out.mirror, 0.56, 0.56, 0.04, '#dfe8f4', 0, 0, 0.06, 0.9);
     root.add(blob(1.0, 1.0));
+  } else if (kind === 'reflection') {
+    // your Reflection: your own shape in dark mirror-glass, with pink light where your eyes would be
+    const pm = buildPlayer();
+    for (const m of pm.K.mats.values()) {
+      if (!m.isMeshLambertMaterial) continue;
+      m.color.lerp(new THREE.Color('#1c1a34'), 0.72); m.userData.base = m.color.clone();
+      m.emissive = new THREE.Color('#000000');
+    }
+    for (const e of pm.eyes || []) e.traverse((o) => { if (o.isMesh) o.material = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff9fe0').multiplyScalar(2.4) }); });
+    pm.root.scale.setScalar(1.12);
+    body.add(pm.root);
+    out.pm = pm; out.flash = pm.K.flash;
   } else if (kind === 'golem') {
     // the Kiln Golem: the furnace itself, stood up. Fire-brick body, a door of iron for a chest with the fire behind it,
     // arms of stacked brick, and glass running like sweat in the cracks
@@ -2410,11 +2422,26 @@ export function buildToolModel(id, o = {}) {
     K.box(g, 0.08, 0.06, 0.08, '#b08a5a', 0, o.full ? 0.41 : 0.4, o.full ? 0.07 : 0);              // the cork (pushed aside when it's full)
     for (const x of [-1, 1]) K.box(g, 0.02, 0.12, 0.02, '#c8b28a', x * 0.1, 0.38, 0);              // the cord
     K.box(g, 0.22, 0.02, 0.02, '#c8b28a', 0, 0.44, 0);
+  } else if (id === 'lantern') {
+    // the Lantern of Seeing: a keeper's brass lantern, four panes of glass, and for a flame a sliver of the
+    // Temple's mirror, burning cold and white
+    const brass = ['#c9a24a', '#b08a3a', '#e0b85a'];
+    K.box(g, 0.24, 0.04, 0.24, brass[1], 0, 0.02, 0);
+    K.box(g, 0.2, 0.03, 0.2, brass[0], 0, 0.05, 0);
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) K.box(g, 0.03, 0.26, 0.03, brass[2], x * 0.095, 0.2, z * 0.095);
+    for (const [x, z, w, d] of [[0, 0.095, 0.16, 0.01], [0, -0.095, 0.16, 0.01], [0.095, 0, 0.01, 0.16], [-0.095, 0, 0.01, 0.16]]) K.box(g, w, 0.22, d, '#dfe8f4', x, 0.2, z, 0.9);
+    K.box(g, 0.07, 0.12, 0.07, '#ffffff', 0, 0.18, 0, 2.6);
+    K.box(g, 0.05, 0.08, 0.05, '#bff6ff', 0, 0.26, 0, 2.2);
+    K.box(g, 0.24, 0.04, 0.24, brass[1], 0, 0.34, 0);
+    K.box(g, 0.16, 0.05, 0.16, brass[0], 0, 0.38, 0);
+    K.box(g, 0.08, 0.04, 0.08, brass[2], 0, 0.42, 0);
+    for (const x of [-1, 1]) K.box(g, 0.02, 0.1, 0.02, brass[2], x * 0.06, 0.48, 0);
+    K.box(g, 0.14, 0.02, 0.02, brass[2], 0, 0.53, 0);
   }
   g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
   return { root: g, flash: K.flash };
 }
-const TOOL_POSE = { sling: [-1.1, 0, 0.75], tether: [-0.95, 0.6, 0.85], jar: [0.25, -0.5, 0], jarFull: [0.25, -0.5, 0], zoom: { sling: 0.5, tether: 0.5, jar: 0.6 } };
+const TOOL_POSE = { sling: [-1.1, 0, 0.75], tether: [-0.95, 0.6, 0.85], jar: [0.25, -0.5, 0], jarFull: [0.25, -0.5, 0], lantern: [0.25, -0.55, 0], zoom: { sling: 0.5, tether: 0.5, jar: 0.6, lantern: 0.62 } };
 // render a tool's model into a picture for the buttons and the tool panel (a small, separate renderer, used once)
 export function renderToolArt(ids, size = 128, poses = {}) {
   const out = {};

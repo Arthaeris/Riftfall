@@ -901,6 +901,67 @@ export function createFoes(ctx) {
   }
 
   // ---------------------------------------------------------------------------
+  // The Temple's guardian: your Reflection. It stands where your mirror image would, across the middle of its hall
+  // (in its second phase, where you were a moment ago). The light of a burning brazier shows it for what it is:
+  // only then does it stumble, and only then can it be hurt.
+  // ---------------------------------------------------------------------------
+  function reflectionAI(f, dt) {
+    const D = f.D, m = f.m, now = performance.now() / 1000;
+    f.t += dt;
+    if (f.cx === undefined) { f.cx = f.x; f.cz = f.z; f.hist = []; f.phase = 0; if (world.setBurn) world.setBurn(D.burn[0]); }
+    const phase = f.hp / D.hp > 0.5 ? 0 : 1;
+    if (phase !== f.phase) { f.phase = phase; if (world.setBurn) world.setBurn(D.burn[1]); sound.sfx('roar'); ctx.shake(0.5); ctx.toast('Your reflection stops waiting for you'); }
+    ctx.bossBar(D.name, Math.max(0, f.hp / D.hp));
+    f.barY = 0;
+    f.hist.push({ t: now, x: P.x, z: P.z, face: P.face });
+    while (f.hist.length > 2 && now - f.hist[0].t > 2) f.hist.shift();
+    if (ctx.bossHold && ctx.bossHold()) return;
+    const lag = D.lag[phase];
+    let src = f.hist[f.hist.length - 1];
+    if (lag) src = f.hist.find((h) => now - h.t <= lag) || src;
+    let walk = 0;
+    f.cd = (f.cd || 0) - dt;
+    if (f.state === 'seen') {
+      // caught in the light: it flickers between you and not-you, staggers, and can be struck
+      m.body.rotation.z = Math.sin(now * 22) * 0.12;
+      f.tellGlow = 0.25 + Math.sin(now * 18) * 0.15;
+      if (f.t > D.seen) { f.state = 'mirror'; f.t = 0; f.tellGlow = 0; m.body.rotation.z = 0; }
+    } else {
+      f.state = 'mirror';
+      // across the middle from you
+      const tx = 2 * f.cx - src.x, tz = 2 * f.cz - src.z;
+      const dx = tx - f.x, dz = tz - f.z, d = Math.hypot(dx, dz), sp = D.speed * (1 + phase * 0.2) * dt;
+      if (d > 0.05) { moveFoe(f, dx / d * Math.min(d, sp), dz / d * Math.min(d, sp)); walk = Math.min(1, d * 2); }
+      f.face = src.face + Math.PI;
+      // a burning brazier's light catches it
+      const L = world.lampAt ? world.lampAt(f.x, f.z, -1.5) : null;
+      if (L && L.brazier) {
+        f.state = 'seen'; f.t = 0; sound.sfx('shimmer'); ctx.shake(0.2);
+        ctx.number(STORY_SEEN, f.x, f.y + 2.4, f.z, true);
+        for (let i = 0; i < 26; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x, y: f.y + 1, z: f.z, vx: Math.cos(a) * 3, vy: Math.random() * 3, vz: Math.sin(a) * 3, drag: 3, life: 0.6, size: 0.12, color: i % 2 ? '#bff6ff' : '#ff9fe0', glow: 2.2 }); }
+      }
+      // touching you hurts
+      const tp = toPlayer(f);
+      if (tp.d < D.r + 0.6 && f.cd <= 0) { if (ctx.hurtPlayer(D.dmg, f.x, f.z)) f.cd = 1.3; }
+      // second phase: it throws your own sling shots back at you, three at a time
+      if (phase) {
+        f.orbT = (f.orbT === undefined ? D.orbs : f.orbT) - dt;
+        if (f.orbT <= 0 && tp.d > 3) {
+          f.orbT = D.orbs;
+          const base = Math.atan2(tp.x, tp.z);
+          for (const da of [-0.25, 0, 0.25]) pebble(f.x, f.y + 1.1, f.z, Math.sin(base + da), Math.cos(base + da), 9, 1);
+        }
+      }
+    }
+    // it walks the way you walk
+    const ph = now * 9;
+    m.pm.legL.rotation.x = Math.sin(ph) * 0.6 * walk; m.pm.legR.rotation.x = -Math.sin(ph) * 0.6 * walk;
+    m.pm.armL.rotation.x = -Math.sin(ph) * 0.5 * walk; m.pm.armR.rotation.x = f.state === 'seen' ? -2.4 : Math.sin(ph) * 0.5 * walk;
+    if (Math.random() < dt * 10) sparks.spawn({ x: f.x + (Math.random() - 0.5) * 0.5, y: f.y + 0.05, z: f.z + (Math.random() - 0.5) * 0.5, vy: 0.6, life: 0.6, size: 0.08, color: '#2a2846', glow: 0.4, drag: 1 });
+  }
+  const STORY_SEEN = 'Seen!';
+
+  // ---------------------------------------------------------------------------
   // The Clocktide Market's creatures. Its rule: when the great clock strikes, time stands still for a moment
   // for everything here but you (world.frozen()); that's when the Broker's glass opens.
   // ---------------------------------------------------------------------------
@@ -1508,6 +1569,8 @@ export function createFoes(ctx) {
       if (src === 'sling' || src === 'tool') { sound.sfx('clank'); ctx.number('It shrugs it off', f.x, f.y + 4, f.z, false); return true; }
       if (f.state !== 'open') { dmg = Math.max(1, Math.round(dmg * f.D.armour)); knock = 0; sound.sfx('clank'); }
     }
+    // your Reflection: outside a brazier's light, there's nothing there to hit
+    if (f.kind === 'reflection' && f.state !== 'seen') { sound.sfx('shimmer'); ctx.number('It isn\u2019t really there', f.x, f.y + 2.4, f.z, false); return src === 'sling' ? 'reflect' : true; }
     // the Cuckoo Clock: its case turns a blade until the door's open
     if (shut(f)) { sound.sfx('wood'); ctx.number('Blocked', f.x, f.y + 2.4, f.z, false); return true; }
     // the Hour Broker: its heart is behind glass that only opens when time stands still
@@ -1558,7 +1621,7 @@ export function createFoes(ctx) {
     ctx.number(String(dmg), f.x, hy + 0.7, f.z, heavy);
     // a heavy hit (or any hit on a creature mid-warning, for the puddle) knocks it out of what it was doing
     // (the guardian has poise: it flinches, but never drops what it's doing, so its warnings always play out)
-    if ((f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker' || f.kind === 'golem') && f.hp > 0) { f.flinch = 1; }
+    if ((f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker' || f.kind === 'golem' || f.kind === 'reflection') && f.hp > 0) { f.flinch = 1; }
     else if (f.hp > 0 && (heavy || (f.kind === 'mirrorpuddle' && f.state === 'tell'))) {
       if (f.state !== 'under' && f.state !== 'tell' || f.kind === 'mirrorpuddle') { f.state = 'stagger'; f.t = 0; f.m.body.position.x = 0; f.tellGlow = 0; }
     }
@@ -1575,7 +1638,12 @@ export function createFoes(ctx) {
       bits.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * sp + nx * 2, vy: 2 + Math.random() * 3.5, vz: Math.sin(a) * sp + nz * 2, life: 1.3, size: 0.09 + Math.random() * 0.1, color: cols[i % 3], floor: f.y });
     }
     for (let i = 0; i < 22; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * 3.5, vy: Math.random() * 4, vz: Math.sin(a) * 3.5, drag: 3, grav: 3, life: 0.6, size: 0.18, color: i % 2 ? '#ffffff' : '#9ff3ff', glow: 3 }); }
-    const big = f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker' || f.kind === 'golem';
+    const big = f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker' || f.kind === 'golem' || f.kind === 'reflection';
+    if (f.kind === 'reflection') {
+      ctx.bossBar(null);
+      for (let i = 0; i < 60; i++) { const a = Math.random() * TAU, sp = 2 + Math.random() * 5; sparks.spawn({ x: f.x, y: f.y + 1 + Math.random() * 1.5, z: f.z, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 4, vz: Math.sin(a) * sp, drag: 2, grav: 3, life: 1.1, size: 0.14, color: i % 2 ? '#dfe8f4' : '#bff6ff', glow: 2.4 }); }
+      if (ctx.onGuardianDown) ctx.onGuardianDown(f);
+    }
     if (f.kind === 'golem') {
       ctx.bossBar(null);
       for (const w of waves) scene.remove(w.g);
@@ -1862,6 +1930,7 @@ export function createFoes(ctx) {
       else if (f.kind === 'wisp') wisp(f, dt);
       else if (f.kind === 'sentinel') sentinel(f, dt);
       else if (f.kind === 'golem') golem(f, dt);
+      else if (f.kind === 'reflection') reflectionAI(f, dt);
       if (!f.alive) continue;
       // knockback from your hits, sliding out
       if (Math.abs(f.kx) + Math.abs(f.kz) > 0.01) { moveFoe(f, f.kx * dt, f.kz * dt); const k = Math.exp(-9 * dt); f.kx *= k; f.kz *= k; }
@@ -1875,7 +1944,7 @@ export function createFoes(ctx) {
       f.flashT = Math.max(0, f.flashT - dt * 7);
       f.m.flash(Math.max(f.flashT, (f.tellGlow || 0) * (0.35 + 0.25 * Math.sin(performance.now() / 40))));
       // health bar: floats above, fades a little at full health (the guardian's is at the top of the screen)
-      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener' && f.kind !== 'barnaclemother' && f.kind !== 'bellringer' && f.kind !== 'broker' && f.kind !== 'golem' && f.kind !== 'molten' && !hidden(f) && !f.asleep;
+      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener' && f.kind !== 'barnaclemother' && f.kind !== 'bellringer' && f.kind !== 'broker' && f.kind !== 'golem' && f.kind !== 'reflection' && f.kind !== 'molten' && !hidden(f) && !f.asleep;
       f.bar.group.visible = showBar;
       if (showBar) {
         f.bar.group.position.set(f.x, f.y + (f.barY || 1.2), f.z);

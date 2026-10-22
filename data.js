@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.13.0';
+export const VERSION = '0.14.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -315,6 +315,20 @@ export const FOES = {
     knockTaken: 0,
     drops: [20, 26],
   },
+  // the Temple's guardian: your own reflection. It moves as your mirror image across the arena; only where
+  // a brazier burns can it be seen for what it is, and only then can it be hurt
+  reflection: {
+    name: 'Your Reflection',
+    desc: 'Everything you do, it does the other way round. In the light of a brazier it forgets which of you is real.',
+    hp: 240, r: 0.45, dmg: 2, speed: 7.5,
+    seen: 2.8,             // how long it stays exposed once a burning brazier catches it
+    burn: [9, 6],          // how long a lit brazier burns, by phase
+    lag: [0, 0.7],         // in its second phase it mirrors where you were this long ago
+    orbs: 4.5,             // second phase: seconds between volleys of your own sling shots, turned on you
+    armour: 0.0,
+    knockTaken: 0,
+    drops: [24, 30],
+  },
   gardener: {
     name: 'The Weeping Gardener',
     desc: 'A great tree hanging upside down from a crack in the Rift. Its tears fall upward; the fruit on its branches are tiny worlds.',
@@ -337,6 +351,10 @@ export const TOOLS = {
   jar: {
     name: 'Tide Jar', desc: 'A jar that holds a little piece of the sea. Scoop up water, then pour it where it\u2019s needed.',
     reach: 1.8, splash: 1.7, cooldown: 0.5,
+  },
+  lantern: {
+    name: 'Lantern of Seeing', desc: 'A keeper\u2019s lantern with a shard of the Temple\u2019s mirror for a flame. Lights lamps and braziers, burns brambles and webs, and shows what\u2019s really there.',
+    reach: 3.2, cone: 0.75, cooldown: 0.7, glow: 7,
   },
 };
 
@@ -745,6 +763,70 @@ export const KILN = {
   ],
 };
 
+// ----- The Reflected Lighthouse: the Temple, first descent. A lighthouse that goes down, inside the mirror pool.
+//   Its rule: your reflection follows your path a few seconds behind, and lamps push it back.
+//   N  a lamp, unlit (hit it, or bring a flame, to light it)   U  a lamp already burning
+//   V  a brazier in the guardian's hall (burns a while, then goes out)
+//   Z  the mirror's glass    J  where your twin stands behind it    q  a plate (one each side of the glass)
+//   Q  the mirror door: it opens while both plates are held    Y  where your reflection wakes
+export const TEMPLE = {
+  name: 'The Reflected Lighthouse',
+  region: 'The Temple \u00b7 First descent',
+  line: 'A lighthouse that goes down. Every step you take, something takes after you.',
+  theme: 'temple',
+  ambush: { x0: 33, z0: 14, x1: 43, z1: 30 },
+  boss: 'reflection', tool: 'lantern',
+  keepsake: 'cup',
+  hunter: { delay: 3.6, catchR: 0.85, push: 4.5, lampR: 3.4 },
+  mirror: { axis: 7, x0: 2, z0: 16, x1: 12, z1: 29 },
+  map: [
+    '##############################################',
+    '##############################################',
+    '##############################################',
+    '#############t,,,,,,,,,,,,,,,,,t##############',
+    '#############,,,V,,,,,T,,,,,V,,,##############',
+    '#############,,,,,,,,,,,,,,,,,,,##############',
+    '#############,,,,,,,,,,,,,,,,,,,##############',
+    '#############,,,,,,,,,,,,,,,,,,,##############',
+    '#############,,,,,,,,,X,,,,,,,,,##############',
+    '#############,,,,,,,,,,,,,,,,,,,##############',
+    '#############,,,,,,,,,,,,,,,,,,,##############',
+    '#############,,,,,,,,,,,,,,,,,,,##############',
+    '########bkb##,,,V,,,,,,,,,,,V,,,##############',
+    '########bbb##,,,,,,,,,,,,,,,,,,,##############',
+    '########bbb##t,,,,,,,,,,,,,,,,,t#taaaaaaaaat##',
+    '########QQQ##########aaa#########aaaaaaaaaaa##',
+    '##tbbbbZbbbbt########aaa#########aaaaaaaKaaa##',
+    '##bbbbbZbqbbb########BBB#########aaaaaaaaapa##',
+    '##bbbbbZbbbbb#bbbbbbbbbbbbbbbbbt#aaasaaaaaaa##',
+    '##bbbbbZbbbbb#bNbbbbbbbbbbbbbbNb#aaaaaaaaaaa##',
+    '##bbbbbZbbbbb#bbbbbbbbbbbbbbbbbb#bbbaaamaaaa##',
+    '##bbbbbZbbbbbbbbbbbbbbbbbbpbbbbbDbbbaaaaaaaa##',
+    '##bbbbbZbbbbbbtbbbbbbbbbbbbbbbbtDbbbaaaaamaa##',
+    '##bbbbbZbbbbbbbbbbbbbbbbbbbbbbbbDbbbaaaaaaaa##',
+    '##bbbbbZbbbbb#bbbbbpbbbbbbbbbbbb#bbbaaaaaaaa##',
+    '##rrrrrZbbbbb#bbbbbbbbbbbbbbbbbb#aaaaaaaaaaa##',
+    '##bbbqbZbbbbb#bNbbbbbbbbbbbbbbNb#aaaaamaaaaa##',
+    '##bbbbbZbbbbb#tbbbbbbbbbbbbbbbbb#aaaaaaaaaaa##',
+    '##bJbbbZbbbNb########bbb#########apaaaaaaasa##',
+    '##tbbbbZbbbbt########bbb#########aaaaaaaaaaa##',
+    '#####################Nbb#########taaaaaaaaat##',
+    '#####################...######################',
+    '#####################.Y.######################',
+    '#####################..N######################',
+    '##################t........t##################',
+    '##################.U......U.##################',
+    '##################..........##################',
+    '##################..........##################',
+    '##################..p....p..##################',
+    '##################....P.....##################',
+    '##################t........t##################',
+    '#####################...######################',
+    '#####################EEE######################',
+    '##############################################',
+  ],
+};
+
 // ----- the Seep: the clearing where the fallen shard leaks creatures into Lanternhold -----
 export const SEEP = {
   name: 'The Seep',
@@ -871,7 +953,12 @@ export const STORY = {
     reportOdda: 'Show Odda the blade',
     forgeHome: 'Find Odda\u2019s new forge in the village on Lanternhold',
     mirrorPool: 'Something fell on the Heights tonight. Go and look',
-    act1Temple: 'The pool on the Heights is a mirror now, and it shows a lighthouse going down. (The Temple arrives in the next build.)',
+    act1Temple: 'The pool on the Heights is a mirror now, and the lighthouse in it goes down. Step in',
+    temple: 'Go down the Reflected Lighthouse. Keep to the lamps',
+    templeBoss: 'Face your Reflection',
+    reportMaren4: 'Bring the Lantern back to Maren',
+    saltworks: 'Burn the brambles at the Old Saltworks with the Lantern',
+    act1Saltglass: 'A page of the old chart: Saltglass Flats, where the town is only there at noon. (Saltglass arrives in the next build.)',
   },
   // the Prologue in chapters, for the journal in the pause menu (each lists the steps it covers)
   chapters: [
@@ -886,9 +973,11 @@ export const STORY = {
     { name: 'Act 1 \u00b7 Bell Rock', steps: ['act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3'] },
     { name: 'Act 1 \u00b7 Cinderglass', steps: ['act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda', 'forgeHome'] },
     { name: 'Act 1 \u00b7 The Mirror Pool', steps: ['mirrorPool', 'act1Temple'] },
+    { name: 'Act 1 \u00b7 The Reflected Lighthouse', steps: ['temple', 'templeBoss', 'reportMaren4'] },
+    { name: 'Act 1 \u00b7 The Old Saltworks', steps: ['saltworks', 'act1Saltglass'] },
   ],
   // every step in order (saving and the journal use this)
-  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3', 'act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda', 'forgeHome', 'mirrorPool', 'act1Temple'],
+  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3', 'act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda', 'forgeHome', 'mirrorPool', 'act1Temple', 'temple', 'templeBoss', 'reportMaren4', 'saltworks', 'act1Saltglass'],
   maren: {
     findMaren: [
       'There you are. I thought the tide had taken you.',
@@ -983,7 +1072,21 @@ export const STORY = {
     act1Temple: [
       'The pool. It\u2019s a mirror now, and the lighthouse in it goes down instead of up.',
       'I have seen that before. In the oldest of the keepers\u2019 books. They called it the Temple, and nobody who wrote about it went in twice.',
-      'Not tonight. Sleep first. Whatever is down there has waited three hundred years; it can wait till morning.',
+      'The book says one thing, over and over: keep to the lamps. Something walks behind you down there, and it walks where you walked.',
+      'Go when you\u2019re ready. I\u2019ll keep the beacon. If you\u2019re not back by dark, I\u2019m coming in after you, book or no book.',
+    ],
+    temple: ['Keep to the lamps, apprentice.'],
+    templeBoss: ['Keep to the lamps, apprentice.'],
+    reportMaren4: [
+      'You\u2019re back. You\u2019re back, and you\u2019re you. Let me look at you. \u2026Yes. That\u2019s you.',
+      'And that. A keeper\u2019s lantern. The book draws one exactly like it, with a flame that isn\u2019t fire.',
+      'It shows what\u2019s really there, the book says. And it burns what shouldn\u2019t be.',
+      'The brambles at the Old Saltworks, then. They came up the night the sky cracked, and nothing will cut them. Burn them.',
+    ],
+    saltworks: ['The brambles at the Old Saltworks. South-east, past the dock. Burn them, and see what they were hiding.'],
+    act1Saltglass: [
+      'Saltglass Flats. My grandmother sailed there once. She said the town is only there at noon, and the rest of the day it\u2019s a lake of salt.',
+      'If the chart shows it again, the sea is changing. We\u2019ll need Tobin. And patience.',
     ],
   },
   // after the beacon is lit: night falls, then the first Riftfall
@@ -1173,6 +1276,30 @@ export const STORY = {
     heart: { name: 'Kiln-fired Heart', line: 'Your health grows by one heart.' },
   },
   forgeOpen: { name: 'Odda\u2019s Forge', region: 'Lanternhold', line: 'Skyglass in, better tools out.' },
+  templeLines: {
+    enter: [{ who: '', text: 'You step into the pool and fall up, out of it, into a lighthouse standing on its head. The stairs go down. The light goes down. Far below, something is climbing the stairs the way you came.' }],
+    wake: [{ who: '', text: 'Behind you, the glass of the floor ripples, and someone steps out of it. Your coat. Your face. It stands where you stood a moment ago, and then where you stood after that.' }],
+    wakeHint: 'Your reflection follows your path. Light the lamps: it won\u2019t walk into their light',
+    caught: 'It caught you',
+    lamp: 'The lamp catches',
+    lampHint: 'An unlit lamp: hit it to light it',
+    twin: 'Behind the glass, your twin moves as you move, the other way round. Its walls aren\u2019t yours',
+    plates: 'Both plates: one for you, one for your twin',
+    mirrorOpen: 'The mirror door slides into the floor',
+    lantern: { name: 'Lantern of Seeing', line: 'A keeper\u2019s lantern; its flame is a sliver of the Temple\u2019s mirror. Choose it from your tools and use it to light lamps and braziers and burn brambles. In the dark it lights your way.' },
+    bossCard: { name: 'Your Reflection', region: 'Guardian of the Temple', line: 'It does what you do, the other way round. Bring it into the light.' },
+    boss: [{ who: '', text: 'At the bottom of the lighthouse, the floor is a perfect mirror, and you are standing in it. Then you aren\u2019t. It is standing across the hall from you, and it smiles a moment after you do.' }],
+    bossHint: 'Light a brazier, then go to the one across from it: your reflection walks into the light',
+    seen: 'Seen!',
+    blocked: 'It isn\u2019t really there',
+    down: [{ who: '', text: 'Your reflection looks at its hands, then at you. Then it is only a mirror again, and in it there is only you, holding a lantern that wasn\u2019t there before.' }],
+    heart: { name: 'Mirror-glass Heart', line: 'Your health grows by one heart.' },
+  },
+  saltworksLines: {
+    brambles: 'Thorns as hard as glass. A flame might do it',
+    burn: 'The brambles burn away',
+    chest: { name: 'A page of the old chart', line: 'Torn from a keeper\u2019s chart: an island south of Bell Rock, marked Saltglass Flats, and in the margin \u201conly at noon\u201d.' },
+  },
   shardFall: [
     { who: '', text: 'A thread of light falls out of the crack and comes down on the Heights without a sound.' },
   ],

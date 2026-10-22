@@ -96,6 +96,7 @@ export function createUI(opts) {
     attack: { down: false, pressed: false, aim: { x: 0, y: 0, active: false } },
     ranged: { down: false, pressed: false, aim: { x: 0, y: 0, active: false } },
     roll: { pressed: false },
+    orbit: 0,         // a drag on the right side of the screen: pixels to turn the close view by
     run: false,       // running (the boot button, or Shift held)
     ability: { pressed: false },
     tap: null,        // a quick tap on the ground: { x, y } on the stage, the game walks you there
@@ -115,7 +116,7 @@ export function createUI(opts) {
   const pauseBtn = el('button', 'pauseBtn glass', ICON.pause);
   pauseBtn.setAttribute('aria-label', 'Pause');
   hud.appendChild(pauseBtn);
-  // at sea: switch between the view from above and the low view out to the horizon
+  // switch between the view from above and the close view, low behind you
   const SEAVIEW = {
     horizon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 15h20"/><path d="M5 19h14"/><circle cx="12" cy="10" r="3.2"/><path d="M12 3v1.6M5.6 6.2l1.1 1.1M18.4 6.2l-1.1 1.1"/></svg>',
     top: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
@@ -127,7 +128,7 @@ export function createUI(opts) {
   // mode: null (not sailing), 'top' or 'horizon' (the view showing now); the button shows the other one
   function setSeaView(mode) {
     seaViewBtn.classList.toggle('hidden', !mode);
-    if (mode) { seaViewBtn.innerHTML = mode === 'horizon' ? SEAVIEW.top : SEAVIEW.horizon; seaViewBtn.setAttribute('aria-label', mode === 'horizon' ? 'View from above' : 'View the horizon'); }
+    if (mode) { const close = mode === 'close' || mode === 'horizon'; seaViewBtn.innerHTML = close ? SEAVIEW.top : SEAVIEW.horizon; seaViewBtn.setAttribute('aria-label', close ? 'View from above' : 'Close view'); }
   }
   const hint = el('div', 'hint glass');
   hud.appendChild(hint);
@@ -361,6 +362,12 @@ export function createUI(opts) {
     if (t.kind !== 'field' || t.pinched) return;
     let dx = t.x - t.sx, dy = t.y - t.sy;
     t.far = Math.max(t.far, Math.hypot(dx, dy));
+    // a drag that starts on the buttons' side turns the view instead
+    if (!t.stick && (t.orbit || (t.far > TAP_MOVE && onButtonSide(t.sx)))) {
+      if (t.orbit) input.orbit += p.x - t.lx;
+      t.orbit = true; t.lx = p.x; input.tap = null;
+      return;
+    }
     // a drag turns into the joystick, which appears where the drag started
     if (!t.stick && t.far > TAP_MOVE && !onButtonSide(t.sx)) {
       t.stick = true;
@@ -389,7 +396,7 @@ export function createUI(opts) {
     else if (t.kind === 'field') {
       if (pinch && pinch.a === t) { pinch = null; touches.forEach((o, id) => { if (o.kind === 'pinch2') touches.delete(id); }); }
       // a quick tap that didn't wander: walk there
-      if (!t.stick && !t.pinched && t.far <= TAP_MOVE && performance.now() - t.t0 < TAP_TIME && e.type === 'pointerup') { input.tap = { x: t.x, y: t.y }; hideHint('move'); }
+      if (!t.stick && !t.orbit && !t.pinched && t.far <= TAP_MOVE && performance.now() - t.t0 < TAP_TIME && e.type === 'pointerup') { input.tap = { x: t.x, y: t.y }; hideHint('move'); }
       releaseStick(t);
     }
   }

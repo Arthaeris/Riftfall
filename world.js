@@ -2528,9 +2528,6 @@ export function buildCaves(root, D, saved = {}) {
     if (fireLight) fireLight.intensity = fires.some((f) => !f.out) ? 6 + Math.sin(t * 15) * 0.8 : 0;
     if (wheel && state.basin) wheel.rotation.z -= dt * 1.4;
     for (const [k2, v] of hotCells) if (v > 0) hotCells.set(k2, Math.max(0, v - dt));
-    // the remembered town shimmers while it's only light
-    if (SLT && !rem.solid) { rem.ghostMat.opacity = (0.1 + rem.k * 0.5) * (0.75 + Math.sin(t * 2.3) * 0.25); rem.g.position.y = Math.sin(t * 1.7) * 0.04; }
-    if (SLT && rem.mirage) rem.mirage.g.position.y = -2 + Math.sin(t * 0.9) * 0.6;
     for (const l of torchLights) l.intensity = 5 + Math.sin(t * 11 + l.position.x) * 0.6 + Math.sin(t * 17 + l.position.z) * 0.4;
     // doors sinking and rising
     for (const dr of doors) {
@@ -3076,6 +3073,9 @@ export function buildTown(root, D) {
     boat.userData.pennant.rotation.y = Math.sin(t * 3) * 0.3;
     sea.position.set(P.x, level, P.z);
     for (const [k2, v] of hotCells) if (v > 0) hotCells.set(k2, Math.max(0, v - dt));
+    // the remembered town shimmers while it's only light
+    if (SLT && !rem.solid) { rem.ghostMat.opacity = (0.1 + rem.k * 0.5) * (0.75 + Math.sin(t * 2.3) * 0.25); rem.g.position.y = Math.sin(t * 1.7) * 0.04; }
+    if (SLT && rem.mirage) rem.mirage.g.position.y = -2 + Math.sin(t * 0.9) * 0.6;
     for (const k of keepsakes) if (!k.taken) k.m.rotation.y = t * 0.6;
     if (hooks) for (const k of keepsakes) if (!k.taken && Math.hypot(P.x - k.x, P.z - k.z) < 0.85 && Math.abs(P.y - k.y) < 1) { k.taken = true; k.m.visible = false; hooks.onEvent('keepsake', k); }
   }

@@ -3287,11 +3287,23 @@ function updateCamera(dt, t) {
 // Main loop
 // ===========================================================================
 let last = performance.now(), time = 0;
+// the first time a material is drawn, the phone compiles a shader for it, and that frame hitches. Things that start
+// out hidden (the mark's pillar, the lantern in your hand, the jar) are shown for one moment while everything compiles
+let warmed = false;
+function warmShaders() {
+  warmed = true;
+  const hidden = [beacon.g, P.held && P.held.lantern && P.held.lantern.root, P.held && P.held.jarG, lantern].filter(Boolean);
+  const was = hidden.map((o) => o.visible);
+  hidden.forEach((o) => { o.visible = true; });
+  try { renderer.compile(scene, camera); } catch (_) { /* fine: it compiles on first use instead */ }
+  hidden.forEach((o, i) => { o.visible = was[i]; });
+}
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (!paused) tick(dt);
+  if (!warmed && started && time > 2) warmShaders();
   // with the map open, the map draws itself (the world isn't drawn at all)
   if (!(ui && ui.atlas && ui.atlas.isOpen() && map3d.active)) post.render();
 }

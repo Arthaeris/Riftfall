@@ -189,6 +189,66 @@ function kit() {
   return { mat, box, flash, mats };
 }
 
+// ---------------------------------------------------------------------------
+// Merging a model's blocks: a character is put together from dozens of little boxes, and every one of them would be
+// its own draw call (twice: once more for the shadow). Once it's built, the boxes under each moving part (a head,
+// an arm) are folded into one mesh, its colours baked into the vertices; the parts still move as before.
+// Anything the code keeps a handle on (eyes, a glowing core, a hidden hand) is left as it is.
+// ---------------------------------------------------------------------------
+function refsOf(obj, out = new Set(), depth = 0) {
+  if (!obj || depth > 3) return out;
+  if (obj.isObject3D) { out.add(obj); return out; }
+  if (Array.isArray(obj)) { for (const v of obj) refsOf(v, out, depth + 1); return out; }
+  if (typeof obj === 'object' && !(obj instanceof Map)) for (const k of Object.keys(obj)) { if (k !== 'K' && k !== 'root') refsOf(obj[k], out, depth + 1); }
+  return out;
+}
+function mergeKit(root, K, keepFrom) {
+  const keep = refsOf(keepFrom);
+  const kitMats = new Set(K.mats.values());
+  const lit = new THREE.MeshLambertMaterial({ vertexColors: true });
+  lit.userData.base = lit.color.clone();
+  const glow = new THREE.MeshBasicMaterial({ vertexColors: true });
+  let used = false;
+  const parents = [];
+  root.traverse((o) => { if (o.children.length) parents.push(o); });
+  for (const p of parents) {
+    const lists = [[], []];
+    for (const c of p.children) {
+      if (!c.isMesh || c.children.length || !c.visible || keep.has(c) || !kitMats.has(c.material)) continue;
+      lists[c.material.isMeshBasicMaterial ? 1 : 0].push(c);
+    }
+    lists.forEach((list, gi) => {
+      if (list.length < 2) return;
+      const pos = [], nor = [], colr = [], idx = [];
+      for (const c of list) {
+        c.updateMatrix();
+        const g = c.geometry, P2 = g.attributes.position, N = g.attributes.normal, o0 = pos.length / 3, cc = c.material.color;
+        const nm = new THREE.Matrix3().getNormalMatrix(c.matrix), v = new THREE.Vector3();
+        for (let i = 0; i < P2.count; i++) {
+          v.fromBufferAttribute(P2, i).applyMatrix4(c.matrix); pos.push(v.x, v.y, v.z);
+          v.fromBufferAttribute(N, i).applyMatrix3(nm).normalize(); nor.push(v.x, v.y, v.z);
+          colr.push(cc.r, cc.g, cc.b);
+        }
+        if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(o0 + g.index.getX(i)); else for (let i = 0; i < P2.count; i++) idx.push(o0 + i);
+        p.remove(c);
+      }
+      const mg = new THREE.BufferGeometry();
+      mg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      mg.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      mg.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3));
+      mg.setIndex(idx);
+      const m = new THREE.Mesh(mg, gi ? glow : lit);
+      m.castShadow = !gi;
+      p.add(m);
+      used = true;
+    });
+  }
+  // the merged material answers to the model's flash (hits, warnings) like the old ones did
+  if (used) K.mats.set('__merged', lit);
+  // tiny pieces left on their own (eyes, buttons, sparks of glass) needn't cast a shadow
+  root.traverse((o) => { if (o.isMesh && o.geometry && o.geometry.parameters && Math.max(o.geometry.parameters.width || 0, o.geometry.parameters.height || 0, o.geometry.parameters.depth || 0) < 0.16) o.castShadow = false; });
+}
+
 const blobGeo = new THREE.CircleGeometry(0.5, 20);
 const blobMat = new THREE.MeshBasicMaterial({ color: 0x1a0f2e, transparent: true, opacity: 0.28, depthWrite: false });
 export function blob(sx, sz) {
@@ -202,7 +262,7 @@ export function blob(sx, sz) {
 
 // The apprentice. look: { body: 'a'|'b', hair: 0-3, skin, hairColor, tunic, trim, scarf, pants, boots }
 export const DEFAULT_LOOK = { body: 'a', hair: 2, skin: '#f1c8a0', hairColor: '#4a2f25', tunic: '#2f6f8f', trim: '#e8d6a8', scarf: '#e0573f', pants: '#4a3b5a', boots: '#3b2a22' };
-export function buildPlayer(look = {}) {
+export function buildPlayer(look = {}, opt = {}) {
   const L = Object.assign({}, DEFAULT_LOOK, look);
   const K = kit();
   const { box } = K;
@@ -274,7 +334,9 @@ export function buildPlayer(look = {}) {
       H(0.16, 0.07, 0.05, -0.07, ht - 0.05, hs / 2 - 0.01);
   }
   root.add(blob(0.85, 0.85));
-  return { root, body, torso, legL, legR, armL, armR, handR, handL, head, scarfTail, scarfEnd, eyes: [eyeL, eyeR], flash: K.flash, K };
+  const res = { root, body, torso, legL, legR, armL, armR, handR, handL, head, scarfTail, scarfEnd, eyes: [eyeL, eyeR], flash: K.flash, K };
+  if (!opt.noMerge) mergeKit(root, K, res);
+  return res;
 }
 
 // Weapons (held in the right hand; +z is "forward" from the hand)
@@ -292,6 +354,7 @@ export function buildGlassblade() {
   }
   K.box(grip, 0.025, 0.02, 0.12, '#ffffff', 0, 0.01, 1.18, 2.4);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  mergeKit(g, K, null);
   return { root: g, flash: K.flash };
 }
 export function buildSkyblade() {
@@ -307,6 +370,7 @@ export function buildSkyblade() {
   }
   K.box(grip, 0.03, 0.02, 0.1, '#ffffff', 0, 0.01, 0.98, 2.4);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  mergeKit(g, K, null);
   return { root: g, flash: K.flash };
 }
 
@@ -1614,6 +1678,7 @@ export function buildFoe(kind) {
     root.add(blob(3.4, 3.4));
   }
   root.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.castShadow = !o.userData.noShadow; });
+  mergeKit(root, K, out);
   return out;
 }
 
@@ -1751,7 +1816,7 @@ const NPC_LOOKS = {
   brann: { body: 'a', hair: 0, skin: '#e0b090', hairColor: '#3a2a20', tunic: '#7a5a3a', trim: '#c8b28a', scarf: '#c94a3f', pants: '#3a3a40', boots: '#2a1e18' },
 };
 export function buildNpc(kind) {
-  const m = buildPlayer(NPC_LOOKS[kind]);
+  const m = buildPlayer(NPC_LOOKS[kind], { noMerge: true });
   const { box } = m.K;
   const L = NPC_LOOKS[kind];
   if (kind === 'maren') {
@@ -1838,6 +1903,7 @@ export function buildNpc(kind) {
     box(sw, 0.18, 0.04, 0.04, '#6b4a33', 0, 0, 0.09);
     box(sw, 0.06, 0.03, 0.5, '#c8a77a', 0, 0, 0.36);
   }
+  mergeKit(m.root, m.K, m);
   return m;
 }
 
@@ -2459,6 +2525,7 @@ export function buildToolModel(id, o = {}) {
     K.box(g, 0.14, 0.02, 0.02, brass[2], 0, 0.53, 0);
   }
   g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  mergeKit(g, K, null);
   return { root: g, flash: K.flash };
 }
 const TOOL_POSE = { sling: [-1.1, 0, 0.75], tether: [-0.95, 0.6, 0.85], jar: [0.25, -0.5, 0], jarFull: [0.25, -0.5, 0], lantern: [0.25, -0.55, 0], zoom: { sling: 0.5, tether: 0.5, jar: 0.6, lantern: 0.62 } };

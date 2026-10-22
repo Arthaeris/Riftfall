@@ -41,7 +41,7 @@ export function createFoes(ctx) {
     };
     if (opts.placed) {
       scene.remove(crack); f.crack = null;
-      f.state = { mirrorpuddle: 'chase', bellfish: 'drift', shardmite: 'chase', barnacle: 'idle', doorcrab: 'up', lullabypod: 'up', rootscript: 'up', bubblebishop: 'drift', rustgill: 'chase', mudmimic: 'hidden' }[kind] || 'up';
+      f.state = { mirrorpuddle: 'chase', bellfish: 'drift', shardmite: 'chase', barnacle: 'idle', doorcrab: 'up', lullabypod: 'up', rootscript: 'up', bubblebishop: 'drift', rustgill: 'chase', mudmimic: 'hidden', hound: 'chase', molten: 'drift', wisp: 'drift', sentinel: 'watch' }[kind] || 'up';
       f.hittable = true; f.asleep = opts.wake || 8.5;
       m.root.visible = true;
       Object.assign(f, opts.extra || {});
@@ -202,6 +202,7 @@ export function createFoes(ctx) {
       let pop = o.life <= 0;
       if (!pop && Math.hypot(P.x - o.x, P.z - o.z) < o.r + 0.32 && Math.abs(P.y + 0.8 - o.y) < 0.9) { if (ctx.hurtPlayer(o.dmg, o.x, o.z)) pop = true; }
       if (!pop && world.shotBlocked(o.x, o.y, o.z, 0.1)) pop = true;   // houses, trees, the crystal wall: orbs stop at anything solid
+      if (pop && o.burn) burnPatch(o.x, o.z, 0.9, 2.5);
       if (pop) {
         for (let k = 0; k < 6; k++) { const a = Math.random() * TAU; sparks.spawn({ x: o.x, y: o.y, z: o.z, vx: Math.cos(a) * 1.5, vy: Math.random() * 1.5, vz: Math.sin(a) * 1.5, life: 0.3, size: 0.12, color: '#ffc6ea', glow: 2 }); }
         if (o.life > 0) sound.sfx('orbPop');
@@ -417,6 +418,10 @@ export function createFoes(ctx) {
     if (f.kind === 'hourglass') { f.state = 'stun'; f.t = 0; return { reel: true }; }
     if (f.kind === 'cuckoo') { if (f.state === 'idle' || f.state === 'tell') { f.state = 'open'; f.t = 0; sound.sfx('snap'); ctx.number('Door yanked open!', f.x, f.y + 2.8, f.z, true); } return { reel: false }; }
     if (f.kind === 'broker') { sound.sfx('clank'); return { reel: false }; }
+    if (f.kind === 'golem') { sound.sfx('clank'); ctx.number('It shrugs it off', f.x, f.y + 4, f.z, false); return { reel: false }; }
+    if (f.kind === 'molten') { sound.sfx('hiss'); return { reel: false }; }
+    if (f.kind === 'hound' || f.kind === 'wisp') { f.state = 'stun'; f.t = 0; return { reel: true }; }
+    if (f.kind === 'sentinel') { f.state = 'stun'; f.t = 0; sound.sfx('clank'); return { reel: false }; }
     if (f.kind === 'mudmimic' || f.kind === 'bellringer') { sound.sfx('clank'); return { reel: false }; }
     // small creatures are reeled in and dazed
     if (['shardmite', 'mirrorpuddle', 'bellfish', 'lullabypod'].includes(f.kind)) {
@@ -668,6 +673,7 @@ export function createFoes(ctx) {
   // water from the Tide Jar landing at (x, z): what it does to the creatures it reaches
   function wash(x, z, rad) {
     const out = { mimic: 0, bubble: 0, bell: false };
+    for (let i = burns.length - 1; i >= 0; i--) if (Math.hypot(burns[i].x - x, burns[i].z - z) < burns[i].r + rad) { scene.remove(burns[i].m); burns.splice(i, 1); out.burnOut = true; }
     for (const f of foes) {
       if (!f.alive) continue;
       const d = Math.hypot(f.x - x, f.z - z);
@@ -676,6 +682,17 @@ export function createFoes(ctx) {
         sound.sfx('squelch'); ctx.number('Washed out!', f.x, f.y + 1.4, f.z, true);
       }
       if (f.kind === 'bubblebishop' && d < rad + 0.9 && popBubble(f)) out.bubble++;
+      if (f.kind === 'molten' && d < rad + 0.9) {
+        // it sets: and the river round it with it, three cells across: a stepping stone
+        let n2 = 0;
+        if (world.solidify) for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (world.solidify(f.x + di, f.z + dj)) n2++;
+        f.alive = false; f.hittable = false; scene.remove(f.m.root); scene.remove(f.bar.group);
+        sound.sfx('hiss'); ctx.shake(0.2); out.cooled = (out.cooled || 0) + 1;
+        for (let i = 0; i < 30; i++) sparks.spawn({ x: f.x + (Math.random() - 0.5) * 2, y: f.y + 0.3, z: f.z + (Math.random() - 0.5) * 2, vy: 1.5 + Math.random() * 2, drag: 0.6, life: 1.4, size: 0.3, color: '#f2f6f8', glow: 0.5 });
+        dropSliver(f.x, f.y + 0.5, f.z);
+      }
+      if (f.kind === 'wisp' && d < rad + 1.2) { f.hp = 1; hit(f, 0, 0, 5, false, 0); out.wisp = (out.wisp || 0) + 1; sound.sfx('hiss'); }
+      if (f.kind === 'golem' && d < f.D.r + rad + 0.6) { sound.sfx('hiss'); ctx.number('It shrugs it off', f.x, f.y + 4, f.z, false); }
       if (f.kind === 'bellringer' && d < f.D.r + rad + 0.6) {
         if (f.state === 'hot') {
           f.state = 'exposed'; f.t = 0; f.heat = 0; f.cracks++; out.bell = true;
@@ -686,6 +703,201 @@ export function createFoes(ctx) {
       }
     }
     return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cinderglass and the Kiln
+  // ---------------------------------------------------------------------------
+  // Glass Hound: runs at you, crouches (the warning), and lunges in a straight line
+  function hound(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    let run = 0;
+    if (f.state === 'up' || f.state === 'chase') {
+      f.state = 'chase';
+      turnTo(f, Math.atan2(tp.x, tp.z), 7, dt);
+      f.cd -= dt;
+      if (tp.d > 2.2) { moveFoe(f, tp.x * D.speed * dt, tp.z * D.speed * dt); run = 1; }
+      if (tp.d < 5 && f.cd <= 0) { f.state = 'tell'; f.t = 0; f.dir = { x: tp.x, z: tp.z }; sound.sfx('crabTell'); }
+    } else if (f.state === 'tell') {
+      const k = Math.min(1, f.t / D.tell);
+      m.body.scale.y = 1 - k * 0.2; m.head.rotation.x = -k * 0.3;
+      f.tellGlow = k * 0.6;
+      turnTo(f, Math.atan2(f.dir.x, f.dir.z), 4, dt);
+      if (f.t >= D.tell) { f.state = 'lunge'; f.t = 0; f.hitDone = false; f.tellGlow = 0; m.body.scale.y = 1; sound.sfx('leap'); }
+    } else if (f.state === 'lunge') {
+      moveFoe(f, f.dir.x * D.lungeSpeed * dt, f.dir.z * D.lungeSpeed * dt);
+      m.jaw.rotation.x = 0.6; run = 1;
+      if (!f.hitDone && touch(f, D.r + 0.45, D.dmg)) f.hitDone = true;
+      if (f.t >= D.lunge) { f.state = 'rest'; f.t = 0; m.jaw.rotation.x = 0; }
+    } else if (f.state === 'rest') {
+      if (f.t >= D.rest) { f.state = 'chase'; f.t = 0; f.cd = rnd(0.6, 1.4); }
+    } else if (f.state === 'stagger' || f.state === 'stun') { if (f.t > (f.state === 'stun' ? 1.2 : 0.35)) { f.state = 'chase'; f.t = 0; } }
+    const ph = now * 16;
+    m.legs.forEach((lg, i) => { lg.rotation.x = Math.sin(ph + (i % 2 ? Math.PI : 0) + (i > 1 ? 0.6 : 0)) * 0.7 * run; });
+    m.tail.rotation.y = Math.sin(now * 8) * 0.5;
+    f.barY = 1.4;
+  }
+  // Molten Puddle: drifts up and down its river, bulges (the warning) and flicks a glob of hot glass at you.
+  // Blades can't cut it. Cool it with the Jar and it sets, and the river round it sets with it
+  function molten(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    if (f.state === 'up' || f.state === 'drift') {
+      f.state = 'drift';
+      if (f.dirX === undefined) f.dirX = Math.random() < 0.5 ? -1 : 1;
+      const nx = f.x + f.dirX * D.speed * dt;
+      if (world.moltenAt && world.moltenAt(nx + f.dirX * 0.6, f.z)) f.x = nx; else f.dirX *= -1;
+      f.next = (f.next === undefined ? rnd(...D.every) : f.next) - dt;
+      if (f.next <= 0 && tp.d < 9) { f.state = 'tell'; f.t = 0; sound.sfx('puddleTell'); }
+    } else if (f.state === 'tell') {
+      const k = Math.min(1, f.t / D.tell);
+      m.blob.scale.set(1 + k * 0.2, 1 + k * 0.6, 1 + k * 0.2);
+      f.tellGlow = k * 0.5;
+      if (f.t >= D.tell) {
+        const a = Math.atan2(tp.x, tp.z);
+        const o = buildOrb(0.22);
+        o.traverse((c) => { if (c.material) { c.material = c.material.clone(); c.material.color && c.material.color.set('#ff9a3c'); } });
+        o.position.set(f.x, f.y + 0.6, f.z); scene.add(o);
+        orbs.push({ m: o, x: f.x, y: f.y + 0.6, z: f.z, vx: Math.sin(a) * 5, vz: Math.cos(a) * 5, life: 2, r: 0.24, dmg: D.dmg, t: 0, burn: true });
+        sound.sfx('spit');
+        f.state = 'drift'; f.t = 0; f.next = rnd(...D.every); f.tellGlow = 0; m.blob.scale.set(1, 1, 1);
+      }
+    }
+    m.blob.position.y = Math.sin(now * 3 + f.x) * 0.04;
+    f.y = (world.groundAt(f.x, f.z) || 0) + 0.25;
+    f.barY = 0.9;
+  }
+  // Ember Wisp: drifts round you at a distance, swells (the warning), and drops an ember that sets the ground burning
+  function wisp(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    m.float.position.y = D.hover + Math.sin(now * 2.4 + f.x) * 0.15;
+    m.embers.rotation.y += dt * 3;
+    m.core.scale.setScalar(1 + Math.sin(now * 20) * 0.08);
+    if (f.state === 'up' || f.state === 'drift') {
+      f.state = 'drift';
+      const k = tp.d < 3 ? -1 : tp.d > 6 ? 1 : 0, side = Math.sin(now * 0.8 + f.x);
+      moveFoe(f, (tp.x * k - tp.z * side) * D.speed * dt, (tp.z * k + tp.x * side) * D.speed * dt);
+      f.next = (f.next === undefined ? rnd(...D.every) : f.next) - dt;
+      if (f.next <= 0 && tp.d < 9) { f.state = 'tell'; f.t = 0; sound.sfx('puddleTell'); }
+    } else if (f.state === 'tell') {
+      m.core.scale.setScalar(1 + Math.min(1, f.t / D.tell) * 0.8);
+      f.tellGlow = Math.min(1, f.t / D.tell) * 0.6;
+      if (f.t >= D.tell) { burnPatch(P.x, P.z, 1.1, 3.2); f.state = 'drift'; f.t = 0; f.next = rnd(...D.every); f.tellGlow = 0; }
+    } else if (f.state === 'stagger' || f.state === 'stun') { if (f.t > 0.4) { f.state = 'drift'; f.t = 0; } }
+    if (Math.random() < dt * 12) sparks.spawn({ x: f.x, y: f.y + m.float.position.y, z: f.z, vy: 0.8, life: 0.5, size: 0.1, color: '#ffb04a', glow: 2.2, drag: 1 });
+    f.barY = D.hover + 0.8;
+  }
+  // burning ground: from an ember, or a glob of hot glass landing. It hurts like hot ground does (the game's heat)
+  const burns = [];
+  function burnPatch(x, z, r, sec) {
+    const g = new THREE.Group();
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 20), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff7a2a').multiplyScalar(1.4), transparent: true, opacity: 0.5, depthWrite: false }));
+    disc.rotation.x = -Math.PI / 2; g.add(disc);
+    g.position.set(x, world.groundAt(x, z) + 0.03, z); scene.add(g);
+    burns.push({ x, z, r, t: sec, life: sec, m: g });
+    sound.sfx('burst');
+  }
+  function updateBurns(dt) {
+    for (let i = burns.length - 1; i >= 0; i--) {
+      const b = burns[i];
+      b.t -= dt;
+      b.m.children[0].material.opacity = 0.5 * Math.min(1, b.t / 0.6) * (0.85 + Math.sin(b.t * 20) * 0.15);
+      if (Math.random() < dt * 8) sparks.spawn({ x: b.x + (Math.random() - 0.5) * b.r * 1.6, y: b.m.position.y + 0.1, z: b.z + (Math.random() - 0.5) * b.r * 1.6, vy: 1.2, life: 0.5, size: 0.1, color: '#ffb04a', glow: 2, drag: 1 });
+      if (b.t <= 0) { scene.remove(b.m); burns.splice(i, 1); }
+    }
+  }
+  const burnAt = (x, z) => burns.some((b) => Math.hypot(x - b.x, z - b.z) < b.r);
+  // Mirror Sentinel: turns slowly to face you, its mirror brightens (the warning), and it fires a line of light.
+  // It throws sling shots straight back
+  function sentinel(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    f.t += dt;
+    let beam = 0;
+    if (f.state === 'up' || f.state === 'watch') {
+      f.state = 'watch';
+      turnTo(f, Math.atan2(tp.x, tp.z), D.turn, dt);
+      if (tp.d > 4) moveFoe(f, tp.x * D.speed * dt, tp.z * D.speed * dt);
+      f.cd -= dt;
+      if (f.cd <= 0 && tp.d < D.beam && Math.cos(angTo(f.face, Math.atan2(tp.x, tp.z))) > 0.9) { f.state = 'tell'; f.t = 0; sound.sfx('shimmer'); }
+    } else if (f.state === 'tell') {
+      m.glass.material.color.set('#ffffff').multiplyScalar(1 + Math.min(1, f.t / D.tell) * 2.5);
+      f.tellGlow = Math.min(1, f.t / D.tell) * 0.4;
+      if (f.t >= D.tell) { f.state = 'beam'; f.t = 0; f.hitDone = false; f.tellGlow = 0; sound.sfx('burst'); }
+    } else if (f.state === 'beam') {
+      beam = 1;
+      // anyone within half a step of the line it's looking along
+      const fx = Math.sin(f.face), fz = Math.cos(f.face), along = (P.x - f.x) * fx + (P.z - f.z) * fz, off = Math.abs((P.x - f.x) * fz - (P.z - f.z) * fx);
+      if (!f.hitDone && along > 0 && along < D.beam && off < 0.6) { if (ctx.hurtPlayer(D.dmg, f.x, f.z)) f.hitDone = true; }
+      if (f.t >= D.beamT) { f.state = 'rest'; f.t = 0; m.glass.material.color.set('#dfe8f4').multiplyScalar(0.9); }
+    } else if (f.state === 'rest') { if (f.t >= D.rest) { f.state = 'watch'; f.t = 0; f.cd = rnd(0.8, 1.6); } }
+    else if (f.state === 'stagger' || f.state === 'stun') { if (f.t > 0.5) { f.state = 'watch'; f.t = 0; } }
+    if (!f.beamM) {
+      const bm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff4dc').multiplyScalar(3), transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+      bm.geometry.translate(0, 0, 0.5); bm.scale.z = f.D.beam; scene.add(bm); f.beamM = bm;
+    }
+    f.beamM.visible = !!beam;
+    if (beam) { f.beamM.position.set(f.x, f.y + 1.85, f.z); f.beamM.rotation.y = f.face; }
+    f.barY = 2.5;
+  }
+  // The Kiln Golem: walks at you, raises both arms (the warning) and slams: a ring of heat rolls out, and its
+  // furnace door hangs open for a moment, the only time a blade gets in. It sweeps an arm round when you're close.
+  // Tools do nothing to it
+  function golem(f, dt) {
+    const D = f.D, m = f.m, tp = toPlayer(f);
+    const now = performance.now() / 1000;
+    f.t += dt;
+    const phase = f.hp / D.hp > 0.5 ? 0 : 1;
+    if (phase !== f.phase) { f.phase = phase; if (phase === 1) { sound.sfx('roar'); ctx.shake(0.6); ctx.toast('The Golem burns hotter'); } }
+    m.core.scale.setScalar(f.state === 'open' ? 1.2 + Math.sin(now * 14) * 0.08 : 1);
+    m.door.rotation.y = lerp(m.door.rotation.y, f.state === 'open' ? -1.9 : 0, Math.min(1, dt * 10));
+    ctx.bossBar(D.name, Math.max(0, f.hp / D.hp));
+    f.barY = 0;
+    if (ctx.bossHold && ctx.bossHold()) return;
+    let walk = 0;
+    if (f.state === 'up') { f.state = 'walk'; f.t = 0; f.next = 1.2; }
+    if (f.state === 'walk') {
+      turnTo(f, Math.atan2(tp.x, tp.z), 1.6, dt);
+      if (tp.d > 3) { moveFoe(f, tp.x * D.speed * (1 + phase * 0.3) * dt, tp.z * D.speed * (1 + phase * 0.3) * dt); walk = 1; }
+      f.next -= dt;
+      if (f.next <= 0) {
+        f.state = tp.d < 3.6 && Math.random() < 0.55 ? 'sweep' : 'slam'; f.t = 0; f.fired = 0;
+        sound.sfx('creak');
+      }
+    } else if (f.state === 'slam') {
+      // arms up (the warning), then both down: a ring of heat; twice when it's angry
+      const reps = phase ? 2 : 1, cyc = 1.25, k = (f.t % cyc) / cyc, rep = Math.floor(f.t / cyc);
+      const up = k < 0.75 ? smooth(k / 0.75) : 1 - smooth((k - 0.75) / 0.25);
+      m.arms.forEach((a, i) => { a.sh.rotation.x = -up * 2.6; a.sh.rotation.z = (i ? -1 : 1) * up * 0.3; });
+      f.tellGlow = k < 0.75 ? (k / 0.75) * 0.4 : 0;
+      if (rep < reps && k >= 0.9 && f.fired <= rep) {
+        f.fired = rep + 1; ctx.shake(0.6); sound.sfx('impact');
+        const g2 = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 64), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff9a3c').multiplyScalar(1.5), transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+        g2.rotation.x = -Math.PI / 2; g2.position.set(f.x, f.y + 0.12, f.z); scene.add(g2);
+        waves.push({ g: g2, x: f.x, z: f.z, y: f.y, r: 2.2, max: D.wave + phase * 2, hit: false, speed: 6.5 + phase });
+        if (phase) burnPatch(f.x + Math.sin(f.face) * 2.4, f.z + Math.cos(f.face) * 2.4, 1.4, 4);
+      }
+      if (f.t >= cyc * reps) { f.state = 'open'; f.t = 0; f.tellGlow = 0; m.arms.forEach((a) => { a.sh.rotation.set(0, 0, 0); }); sound.sfx('doorOpen'); ctx.number('Open!', f.x, f.y + 4, f.z, true); }
+    } else if (f.state === 'sweep') {
+      // one arm drawn back (the warning), then round in a wide arc in front of it
+      const a = m.arms[1];
+      if (f.t < 0.8) { a.sh.rotation.y = smooth(f.t / 0.8) * 1.4; a.sh.rotation.z = -0.8; f.tellGlow = (f.t / 0.8) * 0.35; }
+      else {
+        const k = Math.min(1, (f.t - 0.8) / 0.4);
+        a.sh.rotation.y = 1.4 - k * 2.8; f.tellGlow = 0;
+        if (!f.hitDone && k > 0.3 && tp.d < 3.6 && Math.cos(angTo(f.face, Math.atan2(tp.x, tp.z))) > -0.2) { if (ctx.hurtPlayer(D.dmg, f.x, f.z)) f.hitDone = true; }
+        if (k >= 1) { a.sh.rotation.set(0, 0, 0); f.state = 'walk'; f.t = 0; f.next = D.every[phase]; f.hitDone = false; }
+      }
+    } else if (f.state === 'open') {
+      if (f.t >= D.open) { f.state = 'walk'; f.t = 0; f.next = D.every[phase]; sound.sfx('doorSlam'); }
+    } else if (f.state === 'stagger') { f.state = 'walk'; f.t = 0; f.next = 0.6; }
+    const ph = now * 5;
+    m.legs[0].rotation.x = Math.sin(ph) * 0.4 * walk; m.legs[1].rotation.x = -Math.sin(ph) * 0.4 * walk;
+    if (Math.random() < dt * 6) sparks.spawn({ x: f.x, y: f.y + 5, z: f.z, vy: 2, vx: (Math.random() - 0.5), life: 1, size: 0.14, color: '#ffb04a', glow: 2, drag: 0.5 });
   }
 
   // ---------------------------------------------------------------------------
@@ -1287,6 +1499,15 @@ export function createFoes(ctx) {
     }
     // a mud mimic in hiding: the blade just sinks into mud
     if (hidden(f)) { sound.sfx('squelch'); ctx.number('Only mud…?', f.x, f.y + 1, f.z, false); return true; }
+    // a Molten Puddle: too hot to cut
+    if (f.kind === 'molten') { sound.sfx('hiss'); ctx.number('Too hot to cut', f.x, f.y + 1, f.z, false); return true; }
+    // the Mirror Sentinel throws a sling shot straight back
+    if (f.kind === 'sentinel' && src === 'sling') { sound.sfx('shimmer'); ctx.number('Reflected!', f.x, f.y + 2.4, f.z, false); return 'reflect'; }
+    // the Kiln Golem: tools don't touch it; its brick turns most of a blade unless its furnace door is open
+    if (f.kind === 'golem') {
+      if (src === 'sling' || src === 'tool') { sound.sfx('clank'); ctx.number('It shrugs it off', f.x, f.y + 4, f.z, false); return true; }
+      if (f.state !== 'open') { dmg = Math.max(1, Math.round(dmg * f.D.armour)); knock = 0; sound.sfx('clank'); }
+    }
     // the Cuckoo Clock: its case turns a blade until the door's open
     if (shut(f)) { sound.sfx('wood'); ctx.number('Blocked', f.x, f.y + 2.4, f.z, false); return true; }
     // the Hour Broker: its heart is behind glass that only opens when time stands still
@@ -1337,7 +1558,7 @@ export function createFoes(ctx) {
     ctx.number(String(dmg), f.x, hy + 0.7, f.z, heavy);
     // a heavy hit (or any hit on a creature mid-warning, for the puddle) knocks it out of what it was doing
     // (the guardian has poise: it flinches, but never drops what it's doing, so its warnings always play out)
-    if ((f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker') && f.hp > 0) { f.flinch = 1; }
+    if ((f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker' || f.kind === 'golem') && f.hp > 0) { f.flinch = 1; }
     else if (f.hp > 0 && (heavy || (f.kind === 'mirrorpuddle' && f.state === 'tell'))) {
       if (f.state !== 'under' && f.state !== 'tell' || f.kind === 'mirrorpuddle') { f.state = 'stagger'; f.t = 0; f.m.body.position.x = 0; f.tellGlow = 0; }
     }
@@ -1348,13 +1569,23 @@ export function createFoes(ctx) {
     f.alive = false; f.hittable = false;
     if (ctx.onKill) ctx.onKill(f);
     const hy = f.y + (f.kind === 'bellfish' ? f.D.hover : 0.35);
-    const cols = f.kind === 'mirrorpuddle' ? ['#3f9fc4', '#62c3e0', '#ff9f7a'] : f.kind === 'bellfish' ? ['#e2a5d8', '#f2c8e9', '#ffd27a'] : ['#6b4a33', '#7a5236', '#ffc46b'];
+    const cols = f.kind === 'hound' ? ['#5fae7a', '#6fc08a', '#bff6ff'] : f.kind === 'wisp' ? ['#ffb04a', '#ff7a2a', '#ffe08a'] : f.kind === 'sentinel' ? ['#7a7070', '#dfe8f4', '#c9a24a'] : f.kind === 'mirrorpuddle' ? ['#3f9fc4', '#62c3e0', '#ff9f7a'] : f.kind === 'bellfish' ? ['#e2a5d8', '#f2c8e9', '#ffd27a'] : ['#6b4a33', '#7a5236', '#ffc46b'];
     for (let i = 0; i < 18; i++) {
       const a = Math.random() * TAU, sp = 1.5 + Math.random() * 3.5;
       bits.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * sp + nx * 2, vy: 2 + Math.random() * 3.5, vz: Math.sin(a) * sp + nz * 2, life: 1.3, size: 0.09 + Math.random() * 0.1, color: cols[i % 3], floor: f.y });
     }
     for (let i = 0; i < 22; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x, y: hy, z: f.z, vx: Math.cos(a) * 3.5, vy: Math.random() * 4, vz: Math.sin(a) * 3.5, drag: 3, grav: 3, life: 0.6, size: 0.18, color: i % 2 ? '#ffffff' : '#9ff3ff', glow: 3 }); }
-    const big = f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker';
+    const big = f.kind === 'gardener' || f.kind === 'barnaclemother' || f.kind === 'bellringer' || f.kind === 'broker' || f.kind === 'golem';
+    if (f.kind === 'golem') {
+      ctx.bossBar(null);
+      for (const w of waves) scene.remove(w.g);
+      waves.length = 0;
+      for (const b of burns) scene.remove(b.m);
+      burns.length = 0;
+      for (let i = 0; i < 60; i++) { const a = Math.random() * TAU, sp = 2 + Math.random() * 5; bits.spawn({ x: f.x, y: f.y + 1 + Math.random() * 3, z: f.z, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 4, vz: Math.sin(a) * sp, life: 2, size: 0.14 + Math.random() * 0.18, color: ['#7a3a2a', '#8a4a32', '#ff9a3c'][i % 3], floor: f.y }); }
+      if (ctx.onGuardianDown) ctx.onGuardianDown(f);
+    }
+    if (f.beamM) { scene.remove(f.beamM); f.beamM = null; }
     if (f.kind === 'broker') {
       ctx.bossBar(null);
       if (brokerHand) brokerHand.visible = false;
@@ -1626,6 +1857,11 @@ export function createFoes(ctx) {
       else if (f.kind === 'hourglass') imp(f, dt);
       else if (f.kind === 'cuckoo') cuckoo(f, dt);
       else if (f.kind === 'broker') broker(f, dt);
+      else if (f.kind === 'hound') hound(f, dt);
+      else if (f.kind === 'molten') molten(f, dt);
+      else if (f.kind === 'wisp') wisp(f, dt);
+      else if (f.kind === 'sentinel') sentinel(f, dt);
+      else if (f.kind === 'golem') golem(f, dt);
       if (!f.alive) continue;
       // knockback from your hits, sliding out
       if (Math.abs(f.kx) + Math.abs(f.kz) > 0.01) { moveFoe(f, f.kx * dt, f.kz * dt); const k = Math.exp(-9 * dt); f.kx *= k; f.kz *= k; }
@@ -1639,7 +1875,7 @@ export function createFoes(ctx) {
       f.flashT = Math.max(0, f.flashT - dt * 7);
       f.m.flash(Math.max(f.flashT, (f.tellGlow || 0) * (0.35 + 0.25 * Math.sin(performance.now() / 40))));
       // health bar: floats above, fades a little at full health (the guardian's is at the top of the screen)
-      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener' && f.kind !== 'barnaclemother' && f.kind !== 'bellringer' && f.kind !== 'broker' && !hidden(f) && !f.asleep;
+      const showBar = f.m.root.visible && f.state !== 'under' && f.kind !== 'gardener' && f.kind !== 'barnaclemother' && f.kind !== 'bellringer' && f.kind !== 'broker' && f.kind !== 'golem' && f.kind !== 'molten' && !hidden(f) && !f.asleep;
       f.bar.group.visible = showBar;
       if (showBar) {
         f.bar.group.position.set(f.x, f.y + (f.barY || 1.2), f.z);
@@ -1654,6 +1890,7 @@ export function createFoes(ctx) {
     updateEffects(dt);
     updateWaves(dt);
     updateFalling(dt);
+    updateBurns(dt);
   }
 
   // you fell: everything in the Seep goes quiet again, nothing is lost
@@ -1669,6 +1906,9 @@ export function createFoes(ctx) {
     for (const b of falling) { scene.remove(b.sh); scene.remove(b.bl); }
     falling.length = 0;
     if (brokerHand) brokerHand.visible = false;
+    for (const b of burns) scene.remove(b.m);
+    burns.length = 0;
+    for (const f of foes) if (f.beamM) { scene.remove(f.beamM); f.beamM = null; }
     for (const e of effects) scene.remove(e.m);
     effects.length = 0;
     flood.k = 0; flood.to = 0;
@@ -1690,5 +1930,5 @@ export function createFoes(ctx) {
   }
   // dragged along by the Tether (walls still stop it)
   function drag(f, dx, dz) { moveFoe(f, dx, dz); f.stunT = 0.3; if (f.state === 'loose') f.t = Math.min(f.t, 0.2); }
-  return { update, hit, targets, reset, rest, spawn, tethered, drag, wash, list: foes, seep, dropHeart, dropSliver, slowAt, flood, alive: () => foes.some((f) => f.alive) };
+  return { update, hit, targets, reset, rest, spawn, tethered, drag, wash, burnAt, list: foes, seep, dropHeart, dropSliver, slowAt, flood, alive: () => foes.some((f) => f.alive) };
 }

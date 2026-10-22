@@ -1,8 +1,8 @@
 /* Riftfall — game.js
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
-import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, MARKET, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, BELLROCK, SEA } from '@rf/data';
-import { buildPlayer, buildSkyblade, buildToolModel, renderToolArt, buildSailboat, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
+import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, MARKET, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, BELLROCK, CINDER, KILN, HEAT, UPGRADES, SEA } from '@rf/data';
+import { buildPlayer, buildSkyblade, buildGlassblade, buildToolModel, MOLTEN, renderToolArt, buildSailboat, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
 import { createStory } from '@rf/story';
 import { buildCove, buildRift, buildCaves, buildTown, buildSeaPlace } from '@rf/world';
 import { createFoes } from '@rf/foes';
@@ -394,12 +394,15 @@ let seaW = null, seaRoot = null, foesSea = null;
 // the Clocktide Market (a Rift, grown fresh each time you go in) and Bell Rock (a little town-like place)
 let market = null, marketRoot = null, foesMarket = null;
 let bellW = null, bellRoot = null, foesBell = null;
+// Cinderglass (a town) and the Kiln (a dungeon)
+let cinderW = null, cinderRoot = null, foesCinder = null;
+let kiln = null, kilnRoot = null, foesKiln = null, kilnSaved = null;
 // which place is which
-const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : w === market ? 'market' : w === bellW ? 'bell' : 'cove');
+const placeOf = (w) => (w === caves ? 'caves' : w === rift ? 'rift' : w === belfry ? 'belfry' : w === brine ? 'brine' : w === seaW ? 'sea' : w === market ? 'market' : w === bellW ? 'bell' : w === cinderW ? 'cinder' : w === kiln ? 'kiln' : 'cove');
 const isRift = (w = world) => !!w && (w === rift || w === market);
-const isTown = (w = world) => !!w && (w === brine || w === bellW);
-const isDungeon = (w = world) => !!w && (w === caves || w === belfry);
-const outdoors = (w = world) => w === cove || w === brine || w === seaW || w === bellW;
+const isTown = (w = world) => !!w && (w === brine || w === bellW || w === cinderW);
+const isDungeon = (w = world) => !!w && (w === caves || w === belfry || w === kiln);
+const outdoors = (w = world) => w === cove || w === brine || w === seaW || w === bellW || w === cinderW;
 const camDir = new V3(...CONFIG.camera.dir).normalize();
 const camFwd = new V3(-camDir.x, 0, -camDir.z).normalize();
 const camRight = new V3().crossVectors(camFwd, new V3(0, 1, 0)).normalize();
@@ -410,7 +413,18 @@ const P = {
   hp: CONFIG.player.hearts * 2, maxHp: CONFIG.player.hearts * 2, invuln: 0, kx: 0, kz: 0, shards: 0,
   combo: 0, comboT: 0, swing: null, rollDir: new THREE.Vector2(), rollCd: 0, rollBuf: 0, atkBuf: 0, fireCd: 0,
   stepT: 0, stepSide: 0, firing: 0, hitList: null, model: null, blade: null, sling: null, spin: null,
+  sword: 'skyblade', upgrades: new Set(), heat: 0,
 };
+// change the sword in your hand (the Kiln's Cinderglass Blade replaces the Skyblade)
+function setSword(id) {
+  P.sword = id;
+  const h = P.model.handR;
+  if (P.blade) h.remove(P.blade.root);
+  const b = id === 'glassblade' ? buildGlassblade() : buildSkyblade();
+  b.root.rotation.x = Math.PI * 0.5 - 0.2;
+  h.add(b.root);
+  P.blade = b;
+}
 let stop = 0, trauma = 0, flashT = 0;
 const projectiles = [];
 
@@ -575,7 +589,7 @@ function startRoll() {
   ui.hideHint('roll');
 }
 function startSwing(dir) {
-  const W = WEAPONS.skyblade;
+  const W = blade();
   if (P.comboT <= 0) P.combo = 0;
   const step = W.combo[P.combo % W.combo.length];
   P.swing = { step, idx: P.combo % W.combo.length, dir, hit: false, slash: null };
@@ -705,7 +719,7 @@ function makeFoes(w, root) {
     onSeepClear: () => story.onSeepClear(),
     pullPlayer: (dx, dz) => { if (P.state !== 'dead' && !P.iframes) tryMove(dx, dz); },
     bossBar: (name, frac) => ui.bossBar(name, frac),
-    onGuardianDown: (f) => (f.kind === 'barnaclemother' || f.kind === 'bellringer' ? caveBossDown(f) : riftEvent('guardianDown', f)),
+    onGuardianDown: (f) => (['barnaclemother', 'bellringer', 'golem'].includes(f.kind) ? caveBossDown(f) : riftEvent('guardianDown', f)),
     onKill: () => { stats.calmed++; },
     // the Seep only wakes while the story needs it; afterwards the stone circle stays quiet
     seepAwake: () => ['toShard', 'seep'].includes(story.state.step),
@@ -747,8 +761,8 @@ function swapTo(to) {
   foes.reset();
   ui.bossBar(null);
   const from = world;
-  if (isDungeon(from)) { if (from === caves) cavesSaved = caves.snapshot(); else belfrySaved = belfry.snapshot(); }
-  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot, marketRoot, bellRoot]) if (r) r.visible = false;
+  if (isDungeon(from)) { if (from === caves) cavesSaved = caves.snapshot(); else if (from === kiln) kilnSaved = kiln.snapshot(); else belfrySaved = belfry.snapshot(); }
+  for (const r of [coveRoot, riftRoot, cavesRoot, belfryRoot, brineRoot, seaRoot, marketRoot, bellRoot, cinderRoot, kilnRoot]) if (r) r.visible = false;
   boatModel.visible = false;
   ui.setMap(null);   // the Rift's room map (a Rift sets its own again below)
   if (P.boat) { P.boat = null; resetPose(); P.model.legL.rotation.x = P.model.legR.rotation.x = 0; P.iframes = false; }
@@ -790,6 +804,27 @@ function swapTo(to) {
     applyLight(market.light);
     P.x = market.spawn.x; P.z = market.spawn.z; P.y = 0; P.face = Math.PI;
     ui.setMap(market.mapState());
+  } else if (to === 'kiln') {
+    kilnBuilt();
+    kilnRoot.visible = true;
+    world = kiln; foes = foesKiln;
+    applyLight(kiln.light);
+    P.x = kiln.spawn.x; P.z = kiln.spawn.z - 0.5; P.y = kiln.spawn.y; P.face = Math.PI;
+    populateCaves();
+    ui.buildMap(kiln.mapInfo, MAP_ROT, 'kiln');
+    syncKeys();
+  } else if (to === 'cinder') {
+    cinderBuilt();
+    cinderRoot.visible = true;
+    world = cinderW; foes = foesCinder;
+    outdoorLight(28, 90);
+    if (from === kiln) { const k = cinderW.spots.kiln; P.x = k.x; P.z = k.z - 1.2; P.face = Math.PI; }
+    else { P.x = cinderW.spawn.x; P.z = cinderW.spawn.z; P.face = 0; }
+    P.y = cinderW.groundAt(P.x, P.z);
+    foes.reset();
+    for (const c of cinderW.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 7 });
+    ui.buildMap(cinderW.mapInfo, MAP_ROT, 'cinder');
+    syncKeys();
   } else if (to === 'bell') {
     bellBuilt();
     bellRoot.visible = true;
@@ -804,7 +839,7 @@ function swapTo(to) {
     world = seaW; foes = foesSea;
     outdoorLight(60, 260);
     // out from the dock you left; out of the Market onto the warm water, a little way off from where it was
-    const fromId = from === brine ? 'brinemoor' : from === bellW || from === market ? 'bellrock' : 'lanternhold';
+    const fromId = from === brine ? 'brinemoor' : from === bellW || from === market ? 'bellrock' : from === cinderW ? 'cinderglass' : 'lanternhold';
     const isl = SEA.islands.find((o) => o.id === fromId);
     P.x = isl.dock.x; P.z = isl.dock.z + (fromId === 'lanternhold' ? 3 : -4); P.y = 0;
     P.face = fromId === 'lanternhold' ? 0 : Math.PI;
@@ -889,6 +924,18 @@ async function arrived(to, from) {
     return;
   }
   if (to === 'sea' && from === 'market') { risingScene(); return; }
+  if (to === 'cinder') {
+    if (from === 'sea') ui.titleCard(CINDER.name, CINDER.region, CINDER.line);
+    if (story.state.step === 'act1Cinder') story.setStep('cinder');
+    saveSoon = 0.5;
+    return;
+  }
+  if (to === 'kiln') {
+    ui.titleCard(KILN.name, KILN.region, KILN.line);
+    if (story.state.step === 'kiln' || story.state.step === 'cinder') story.setStep('kilnIn');
+    if (!kiln.state.visited) { kiln.state.visited = true; await story.say(STORY.kilnLines.enter); }
+    return;
+  }
   if (to === 'bell') {
     ui.titleCard(BELLROCK.name, BELLROCK.region, BELLROCK.line);
     if (!bellW.visited) { bellW.visited = true; await story.say(STORY.bellRockLines.arrive); }
@@ -1027,6 +1074,13 @@ function playtestJump(where) {
     });
   } else if (where === 'tether') {
     giveTool('tether'); ui.toast('Tether (for testing)');
+  } else if (where === 'cinder' || where === 'kiln' || where === 'forge') {
+    if (travelling) return;
+    if (!story.past('act1Cinder')) { story.applyState('act1Cinder'); clock.running = true; }
+    giveTool('tether'); giveTool('jar');
+    if (where === 'cinder') { seaBuilt(); seaW.unlock('cinderglass'); travel('cinder'); }
+    else if (where === 'kiln') { if (!story.past('kiln')) story.setStep('kiln'); seaBuilt(); travel('kiln'); }
+    else { setSword('glassblade'); P.shards += 120; ui.setShards(P.shards); story.applyState('forgeHome'); oddaMoves(); if (world !== cove) travel('cove'); }
   } else if (where === 'market' || where === 'bellrock') {
     if (travelling) return;
     if (!story.past('act1Sea')) { story.applyState('act1Sea'); clock.running = true; }
@@ -1069,7 +1123,10 @@ function objectiveSpot() {
   if (st === 'findTobin') return story.people().find((n) => n.id === 'tobin');
   if (['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st)) return sp.lantern;
   if (['reportMaren2', 'reportMaren3'].includes(st)) return maren;
-  if (['act1Sea', 'market', 'marketBoss', 'bellRock'].includes(st)) return sp.lantern;
+  if (['act1Sea', 'market', 'marketBoss', 'bellRock', 'act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda'].includes(st)) return sp.lantern;
+  if (st === 'forgeHome') return story.people().find((n) => n.id === 'odda') || sp.forge;
+  if (st === 'mirrorPool') return sp.pool;
+  if (st === 'act1Temple') return maren;
   return null;
 }
 // where the story wants you, in a town or on the sea
@@ -1082,9 +1139,14 @@ function placeGoal() {
     return null;
   }
   if (world === bellW) return st === 'bellRock' ? bellW.spots.bell : bellW.spots.pier;
+  if (world === cinderW) {
+    if (['act1Cinder', 'cinder', 'reportOdda'].includes(st)) return story.people(cinderW).find((n) => n.id === 'odda') || cinderW.spots.pier;
+    if (['kiln', 'kilnIn', 'kilnBoss'].includes(st)) return cinderW.spots.kiln;
+    return cinderW.spots.pier;
+  }
   if (world === seaW) {
     if (['act1Sea', 'market', 'marketBoss'].includes(st)) { const o = SEA.islands.find((v) => v.id === 'bellrock'); return { x: o.x / 2, z: o.z / 2 }; }
-    const id = ['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st) ? 'brinemoor' : st === 'bellRock' ? 'bellrock' : 'lanternhold';
+    const id = ['setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale'].includes(st) ? 'brinemoor' : st === 'bellRock' ? 'bellrock' : ['act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda'].includes(st) ? 'cinderglass' : 'lanternhold';
     const o = SEA.islands.find((v) => v.id === id);
     return { x: o.dock.x / 2, z: o.dock.z / 2 };
   }
@@ -1098,7 +1160,7 @@ function updateIslandMap() {
   const o = STORY.objectives[story.state.step];
   const objective = typeof o === 'function' ? o(story.state.hits, STORY.practiceHits) : o;
   if (inCaves) {
-    ui.islandMap({ x: P.x, z: P.z, face: P.face, people: [], goal: null, objective, title: world === belfry ? BELFRY.name : CAVES.name, waystones: [] });
+    ui.islandMap({ x: P.x, z: P.z, face: P.face, people: [], goal: null, objective, title: world.D.name, waystones: [] });
     return;
   }
   if (isTown()) {
@@ -1157,6 +1219,7 @@ function writeSave() {
     caves: caves ? caves.snapshot() : cavesSaved, inCaves: world === caves,
     // the Glass Sea and on
     belfry: belfry ? belfry.snapshot() : belfrySaved, at: travelling ? travelling.to : placeOf(world), jar: jar.full,
+    kiln: kiln ? kiln.snapshot() : kilnSaved, sword: P.sword, upgrades: [...P.upgrades], forgeSeen: !!P.forgeSeen,
     chart: seaW ? (() => { let t = ''; for (const v of seaW.mapInfo.seen) t += String.fromCharCode(v); return btoa(t); })() : seaSeen };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); savedAt = Date.now(); ui.savedMark(); } catch (_) { /* private mode: progress lives only as long as the page */ }
 }
@@ -1223,6 +1286,7 @@ async function beginJourney(save) {
   const O = STORY.order, before = (a, b) => O.indexOf(a) >= 0 && O.indexOf(a) < O.indexOf(b);
   if (save.caves && save.caves.bossDone && before(save.step, 'reportOil')) save.step = 'reportOil';
   if (save.belfry && save.belfry.bossDone && before(save.step, 'reportHale')) save.step = 'reportHale';
+  if (save.kiln && save.kiln.bossDone && before(save.step, 'reportOdda')) save.step = 'reportOdda';
   const step = story.applyState(save.step, save.hits || 0);
   // tools, waystones, keepsakes, memories, the clock, the caves
   tools.owned = save.tools || ['sling']; tools.cur = tools.owned.includes(save.tool) ? save.tool : 'sling'; syncTools();
@@ -1233,6 +1297,10 @@ async function beginJourney(save) {
   if (memories.rain) { cove.showPorch(); }
   cavesSaved = save.caves || null;
   belfrySaved = save.belfry || null;
+  kilnSaved = save.kiln || null;
+  if (save.sword) setSword(save.sword);
+  P.upgrades = new Set(save.upgrades || []);
+  P.forgeSeen = !!save.forgeSeen;
   seaSeen = save.chart || null;
   setJarFull(!!save.jar);
   if (save.clockOn) { clock.running = true; clockH = save.clock || 9; setClock(clockH); }
@@ -1256,6 +1324,11 @@ async function beginJourney(save) {
     seaBuilt();
     swapTo('bell');
     pl = BELLROCK;
+  } else if (at === 'cinder' || at === 'kiln') {
+    seaBuilt();
+    swapTo('cinder');
+    if (at === 'kiln') { const k = cinderW.spots.kiln; P.x = k.x; P.z = k.z - 1.2; P.y = cinderW.groundAt(P.x, P.z); }
+    pl = CINDER;
   } else if (at === 'sea' || at === 'market') { const l = cove.spots.lantern; P.x = l.x; P.z = l.z - 1.4; P.y = cove.groundAt(P.x, P.z); }
   started = true;
   snapCamera();
@@ -1401,6 +1474,78 @@ async function ringBell() {
   story.setStep('reportMaren3');
   saveSoon = 0.3;
 }
+// ----- Odda: she moves to Lanternhold, and her forge turns Skyglass into better tools -----
+function oddaMoves() {
+  story.setStep('forgeHome');
+  if (cinderW) story.hidePerson('odda', cinderW);
+  cove.showForge();
+  story.hidePerson('odda', cove, false);
+  story.place('odda', cove.spots.odda);
+  saveSoon = 0.3;
+}
+async function forgeMenu() {
+  const first = !P.forgeSeen;
+  if (first) { P.forgeSeen = true; const C = STORY.forgeOpen; ui.titleCard(C.name, C.region, C.line); }
+  for (;;) {
+    const owned = (id) => (id === 'glassblade' ? P.sword === 'glassblade' : id === 'sling' ? true : tools.owned.includes(id));
+    const items = Object.entries(UPGRADES).filter(([, u]) => owned(u.needs)).map(([id, u]) => ({ id, name: u.name, desc: u.desc, cost: u.cost, owned: P.upgrades.has(id), can: P.shards >= u.cost }));
+    if (!items.some((it) => !it.owned && it.can) && !first) { await story.say(STORY.odda.forgeNone.map((t) => ({ who: 'odda', text: t }))); }
+    const id = await ui.forgeMenu(items, P.shards);
+    if (!id) break;
+    const u = UPGRADES[id];
+    if (P.shards < u.cost || P.upgrades.has(id)) continue;
+    P.shards -= u.cost; ui.setShards(P.shards);
+    P.upgrades.add(id);
+    sound.sfx('clank'); await gwait(0.3); sound.sfx('chime'); shake(0.15);
+    const f = cove.forgeAt;
+    for (let i = 0; i < 24; i++) { const a = Math.random() * TAU; sparks.spawn({ x: f.x + 0.6, y: f.y + 1, z: f.z + 0.2, vx: Math.cos(a) * 3, vy: 2 + Math.random() * 3, vz: Math.sin(a) * 3, grav: 8, life: 0.7, size: 0.12, color: i % 2 ? '#ffb04a' : '#ffe08a', glow: 2.4 }); }
+    await ui.itemGet(u.name, u.desc + ' ' + STORY.odda.forgeDone, null);
+    saveSoon = 0.3;
+  }
+}
+// night on Lanternhold: a thread of light falls out of the crack onto the Heights
+async function shardFall() {
+  story.state.busy = true; story.state.cine = true;
+  ui.show(false); document.body.classList.add('cine');
+  await curtainTo(1, 0.8);
+  clockH = 22; setClock(22);
+  const pl = cove.poolAt;
+  cineView = { pos: new V3(pl.x + 10, pl.y + 9, pl.z + 16), look: new V3(pl.x, pl.y + 6, pl.z), k: 0.0000001 };
+  await curtainTo(0, 1.0);
+  await gwait(0.6);
+  // the streak, falling
+  const from = new V3(pl.x - 20, pl.y + 40, pl.z - 30);
+  for (let t = 0; t < 1.6; t += 0.05) {
+    await gwait(0.05);
+    const k = t / 1.6, x = lerp(from.x, pl.x, k), y = lerp(from.y, pl.y + 0.3, k), z = lerp(from.z, pl.z, k);
+    for (let i = 0; i < 4; i++) sparks.spawn({ x, y, z, vx: (Math.random() - 0.5), vy: (Math.random() - 0.5), vz: (Math.random() - 0.5), life: 0.8, size: 0.25, color: i % 2 ? '#9ff3ff' : '#ff9fe0', glow: 3 });
+    cineView.look.set(x, y - 2, z);
+  }
+  Object.assign(cineFlash, { r: 0.75, g: 0.97, b: 1, k: 0.6 }); shake(0.3); sound.sfx('crack');
+  await story.say(STORY.shardFall);
+  cineView = null; camBlend = 1.2;
+  document.body.classList.remove('cine'); ui.show(true);
+  story.state.busy = false; story.state.cine = null;
+  story.setStep('mirrorPool');
+  saveSoon = 0.3;
+}
+// the pool on the Heights, a mirror now
+async function mirrorScene() {
+  if (story.state.busy) return;
+  story.state.busy = true;
+  ui.setContext(null);
+  const pl = cove.poolAt;
+  cineView = { pos: new V3(pl.x + 3.2, pl.y + 4.2, pl.z + 4.8), look: new V3(pl.x, pl.y, pl.z), k: 0.03 };
+  cove.setMirror(true);
+  sound.sfx('shimmer');
+  for (let i = 0; i < 30; i++) { const a = Math.random() * TAU; sparks.spawn({ x: pl.x + Math.cos(a) * 1.3, y: pl.y + 0.2, z: pl.z + Math.sin(a) * 1.1, vy: 0.8, life: 1.4, size: 0.12, color: '#dfe8f4', glow: 2 }); }
+  await gwait(1.2);
+  await story.say(STORY.mirror);
+  cineView = null; camBlend = 1.2;
+  story.state.busy = false;
+  story.setStep('act1Temple');
+  saveSoon = 0.3;
+}
 // the tide post in Brinemoor: sit a while, and the tide turns (low if it's in, high if it's out)
 async function waitTide() {
   if (story.busy()) return;
@@ -1455,7 +1600,7 @@ function tetherTarget(dir) {
   const y0 = P.y + 1;
   for (const rg of rings) {
     const dx = rg.x - P.x, dz = rg.z - P.z, d = Math.hypot(dx, dz);
-    if (d < 1.6 || d > T.range) continue;
+    if (d < 1.6 || d > tetherRange()) continue;
     // a ring whose landing is where you already stand is the one you just came from
     const land = rg.lever ? null : (world.ringLanding ? world.ringLanding(rg, P.x, P.z) : rg.land);
     if (!rg.lever && (!land || Math.hypot(land.x - P.x, land.z - P.z) < 2.4)) continue;
@@ -1466,7 +1611,7 @@ function tetherTarget(dir) {
   }
   for (const f of foes.targets()) {
     const dx = f.x - P.x, dz = f.z - P.z, d = Math.hypot(dx, dz);
-    if (d > T.range) continue;
+    if (d > tetherRange()) continue;
     const cos = (dx * dir.x + dz * dir.z) / (d || 1);
     if (cos < 0.86) continue;
     const sc = d * (2 - cos) * 0.8;
@@ -1483,7 +1628,7 @@ function tetherDir(aim) {
   let best = null, bs = Infinity;
   for (const o of [...(world.rings || []).filter((rg) => !rg.used), ...foes.targets()]) {
     const dx = o.x - P.x, dz = o.z - P.z, d = Math.hypot(dx, dz);
-    if (d < 1.2 || d > TOOLS.tether.range) continue;
+    if (d < 1.2 || d > tetherRange()) continue;
     if (!o.D && !o.lever) { const land = world.ringLanding ? world.ringLanding(o, P.x, P.z) : o.land; if (!land || Math.hypot(land.x - P.x, land.z - P.z) < 2.4) continue; }
     const cos = (dx * mv.x + dz * mv.z) / d;
     if (cos < 0.45) continue;
@@ -1516,8 +1661,12 @@ function useJar(aim) {
   const x = P.x + dir.x * 1.4, z = P.z + dir.z * 1.4, y = world.groundAt(x, z);
   for (let i = 0; i < 26; i++) { const a = Math.random() * TAU, sp = Math.random() * 2.2; sparks.spawn({ x: P.x + dir.x * 0.6, y: P.y + 1.1, z: P.z + dir.z * 0.6, vx: dir.x * 3.2 + Math.cos(a) * sp * 0.4, vy: 1.5 + Math.random() * 1.5, vz: dir.z * 3.2 + Math.sin(a) * sp * 0.4, grav: 11, life: 0.6, size: 0.14, color: i % 3 ? '#7fd8f0' : '#e6fcff', glow: 1.6 }); }
   splash(x, y, z, true);
-  const r1 = world.pour ? world.pour(x, z, T.splash) : { fire: 0, basin: false };
-  const r2 = foes.wash ? foes.wash(x, z, T.splash) : {};
+  const sp = jarSplash();
+  const r1 = world.pour ? world.pour(x, z, sp) : { fire: 0, basin: false };
+  const r2 = foes.wash ? foes.wash(x, z, sp) : {};
+  // water on hot ground cools it for a while
+  if (world.cool && world.cool(x, z, sp, HEAT.cooled)) { sound.sfx('hiss'); for (let i = 0; i < 20; i++) sparks.spawn({ x: x + (Math.random() - 0.5) * sp * 2, y: world.groundAt(x, z) + 0.2, z: z + (Math.random() - 0.5) * sp * 2, vy: 1.5 + Math.random() * 1.5, drag: 0.6, life: 1.4, size: 0.3, color: '#f2f6f8', glow: 0.5 }); if (!P.coolTold) { P.coolTold = true; ui.toast('The ground hisses and cools, for a while'); } }
+  if (r2 && r2.cooled) ui.toast(STORY.kilnLines.cooled);
   if (r1.fire) { ui.toast(STORY.belfryLines.doused); saveSoon = 1; }
   if (r1.basin) { ui.toast(STORY.belfryLines.basin); sound.sfx('doorOpen'); shake(0.3); saveSoon = 1; }
   void r2;
@@ -1531,7 +1680,7 @@ function useTool(aim) {
     // a target found: aim straight at it, so the hook lands on it
     if (tg) { const dx = tg.x - P.x, dz = tg.z - P.z, l = Math.hypot(dx, dz) || 1; dir = { x: dx / l, z: dz / l }; }
     P.face = Math.atan2(dir.x, dir.z);
-    const len = tg ? Math.hypot(tg.x - P.x, tg.z - P.z) : TOOLS.tether.range;
+    const len = tg ? Math.hypot(tg.x - P.x, tg.z - P.z) : tetherRange();
     hook = { dir, tg, len, d: 0, back: false, hy: P.y + 1.0 };
     tether.g.visible = true;
     sound.sfx('tetherOut');
@@ -1681,17 +1830,42 @@ function bellBuilt() {
   bellRoot.visible = false;
   bellRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
 }
+function cinderBuilt() {
+  if (cinderW) return;
+  cinderRoot = new THREE.Group();
+  scene.add(cinderRoot);
+  cinderW = buildTown(cinderRoot, CINDER);
+  foesCinder = makeFoes(cinderW, cinderRoot);
+  cinderW.attach({ P, foes: foesCinder, sound, shake, onEvent: caveEvent, camera });
+  story.addPeople(cinderW, cinderRoot, ['odda', 'brann']);
+  if (story.past('forgeHome')) story.hidePerson('odda', cinderW);
+  cinderRoot.visible = false;
+  cinderRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+}
+function kilnBuilt() {
+  if (kiln) return;
+  kilnRoot = new THREE.Group();
+  scene.add(kilnRoot);
+  kiln = buildCaves(kilnRoot, KILN);
+  kiln.restore(kilnSaved);
+  foesKiln = makeFoes(kiln, kilnRoot);
+  kiln.attach({ P, foes: foesKiln, sound, shake, onEvent: caveEvent, onMap: () => {} });
+  kilnRoot.visible = false;
+  kilnRoot.traverse((o) => { if (o.isMesh && o.material && o.material.transparent) o.castShadow = false; });
+}
 function seaBuilt() {
   if (seaW) return;
   brineBuilt();
   bellBuilt();
+  cinderBuilt();
   seaRoot = new THREE.Group();
   scene.add(seaRoot);
-  seaW = buildSeaPlace(seaRoot, SEA, { lanternhold: cove.mapInfo, brinemoor: brine.mapInfo, bellrock: bellW.mapInfo });
+  seaW = buildSeaPlace(seaRoot, SEA, { lanternhold: cove.mapInfo, brinemoor: brine.mapInfo, bellrock: bellW.mapInfo, cinderglass: cinderW.mapInfo });
   foesSea = makeFoes(seaW, seaRoot);
   seaW.attach({ onEvent: caveEvent, sparks });
   // Bell Rock has already risen in a journey past the Market
   if (story.past('bellRock')) seaW.raise('bellrock', true);
+  if (story.past('act1Cinder')) seaW.unlock('cinderglass');
   if (seaSeen) { const b = atob(seaSeen); for (let k = 0; k < Math.min(b.length, seaW.mapInfo.seen.length); k++) seaW.mapInfo.seen[k] = b.charCodeAt(k); }
   seaRoot.visible = false;
 }
@@ -1724,13 +1898,18 @@ function checkCaveBoss() {
   const b = W.boss;
   if (Math.hypot(P.x - b.x, P.z - b.z) > 9.5) return;
   bossSpawned = true;
-  const bel = W === belfry;
-  const f = foes.spawn(bel ? 'bellringer' : 'barnaclemother', b.x, b.z);
+  const bel = W === belfry, kil = W === kiln;
+  const f = foes.spawn(kil ? 'golem' : bel ? 'bellringer' : 'barnaclemother', b.x, b.z);
   if (f.crack) { W.root.remove(f.crack); f.crack = null; }
-  if (bel) { f.state = 'up'; f.hittable = true; f.m.root.visible = true; }
+  if (bel || kil) { f.state = 'up'; f.hittable = true; f.m.root.visible = true; }
   f.room = { x0: b.x - 9, x1: b.x + 9, z0: b.z - 9, z1: b.z + 9 };
-  story.setStep(bel ? 'belfryBoss' : 'cavesBoss');
-  bossEntrance(bel ? {
+  story.setStep(kil ? 'kilnBoss' : bel ? 'belfryBoss' : 'cavesBoss');
+  bossEntrance(kil ? {
+    find: () => foes.list.find((o) => o.kind === 'golem' && o.alive),
+    wide: { pos: new V3(b.x + 6, 1.2, b.z + 7), look: new V3(b.x, 3, b.z) },
+    close: (o) => ({ pos: new V3(o.x + 2.5, 3.0, o.z + 6.5), look: new V3(o.x, 2.8, o.z) }),
+    card: STORY.kilnLines.golemCard, lines: STORY.kilnLines.golem,
+  } : bel ? {
     find: () => foes.list.find((o) => o.kind === 'bellringer' && o.alive),
     wide: { pos: new V3(b.x - 5, 1.2, b.z + 8), look: new V3(b.x, 4.5, b.z) },
     close: (o) => ({ pos: new V3(o.x + 3, 2.4, o.z + 6.5), look: new V3(o.x, 3.6, o.z) }),
@@ -1753,7 +1932,7 @@ async function caveEvent(name, arg) {
   else if (name === 'gateUp') ui.toast('The gate rattles up');
   else if (name === 'shortcut') { sound.sfx('doorOpen'); ui.toast('A shortcut opens'); }
   else if (name === 'keepsake') await foundKeepsake(arg);
-  else if (name === 'exit') { if (!travelling) travel(world === belfry ? 'brine' : 'cove'); }
+  else if (name === 'exit') { if (!travelling) travel(world === belfry ? 'brine' : world === kiln ? 'cinder' : 'cove'); }
   else if (name === 'tide') { ui.toast(arg === 'high' ? STORY.belfryLines.tideHigh : STORY.belfryLines.tideLow); saveSoon = 1.5; }
   else if (name === 'wheelHint') ui.toast('A water wheel, its channel bone dry. The basin beside it is empty.');
   else if (name === 'fireHint') { if (!P.fireHinted) { P.fireHinted = true; ui.toast('Burning oil blocks the way'); } }
@@ -1773,6 +1952,9 @@ async function openChest(c) {
     giveTool('tether');
     await ui.itemGet(STORY.tether.name, STORY.tether.line, null);
     ui.showHint('tool', 'Hold the tool button to choose a tool', 6000);
+  } else if (c.item === 'glassblade') {
+    setSword('glassblade');
+    await ui.itemGet(STORY.kilnLines.blade.name, STORY.kilnLines.blade.line, null);
   } else if (c.item === 'jar') {
     giveTool('jar');
     await ui.itemGet(STORY.belfryLines.jar.name, STORY.belfryLines.jar.line, null);
@@ -1805,6 +1987,7 @@ async function caveBossDown(f) {
   // the win counts at once: the heart, the oil and the next step are yours before any words are said,
   // so a fall, a quit or a closed tab in the middle of the scene can't lose them
   if (f.kind === 'bellringer') return belfryBossDown(f);
+  if (f.kind === 'golem') return kilnBossDown(f);
   if (caves.state.bossDone) return;
   caves.guardianDown();
   P.maxHp += 2; P.hp = P.maxHp;
@@ -1835,6 +2018,24 @@ async function belfryBossDown(f) {
   holdUp(true);
   await ui.itemGet(L.heart.name, L.heart.line, null);
   await ui.itemGet(L.page.name, L.page.line, null);
+  holdUp(false);
+  P.safe = 0.5;
+  ui.toast('A shaft of light leads up and out');
+  saveSoon = 0.3;
+}
+// the Kiln Golem kneels: a heart, and the mountain goes back to sleep
+async function kilnBossDown(f) {
+  if (kiln.state.bossDone) return;
+  kiln.guardianDown();
+  P.maxHp += 2; P.hp = P.maxHp;
+  story.setStep('reportOdda');
+  writeSave();
+  P.safe = 99;
+  const L = STORY.kilnLines;
+  await gwait(1.4);
+  await story.say(L.down);
+  holdUp(true);
+  await ui.itemGet(L.heart.name, L.heart.line, null);
   holdUp(false);
   P.safe = 0.5;
   ui.toast('A shaft of light leads up and out');
@@ -1917,6 +2118,9 @@ function deadUpdate(dt) {
     }
     if (world === brine) { foes.reset(); for (const c of brine.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 6 }); }
     if (world === market) { guardianSeen = false; if (story.state.step === 'marketBoss') story.setStep('market', true); }
+    if (story.state.step === 'kilnBoss') story.setStep('kilnIn', true);
+    if (world === cinderW) { foes.reset(); for (const c of cinderW.populate()) foes.spawn(c.kind, c.x, c.z, { placed: true, wake: 7 }); }
+    P.heat = 0;
     P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.groundAt(P.x, P.z);
     if (world === seaW) {
       // out at sea: you come to, drifting, off the nearest island you can dock at
@@ -1932,7 +2136,7 @@ function deadUpdate(dt) {
     deadSat = 1;
     P.waking = 1;
     camLook.set(P.x, P.y + 0.6, P.z);
-    const wn = world === cove ? 'The Keeper\u2019s Cove' : world === caves ? CAVES.name : world === belfry ? BELFRY.name : world === brine ? BRINEMOOR.name : world === market ? MARKET.name : world === bellW ? BELLROCK.name : RIFT.name;
+    const wn = world === cove ? 'The Keeper\u2019s Cove' : world === caves ? CAVES.name : world === belfry ? BELFRY.name : world === brine ? BRINEMOOR.name : world === market ? MARKET.name : world === bellW ? BELLROCK.name : world === cinderW ? CINDER.name : world === kiln ? KILN.name : RIFT.name;
     ui.titleCard(world === cove ? TEXT.fallen : 'You wake where you came in', wn, story.past('free') ? 'Nothing you found is lost.' : 'Nothing is lost in the Prologue.');
     sound.sfx('wake');
   }
@@ -2008,7 +2212,7 @@ function sailUpdate(dt) {
   B.atRift = atRift;
   if (atRift && !B.riftTold) { B.riftTold = true; ui.toast(STORY.marketLines.portal); }
   ui.setContext(B.dockable ? 'dock' : atRift ? 'enter' : null);
-  if (B.dockable && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; travel(B.dockable.id === 'lanternhold' ? 'cove' : B.dockable.id === 'bellrock' ? 'bell' : 'brine'); }
+  if (B.dockable && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; travel({ lanternhold: 'cove', bellrock: 'bell', cinderglass: 'cinder' }[B.dockable.id] || 'brine'); }
   else if (atRift && I.attack.pressed) { I.attack.pressed = false; I.attack.down = false; B.dockable = { id: 'rift' }; travel('market'); }
   I.attack.pressed = false;
 }
@@ -2020,7 +2224,7 @@ function updatePlayer(dt) {
   // knockback from a hit slides you back a little, whatever you're doing
   if (Math.abs(P.kx) + Math.abs(P.kz) > 0.02) { tryMove(P.kx * dt, P.kz * dt); const kk = Math.exp(-11 * dt); P.kx *= kk; P.kz *= kk; }
   P.invuln = Math.max(0, P.invuln - dt);
-  const I = ui.input, C = CONFIG.player, W = WEAPONS.skyblade, R = CONFIG.roll;
+  const I = ui.input, C = CONFIG.player, W = blade(), R = CONFIG.roll;
   if (I.roll.pressed) { P.rollBuf = R.buffer; I.roll.pressed = false; }
   if (I.attack.pressed) { P.atkBuf = 0.3; I.attack.pressed = false; }
   P.rollBuf = Math.max(0, P.rollBuf - dt); P.atkBuf = Math.max(0, P.atkBuf - dt);
@@ -2211,7 +2415,7 @@ function meleeHits(s) {
     const da = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - faceA), Math.cos(Math.atan2(dx, dz) - faceA)));
     if (da > half + 0.25) continue;
     any = true;
-    hitDummy(d, dx / (dist || 1), dz / (dist || 1), st.dmg, st.heavy, WEAPONS.skyblade.knock);
+    hitDummy(d, dx / (dist || 1), dz / (dist || 1), Math.round(st.dmg * bladeMul()), st.heavy, blade().knock);
   }
   for (const t of world.targets) {
     const dx = t.x - P.x, dz = t.z - P.z, dist = Math.hypot(dx, dz);
@@ -2224,7 +2428,7 @@ function meleeHits(s) {
     if (dist > st.range + f.D.r) continue;
     const da = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - faceA), Math.cos(Math.atan2(dx, dz) - faceA)));
     if (da > half + 0.25) continue;
-    if (foes.hit(f, dx / (dist || 1), dz / (dist || 1), st.dmg, st.heavy, WEAPONS.skyblade.knock)) any = true;
+    if (foes.hit(f, dx / (dist || 1), dz / (dist || 1), Math.round(st.dmg * bladeMul()), st.heavy, blade().knock)) any = true;
   }
   potsHit(P.x + s.dir.x * 1.0, P.z + s.dir.z * 1.0, st.range * 0.7);
   if (any) { stop = st.heavy ? CONFIG.feel.hitStop * 2 : CONFIG.feel.hitStop; shake(st.heavy ? 0.5 : 0.28); }
@@ -2255,7 +2459,22 @@ function hitDummy(d, nx, nz, dmg, heavy, knock) {
 // the sling: bright drops of sea water that fly, sag and splash
 const dropGeo = new THREE.BoxGeometry(1, 1, 1);
 const dropMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#7fe8ff').multiplyScalar(2.2) });
+const hostileMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff4dc').multiplyScalar(2.6) });
+// the sword in hand, upgrades from Odda's forge
+const blade = () => WEAPONS[P.sword || 'skyblade'];
+const has = (u) => !!(P.upgrades && P.upgrades.has(u));
+const bladeMul = () => (has('bladeEdge') ? 1.25 : 1);
+const tetherRange = () => TOOLS.tether.range * (has('tetherLong') ? 1.33 : 1);
+const jarSplash = () => TOOLS.jar.splash * (has('jarWide') ? 1.5 : 1);
 function fire(dir) {
+  // twin drops from the forge: two shots, a little apart
+  if (has('slingTwin') && !fire.twin) {
+    fire.twin = true;
+    const a = Math.atan2(dir.x, dir.z);
+    fire({ x: Math.sin(a - 0.11), z: Math.cos(a - 0.11) }); fire({ x: Math.sin(a + 0.11), z: Math.cos(a + 0.11) });
+    fire.twin = false;
+    return;
+  }
   const S = WEAPONS.tidesling;
   const m = new THREE.Mesh(dropGeo, dropMat);
   m.scale.setScalar(S.size * 1.4);
@@ -2278,13 +2497,21 @@ function updateProjectiles(dt) {
     p.m.rotation.set(p.dist * 3, p.dist * 2, 0);
     if (Math.random() < 0.8) sparks.spawn({ x: p.x, y: p.y, z: p.z, life: 0.25, size: 0.12, color: '#7fe8ff', glow: 1.6, drag: 6 });
     let done = false, hitD = null;
+    // a drop the Mirror Sentinel threw back: it's coming for you now
+    if (p.hostile) {
+      if (Math.hypot(P.x - p.x, P.z - p.z) < 0.5 && Math.abs(P.y + 0.9 - p.y) < 1) { hurtPlayer(1, p.x - p.vx * 0.05, p.z - p.vz * 0.05); done = true; }
+      else if (p.y <= world.groundAt(p.x, p.z) + 0.05 || world.shotBlocked(p.x, p.y, p.z, S.size * 0.6)) done = true;
+      if (done) { splash(p.x, world.groundAt(p.x, p.z) + 0.05, p.z, false); scene.remove(p.m); projectiles.splice(i, 1); }
+      continue;
+    }
     for (const d of world.dummies) if (Math.hypot(d.x - p.x, d.z - p.z) < d.r + S.size && p.y < d.root.position.y + 1.6) { hitD = d; break; }
     const gy = world.groundAt(p.x, p.z);
     let hitF = null;
     if (!hitD) for (const f of foes.targets()) if (Math.hypot(f.x - p.x, f.z - p.z) < f.D.r + S.size + 0.1 && p.y < f.y + (f.kind === 'bellfish' || f.kind === 'bubblebishop' ? 2.6 : f.kind === 'bellringer' ? 5 : 1.4)) { hitF = f; break; }
     if (hitF) {
       const l = Math.hypot(p.vx, p.vz) || 1;
-      foes.hit(hitF, p.vx / l, p.vz / l, S.dmg, false, S.knock, 'sling');
+      const res = foes.hit(hitF, p.vx / l, p.vz / l, S.dmg, false, S.knock, 'sling');
+      if (res === 'reflect') { p.vx *= -1; p.vz *= -1; p.vy = 0.6; p.dist = 0; p.hostile = true; p.m.material = hostileMat; continue; }
       stop = Math.max(stop, 0.02);
       done = true; hitD = hitF;
     } else if (!hitD && world.targetAt(p.x, p.y, p.z, S.size)) {
@@ -2496,6 +2723,16 @@ function tick(dt) {
       ui.toast('The water lifts you out');
     }
     jar.cd = Math.max(0, jar.cd - simDt);
+    // Cinderglass's rule: hot ground (and burning embers) heats you up while you stand on it; full, it burns
+    const onHot = !P.boat && P.state !== 'dead' && ((world.hotAt && world.hotAt(P.x, P.z)) || (foes.burnAt && foes.burnAt(P.x, P.z)));
+    if (onHot) {
+      P.heat = Math.min(1, P.heat + HEAT.build * simDt);
+      if (!P.hotTold) { P.hotTold = true; ui.toast(STORY.kilnLines.hot); }
+      if (Math.random() < simDt * 10) sparks.spawn({ x: P.x + (Math.random() - 0.5) * 0.6, y: P.y + 0.1, z: P.z + (Math.random() - 0.5) * 0.6, vy: 1.4, life: 0.5, size: 0.1, color: '#ffb04a', glow: 2, drag: 1 });
+    } else P.heat = Math.max(0, P.heat - HEAT.cool * simDt);
+    if (P.heat >= 1 && hurtPlayer(HEAT.dmg, P.x - Math.sin(P.face) * 0.6, P.z - Math.cos(P.face) * 0.6)) { P.heat = HEAT.after; ui.number(STORY.kilnLines.hotHurt, view.w / 2, view.h * 0.42, false); }
+    // the Kiln's river: say what's in it the first time you see it
+    if (world === kiln && !P.moltenTold && world.moltenAt) { for (const [ox, oz] of [[0, -2.5], [0, 2.5]]) if (world.moltenAt(P.x + ox, P.z + oz)) { P.moltenTold = true; ui.toast(STORY.kilnLines.molten); break; } }
     updateHook(simDt);
     updateProjectiles(simDt);
     foes.update(simDt, camera);
@@ -2554,6 +2791,14 @@ function tick(dt) {
   if (brine) brine.setTide(clock.running ? tideAt(clockH) : -0.08);
   if (bellW) bellW.setTide(clock.running ? tideAt(clockH) : -0.08);
   updateGlimpse(dt);
+  MOLTEN.uTime.value = time;
+  ui.setHeat(P.heat);
+  // heat haze over hot ground near you
+  if ((world === cinderW || world === kiln) && Math.random() < dt * 25) {
+    if (!world._hot || (world._hotT = (world._hotT || 0) - dt) < 0) { world._hot = world.hotCells(); world._hotT = 1; }
+    const near = world._hot.filter((c) => Math.abs(c.x - P.x) < 12 && Math.abs(c.z - P.z) < 10);
+    if (near.length) { const c = near[Math.floor(Math.random() * near.length)]; sparks.spawn({ x: c.x + (Math.random() - 0.5), y: c.y + 0.1, z: c.z + (Math.random() - 0.5), vy: 0.9 + Math.random(), life: 1.2, size: 0.18, color: Math.random() < 0.5 ? '#ffb04a' : '#ff7a2a', glow: 0.9, drag: 0.4 }); }
+  }
   // the Jar rides at your hip while it's the tool in hand, and tips when you use it
   // the tool in your hand: the one you're using (the jar shows its water when it's full, and tips when you pour)
   const H2 = P.held;
@@ -2574,6 +2819,7 @@ function tick(dt) {
   cineFlash.k = Math.max(0, cineFlash.k - dt * 1.6);
   if (cineFlash.k > 0.01) { FU.flashCol.value.setRGB(cineFlash.r, cineFlash.g, cineFlash.b); FU.flash.value = cineFlash.k; }
   else if (dark > 0) { FU.flashCol.value.setRGB(0.02, 0.01, 0.05); FU.flash.value = dark; }
+  else if (P.heat > 0.3 && hurtFlash < 0.05) { FU.flashCol.value.setRGB(1, 0.42, 0.1); FU.flash.value = (P.heat - 0.3) * 0.22; }
   else { FU.flashCol.value.setRGB(0.85, 0.08, 0.16); FU.flash.value = hurtFlash * 0.22; }
   // time standing still in the Market: the colour drains a little and the edges darken
   stillK = lerp(stillK, world.frozen && world.frozen() ? 1 : 0, Math.min(1, dt * 10));
@@ -2639,6 +2885,10 @@ try {
     showLantern: () => showLantern(),
     waitTide: () => waitTide(),
     ringBell: () => ringBell(),
+    oddaMoves: () => oddaMoves(),
+    forgeMenu: () => forgeMenu(),
+    shardFall: () => shardFall(),
+    mirrorScene: () => mirrorScene(),
   });
   setTime(0);
   applyQuality();
@@ -2656,7 +2906,7 @@ try {
   setTimeout(showTitle, 450);
   addEventListener('pagehide', () => writeSave());
   document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
-  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
+  if (/[?&]debug/.test(location.search)) window.RF = { P, get foes() { return foes; }, story, get world() { return world; }, get rift() { return rift; }, travel, playtestJump, hurtPlayer, setTime, setClock, clock, tools, useTool, giveTool, setTool, get caves() { return caves; }, get belfry() { return belfry; }, get brine() { return brine; }, get sea() { return seaW; }, get market() { return market; }, get bell() { return bellW; }, get cinder() { return cinderW; }, get kiln() { return kiln; }, setSword, forgeMenu, shardFall, mirrorScene, oddaMoves, glimpse, risingScene, ringBell, jar, setJarFull, waitTide, get place() { return placeOf(world); }, get hook() { return hook; }, warpTo, kept, memories, get clockH() { return clockH; }, set clockH(v) { clockH = v; }, newGame: () => beginJourney(null), continueGame: () => beginJourney(readSave()), readSave, writeSave, clearSave, get stats() { return stats; }, curtain, projectiles, camera, scene, renderer, ui, post, look, prefs, skip: () => { if (intro) intro.t = 99; }, advance: (sec) => { for (let i = 0; i < sec * 60; i++) tick(1 / 60); } };
 } catch (e) {
   console.error(e);
   loadingFailed('Something went wrong while building the cove: ' + (e && e.message ? e.message : e));

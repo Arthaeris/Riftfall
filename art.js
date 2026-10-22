@@ -278,6 +278,22 @@ export function buildPlayer(look = {}) {
 }
 
 // Weapons (held in the right hand; +z is "forward" from the hand)
+// the Cinderglass Blade: a longer, heavier blade of amber-and-sky glass, tempered in the Kiln, a brass guard
+export function buildGlassblade() {
+  const K = kit();
+  const g = new THREE.Group();
+  const grip = pivot(g, 0, 0, 0);
+  K.box(grip, 0.06, 0.06, 0.22, '#3a2a20', 0, 0, -0.03);
+  K.box(grip, 0.09, 0.09, 0.05, '#e0b85a', 0, 0, -0.15);
+  K.box(grip, 0.32, 0.06, 0.06, '#c9a24a', 0, 0, 0.1); K.box(grip, 0.08, 0.08, 0.08, '#ff9a5a', 0, 0, 0.1, 1.6);
+  for (let i = 0; i < 7; i++) {
+    const w = 0.1 - i * 0.008;
+    K.box(grip, w, 0.04, 0.15, i % 2 ? '#ffd29a' : '#9ff3ff', 0, 0, 0.2 + i * 0.14, 1.5 + i * 0.12);
+  }
+  K.box(grip, 0.025, 0.02, 0.12, '#ffffff', 0, 0.01, 1.18, 2.4);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return { root: g, flash: K.flash };
+}
 export function buildSkyblade() {
   const K = kit();
   const g = new THREE.Group();
@@ -1204,6 +1220,69 @@ export function buildFoe(kind) {
     // little mouths all over her lower shell
     for (let k = 0; k < 14; k++) { const a = Math.random() * TAU, h = 0.3 + Math.random() * 0.8; K.box(core, 0.22, 0.2, 0.22, shell[k % 5], Math.cos(a) * 1.5, h, Math.sin(a) * 1.5); }
     root.add(blob(4.2, 4.2));
+  } else if (kind === 'hound') {
+    // a hound blown out of green bottle-glass: you can see the light through it, and a coal glowing where its heart is
+    const gl = ['#5fae7a', '#6fc08a', '#4f9e6a'];
+    K.box(body, 0.5, 0.42, 0.9, gl[0], 0, 0.62, 0); K.box(body, 0.42, 0.3, 0.4, gl[1], 0, 0.85, 0.32);
+    out.head = pivot(body, 0, 0.82, 0.5);
+    K.box(out.head, 0.36, 0.32, 0.4, gl[1], 0, 0.06, 0.12); K.box(out.head, 0.24, 0.18, 0.26, gl[2], 0, -0.02, 0.36);
+    for (const x of [-0.12, 0.12]) { K.box(out.head, 0.08, 0.16, 0.08, gl[2], x, 0.26, 0.04); K.box(out.head, 0.07, 0.07, 0.03, '#ffd36b', x, 0.1, 0.32, 2.4); }
+    out.jaw = pivot(out.head, 0, -0.1, 0.28); K.box(out.jaw, 0.22, 0.06, 0.24, gl[2], 0, -0.03, 0.08);
+    K.box(body, 0.16, 0.16, 0.16, '#ff7a2a', 0, 0.66, 0.1, 2.6);
+    out.tail = pivot(body, 0, 0.75, -0.45); K.box(out.tail, 0.08, 0.08, 0.4, gl[0], 0, 0.1, -0.16).rotation.x = 0.6;
+    out.legs = [[-0.18, 0.3], [0.18, 0.3], [-0.18, -0.3], [0.18, -0.3]].map(([x, z]) => { const lg = pivot(body, x, 0.45, z); K.box(lg, 0.12, 0.45, 0.12, gl[2], 0, -0.22, 0); return lg; });
+    root.add(blob(0.8, 1.1));
+  } else if (kind === 'molten') {
+    // a bright slow puddle of molten glass with a dark crust drifting on it and two hot-white eyes
+    out.blob = pivot(body);
+    K.box(out.blob, 1.1, 0.18, 1.0, '#ff7a2a', 0, 0.09, 0, 1.8); K.box(out.blob, 0.8, 0.18, 0.72, '#ffb04a', 0, 0.24, 0, 2.2);
+    K.box(out.blob, 0.4, 0.12, 0.36, '#ffe08a', 0.06, 0.36, -0.02, 2.6);
+    for (const [x, z] of [[-0.3, -0.2], [0.3, 0.25], [0.1, -0.35]]) K.box(out.blob, 0.3, 0.06, 0.24, '#3a1a12', x, 0.34, z);
+    for (const x of [-0.14, 0.14]) K.box(out.blob, 0.1, 0.1, 0.04, '#fffbe8', x, 0.4, 0.3, 3);
+    out.crust = pivot(body);
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; K.box(out.crust, 0.34, 0.12, 0.3, '#2a1612', Math.cos(a) * 0.5, 0.06, Math.sin(a) * 0.46); }
+    out.crust.visible = false;   // it shows when the puddle sets
+    root.add(blob(1.1, 1.0));
+  } else if (kind === 'wisp') {
+    // a loose spark from a furnace: a flickering core, a ring of embers, a little trail
+    const fl = pivot(body, 0, 1.4, 0);
+    out.float = fl;
+    out.core = K.box(fl, 0.34, 0.34, 0.34, '#ffd36b', 0, 0, 0, 3.2);
+    K.box(fl, 0.2, 0.2, 0.2, '#ffffff', 0, 0, 0, 4);
+    out.embers = pivot(fl);
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; K.box(out.embers, 0.12, 0.12, 0.12, k % 2 ? '#ff7a2a' : '#ffb04a', Math.cos(a) * 0.42, Math.sin(k * 1.7) * 0.1, Math.sin(a) * 0.42, 2.4); }
+    for (const x of [-0.07, 0.07]) K.box(fl, 0.05, 0.07, 0.02, '#3a1a10', x, 0.04, 0.18);
+    root.add(blob(0.5, 0.5));
+  } else if (kind === 'sentinel') {
+    // a stone statue on a plinth with a round mirror for a face; it turns slowly to catch the light
+    K.box(body, 0.9, 0.3, 0.9, '#5a5050', 0, 0.15, 0, 0);
+    K.box(body, 0.6, 1.1, 0.5, '#7a7070', 0, 0.85, 0); K.box(body, 0.7, 0.2, 0.56, '#8a8080', 0, 1.4, 0);
+    for (const x of [-0.42, 0.42]) K.box(body, 0.18, 0.7, 0.2, '#6a6060', x, 1.0, 0.05);
+    out.mirror = pivot(body, 0, 1.85, 0.05);
+    K.box(out.mirror, 0.7, 0.7, 0.1, '#c9a24a', 0, 0, 0); out.glass = K.box(out.mirror, 0.56, 0.56, 0.04, '#dfe8f4', 0, 0, 0.06, 0.9);
+    root.add(blob(1.0, 1.0));
+  } else if (kind === 'golem') {
+    // the Kiln Golem: the furnace itself, stood up. Fire-brick body, a door of iron for a chest with the fire behind it,
+    // arms of stacked brick, and glass running like sweat in the cracks
+    const brick = ['#7a3a2a', '#8a4a32', '#6a3226'];
+    for (let k = 0; k < 5; k++) K.box(body, 2.4 - k * 0.15, 0.5, 1.7 - k * 0.1, brick[k % 3], 0, 0.9 + k * 0.5, 0);
+    K.box(body, 1.6, 0.6, 1.2, brick[1], 0, 3.4, 0); K.box(body, 1.0, 0.6, 0.9, brick[0], 0, 3.95, 0);
+    out.core = K.box(body, 0.9, 0.9, 0.1, '#ff7a2a', 0, 2.0, 0.86, 2.4);
+    out.door = pivot(body, -0.5, 2.0, 0.92);
+    K.box(out.door, 1.0, 1.0, 0.1, '#3a3a40', 0.5, 0, 0); for (const y of [-0.3, 0, 0.3]) K.box(out.door, 1.0, 0.06, 0.12, '#2a2a30', 0.5, y, 0.02);
+    for (const x of [-0.25, 0.25]) K.box(body, 0.22, 0.14, 0.06, '#ffe08a', x, 3.55, 0.6, 3);
+    K.box(body, 0.6, 0.6, 0.6, '#5a3a30', 0, 4.5, 0); K.box(body, 0.3, 0.3, 0.3, '#ff9a3c', 0, 4.9, 0, 2.4);   // a chimney with fire in it
+    for (let k = 0; k < 8; k++) K.box(body, 0.06, 0.4, 0.06, '#ffb04a', -1.0 + k * 0.28, 1.2 + (k % 3) * 0.7, 0.86, 1.8);
+    out.arms = [-1, 1].map((sd) => {
+      const sh = pivot(body, sd * 1.35, 3.2, 0);
+      for (let k = 0; k < 3; k++) K.box(sh, 0.6, 0.55, 0.6, brick[k % 3], 0, -0.3 - k * 0.55, 0);
+      const el = pivot(sh, 0, -1.7, 0);
+      for (let k = 0; k < 2; k++) K.box(el, 0.7, 0.55, 0.7, brick[(k + 1) % 3], 0, -0.3 - k * 0.55, 0);
+      K.box(el, 0.9, 0.5, 0.9, '#4a2a22', 0, -1.35, 0);
+      return { sh, el };
+    });
+    out.legs = [-0.6, 0.6].map((x) => { const lg = pivot(body, x, 0.9, 0); K.box(lg, 0.8, 0.9, 0.9, brick[2], 0, -0.45, 0); return lg; });
+    root.add(blob(3.0, 2.4));
   } else if (kind === 'pendulum') {
     // a market stall that learned to walk: a striped awning for a hat, a counter for a body, two eyes in the
     // shadow under the awning, and a brass pendulum hanging from a hook on its front
@@ -1644,6 +1723,8 @@ const NPC_LOOKS = {
   jun: { body: 'b', hair: 1, skin: '#e8c0a0', hairColor: '#1a1a24', tunic: '#3f8a8a', trim: '#ffb38a', scarf: '#ffb38a', pants: '#2a4a5a', boots: '#3a3a44' },
   peg: { body: 'b', hair: 3, skin: '#f0c8a8', hairColor: '#c86a4a', tunic: '#8a4a5a', trim: '#f4ead2', scarf: '#f4ead2', pants: '#4a3a4a', boots: '#3a2a20' },
   ennis: { body: 'a', hair: 0, skin: '#c99a78', hairColor: '#e8e4dc', tunic: '#4a5a3a', trim: '#c9a24a', scarf: '#8a4a2a', pants: '#3a3226', boots: '#2a1e18' },
+  odda: { body: 'b', hair: 1, skin: '#c8906a', hairColor: '#8a3a22', tunic: '#5a3a2a', trim: '#e0b85a', scarf: '#2a2a34', pants: '#3a2a26', boots: '#2a1e18' },
+  brann: { body: 'a', hair: 0, skin: '#e0b090', hairColor: '#3a2a20', tunic: '#7a5a3a', trim: '#c8b28a', scarf: '#c94a3f', pants: '#3a3a40', boots: '#2a1e18' },
 };
 export function buildNpc(kind) {
   const m = buildPlayer(NPC_LOOKS[kind]);
@@ -1684,6 +1765,20 @@ export function buildNpc(kind) {
     for (const x of [-0.09, 0.09]) box(m.head, 0.12, 0.1, 0.06, '#ffb38a', x, 0.3, 0.19, 1.2);
     box(m.head, 0.42, 0.05, 0.42, '#3a3a44', 0, 0.3, 0);
     box(m.body, 0.06, 0.2, 0.06, '#c8d4dc', 0.2, 0.26, 0.1);
+  } else if (kind === 'odda') {
+    // the glassblower: a scorched leather apron, goggles up on her head, and where her left hand was, a hook of
+    // clear glass she made herself
+    box(m.torso, 0.34, 0.46, 0.02, '#4a2e22', 0, -0.1, 0.135);
+    box(m.body, 0.44, 0.34, 0.29, '#4a2e22', 0, 0.36, 0.01);
+    for (const x of [-0.09, 0.09]) box(m.head, 0.12, 0.1, 0.06, '#ffb070', x, 0.36, 0.17, 1.2);
+    box(m.head, 0.44, 0.05, 0.44, '#3a2a20', 0, 0.36, 0);
+    for (const c of m.armL.children) if (Math.abs(c.position.y + 0.36) < 0.01) c.visible = false;
+    box(m.armL, 0.09, 0.08, 0.09, '#bff6ff', 0, -0.36, 0, 0.6); box(m.armL, 0.05, 0.14, 0.05, '#bff6ff', 0, -0.46, 0.03, 0.6); box(m.armL, 0.05, 0.05, 0.09, '#bff6ff', 0, -0.53, 0.08, 0.6);
+  } else if (kind === 'brann') {
+    // a bottle-blower: a long blowpipe over his shoulder and a soot-black beard
+    box(m.head, 0.34, 0.16, 0.06, '#2a1e18', 0, 0.02, 0.18);
+    const bp = pivot(m.torso, 0.14, 0.18, -0.12); bp.rotation.z = 0.5;
+    box(bp, 0.04, 0.9, 0.04, '#5a5a62', 0, 0.2, 0); box(bp, 0.12, 0.12, 0.12, '#ff9a5a', 0, 0.66, 0, 1.6);
   } else if (kind === 'peg') {
     // the innkeeper: an apron, sleeves rolled up, and a ladle that goes everywhere with her
     box(m.torso, 0.32, 0.44, 0.02, '#f4ead2', 0, -0.1, 0.135);
@@ -1882,6 +1977,70 @@ export function causticMaterial() {
   return m;
 }
 
+// molten glass: a bright orange surface with slow dark crusts drifting over it (shared by every river and pool of it)
+export const MOLTEN = { uTime: { value: 0 } };
+export function moltenMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: MOLTEN.uTime },
+    vertexShader: 'varying vec3 vW; uniform float uTime; void main() { vec4 w = modelMatrix * vec4(position, 1.0); w.y += sin(w.x * 1.3 + uTime * 0.8) * 0.03 + sin(w.z * 1.1 - uTime * 0.6) * 0.03; vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `uniform float uTime; varying vec3 vW;
+      float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float n(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+      void main() {
+        vec2 p = vW.xz * 0.6 + vec2(uTime * 0.12, uTime * 0.07);
+        float a = n(p) * 0.6 + n(p * 2.3 - uTime * 0.2) * 0.4;
+        float crust = smoothstep(0.55, 0.72, a);
+        vec3 hot = mix(vec3(2.6, 1.15, 0.25), vec3(3.2, 2.2, 0.8), n(p * 4.0 + uTime * 0.5));
+        vec3 col = mix(hot, vec3(0.18, 0.08, 0.06), crust * 0.85);
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cinderglass: furnaces, glass racks, quench troughs, the Kiln's mouth; and on Lanternhold, Odda's forge
+// ---------------------------------------------------------------------------
+export const CINDER_PROPS = {
+  furnace(b, g, x, y, z) {
+    // a beehive furnace of brick, its mouth glowing, a chimney with sparks
+    for (let k = 0; k < 4; k++) b.box(1.8 - k * 0.35, 0.5, 1.8 - k * 0.35, k % 2 ? '#7a4a3a' : '#8a5a42', x, y + 0.25 + k * 0.5, z, { top: '#6a3a2a' });
+    b.box(0.4, 1.0, 0.4, '#5a3a30', x, y + 2.4, z - 0.2);
+    g.box(0.6, 0.5, 0.06, '#ff9a3c', x, y + 0.45, z + 0.91, { glow: 3.2, jitter: 0 });
+    g.box(0.36, 0.3, 0.06, '#ffe08a', x, y + 0.42, z + 0.93, { glow: 4, jitter: 0 });
+  },
+  rack(b, g, x, y, z, r) {
+    // a rack of finished glass: bottles, floats and bowls in every colour
+    for (const sx of [-0.7, 0.7]) b.box(0.1, 1.6, 0.1, '#5d3d26', x + sx, y + 0.8, z);
+    for (const sy of [0.5, 1.0, 1.5]) b.box(1.5, 0.06, 0.4, '#6b4a33', x, y + sy, z);
+    for (const sy of [0.5, 1.0, 1.5]) for (let k = 0; k < 4; k++) g.box(0.18, 0.26, 0.18, pick(['#ff9a5a', '#5fd6c8', '#9fb8ff', '#ffd36b', '#e86a8a'], r), x - 0.55 + k * 0.36, y + sy + 0.16, z, { glow: 0.7, jitter: 0 });
+  },
+  trough(b, g, x, y, z) {
+    b.box(1.6, 0.6, 0.9, '#5a5050', x, y + 0.3, z, { top: '#3a3436' });
+    g.box(1.4, 0.04, 0.7, '#5fb2d4', x, y + 0.58, z, { glow: 0.6, jitter: 0 });
+  },
+  kilnMouth(b, g, x, y, z) {
+    // a great arch of fire-brick cut into the slope, with the furnace-glow deep inside
+    for (const sx of [-1.4, 1.4]) for (let k = 0; k < 4; k++) b.box(0.8, 0.7, 1.2, k % 2 ? '#6a3a2a' : '#7a4a3a', x + sx, y + 0.35 + k * 0.7, z);
+    for (let k = 0; k < 5; k++) b.box(0.7, 0.6, 1.2, '#7a4a3a', x - 1.2 + k * 0.6, y + 2.95 + Math.sin((k / 4) * Math.PI) * 0.35, z);
+    b.box(2.0, 2.6, 0.2, '#1a0e0a', x, y + 1.3, z - 0.4);
+    g.box(1.4, 1.6, 0.06, '#ff7a2a', x, y + 1.0, z - 0.25, { glow: 1.6, jitter: 0 });
+  },
+  // Odda's forge on Lanternhold: a stone smithy open at the front, an anvil, the furnace, her glass on a shelf
+  forge(b, g, x, y, z) {
+    b.push(x, y, z);
+    b.box(4.4, 0.25, 3.2, '#7f7b88', 0, 0.12, 0, { top: '#8e8a96' });
+    for (const [sx, sz] of [[-2.0, -1.4], [2.0, -1.4], [-2.0, 1.4], [2.0, 1.4]]) b.box(0.4, 2.6, 0.4, '#6b4a33', sx, 1.4, sz);
+    b.box(4.4, 2.4, 0.3, '#7a6a64', 0, 1.4, -1.5);
+    for (let k = 0; k < 4; k++) b.box(4.8 - k * 0.8, 0.22, 3.6, k % 2 ? '#8a3a2a' : '#a8473d', 0, 2.8 + k * 0.2, 0);
+    for (let k = 0; k < 3; k++) b.box(1.4 - k * 0.3, 0.5, 1.2 - k * 0.2, '#8a5a42', -1.2, 0.5 + k * 0.5, -0.9, { top: '#6a3a2a' });
+    b.box(0.4, 1.4, 0.4, '#5a3a30', -1.2, 2.9, -1.0);
+    b.box(0.9, 0.5, 0.4, '#3a3a44', 0.6, 0.55, 0.2); b.box(0.5, 0.3, 0.5, '#2c2c36', 0.6, 0.25, 0.2); b.box(0.3, 0.12, 0.3, '#3a3a44', 1.1, 0.75, 0.2);
+    b.box(1.6, 0.08, 0.4, '#6b4a33', 1.2, 1.5, -1.25);
+    b.pop();
+    g.box(0.5, 0.4, 0.06, '#ff9a3c', x - 1.2, y + 0.6, z - 0.28, { glow: 3.2, jitter: 0 });
+    for (let k = 0; k < 4; k++) g.box(0.18, 0.24, 0.18, ['#ff9a5a', '#5fd6c8', '#9fb8ff', '#ffd36b'][k], x + 0.7 + k * 0.32, y + 1.68, z - 1.25, { glow: 0.8, jitter: 0 });
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Lanternhold, the bigger island: waystones, Tether rings, the Knot, the boathouse, the windmill,

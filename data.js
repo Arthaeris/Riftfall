@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.9.0';
+export const VERSION = '0.10.0';
 
 export const CONFIG = {
   // ----- the player -----
@@ -57,6 +57,19 @@ export const WEAPONS = {
     comboReset: 0.6,       // seconds after a swing before the combo starts over
     knock: 2.4,
   },
+  // the glass-tempered sword from the Kiln: heavier, longer, and its spin leaves a ring of hot glass light
+  glassblade: {
+    name: 'Cinderglass Blade',
+    kind: 'melee',
+    desc: 'Skyglass tempered in the Kiln\u2019s fire. It rings when it cuts, and it doesn\u2019t chip.',
+    combo: [
+      { dmg: 14, arc: 135, range: 2.25, windup: 0.15, active: 0.1, recover: 0.33, swing: 'right' },
+      { dmg: 14, arc: 135, range: 2.25, windup: 0.13, active: 0.1, recover: 0.33, swing: 'left' },
+      { dmg: 32, arc: 230, range: 2.7, windup: 0.24, active: 0.14, recover: 0.5, swing: 'spin', heavy: true },
+    ],
+    comboReset: 0.6,
+    knock: 2.8,
+  },
   tidesling: {
     name: 'Tidesling',
     kind: 'ranged',
@@ -75,6 +88,17 @@ export const HURT = {
   invuln: 0.9,           // seconds you can't be hurt again after a hit (you flicker)
   knock: 6,              // how hard a hit pushes you back
   respawnDelay: 2.6,     // seconds from falling to waking by the fire
+};
+
+// ----- Cinderglass's rule: hot ground hurts if you stay on it. Heat builds while you stand there and cools off it.
+export const HEAT = { build: 0.5, cool: 0.7, dmg: 1, after: 0.55, cooled: 14 };   // per second; damage when full; heat left after; seconds the Jar cools a patch
+
+// ----- Odda's forge on Lanternhold: Skyglass slivers buy upgrades
+export const UPGRADES = {
+  bladeEdge: { name: 'Temper the blade', desc: 'Your sword hits a quarter harder.', cost: 60, needs: 'glassblade' },
+  tetherLong: { name: 'Longer Tether', desc: 'The Tether reaches a third further.', cost: 35, needs: 'tether' },
+  jarWide: { name: 'Wider Jar', desc: 'The Tide Jar\u2019s splash spreads half as wide again.', cost: 35, needs: 'jar' },
+  slingTwin: { name: 'Twin drops', desc: 'The sling throws two drops at once.', cost: 45, needs: 'sling' },
 };
 
 // ----- creatures from the Rifts -----
@@ -247,6 +271,49 @@ export const FOES = {
     coins: [5, 7],         // coins in a volley
     knockTaken: 0,
     drops: [20, 24],
+  },
+  hound: {
+    name: 'Glass Hound',
+    desc: 'A dog blown out of green bottle-glass. It barks like something breaking, and it lunges.',
+    hp: 30, r: 0.5, dmg: 1, speed: 3.0,
+    tell: 0.5, lunge: 0.32, lungeSpeed: 11, rest: 0.7,   // it crouches (the warning), then lunges straight at you
+    knockTaken: 0.8,
+    drops: [2, 4],
+  },
+  molten: {
+    name: 'Molten Puddle',
+    desc: 'A slow bright puddle of molten glass that lives in the rivers. Cool it and it sets, solid enough to stand on.',
+    hp: 60, r: 0.6, dmg: 1, speed: 1.1,
+    every: [2.6, 3.6], tell: 0.6,                        // it bulges (the warning), then flicks a glob of hot glass at you
+    knockTaken: 0,
+    drops: [0, 1],
+  },
+  wisp: {
+    name: 'Ember Wisp',
+    desc: 'A spark that got loose from a furnace. It drifts about and drops embers that heat the ground.',
+    hp: 16, r: 0.4, dmg: 1, speed: 1.8, hover: 1.4,
+    every: [2.4, 3.2], tell: 0.5,
+    knockTaken: 0.9,
+    drops: [1, 3],
+  },
+  sentinel: {
+    name: 'Mirror Sentinel',
+    desc: 'A statue with a mirror for a face. It throws sling shots straight back, and when it catches the light it fires it.',
+    hp: 54, r: 0.6, dmg: 1, speed: 0.9, turn: 1.6,
+    tell: 0.8, beam: 9, beamT: 0.35, rest: 1.4,          // its mirror brightens (the warning), then a line of light
+    knockTaken: 0.3,
+    drops: [3, 5],
+  },
+  golem: {
+    name: 'The Kiln Golem',
+    desc: 'The Kiln\u2019s own furnace, stood up and walking. Its brick turns every tool. Only a blade, at the right moment, gets in.',
+    hp: 420, r: 1.6, dmg: 1, speed: 1.3,
+    every: [2.0, 1.5],
+    open: 1.7,             // after a slam its core lies open this long
+    armour: 0.2,           // how much of a blow gets through when it isn't open
+    wave: 8,
+    knockTaken: 0,
+    drops: [20, 26],
   },
   gardener: {
     name: 'The Weeping Gardener',
@@ -491,7 +558,7 @@ export const SEA = {
     { id: 'lanternhold', name: 'Lanternhold', x: 0, z: 0, dock: { x: 6.6, z: 14 }, open: true },
     { id: 'brinemoor', name: 'Brinemoor', x: -130, z: 150, dock: { x: -129.5, z: 134 }, open: true },
     { id: 'bellrock', name: 'Bell Rock', x: 72, z: 128, dock: { x: 72.5, z: 111 }, risen: true },
-    { id: 'cinderglass', name: 'Cinderglass Atoll', x: 150, z: 96, r: 16, locked: 'A ring of boiling water keeps you off. Not yet.' },
+    { id: 'cinderglass', name: 'Cinderglass Atoll', x: 150, z: 96, r: 16, dock: { x: 149.75, z: 79 }, locked: 'A ring of boiling water keeps you off. Not yet.', opens: 'act1Cinder' },
     { id: 'saltglass', name: 'Saltglass Flats', x: -190, z: -40, r: 22, locked: 'The shallows are full of rocks you can\u2019t see. Not yet.' },
     { id: 'choir', name: 'The Hushed Choir', x: 40, z: -180, r: 14, locked: 'A wall of fog that hums. Your sail goes slack. Not yet.' },
   ],
@@ -544,6 +611,137 @@ export const BELLROCK = {
     '~~~~~~~~~~~~~~~~~,,,~~~~~~~~~~~~~~',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  ],
+};
+
+// ----- Cinderglass Atoll: glassblowers on a sleeping volcano. Its rule: hot ground hurts if you stay on it.
+//   ~ sea   , black sand   = the basalt plaza   a b c C the volcano, in half-block steps up   v molten glass
+//   h hot ground   D pier   P where the boat ties up   H workshops   F furnaces   G glass racks   U quench troughs
+//   l lamps   o Odda   n Brann   Y the Kiln's mouth   w glass hound   e ember wisp
+export const CINDER = {
+  key: 'cinder',
+  name: 'Cinderglass Atoll',
+  region: 'The Glass Sea',
+  line: 'Glassblowers on a sleeping mountain. The air shivers over the stones.',
+  theme: 'cinder',
+  heights: { D: 1.35, P: 1.35, '=': 1.35, ',': 0.85, a: 1.35, b: 1.85, c: 2.35, C: 2.85, v: 0.6, h: 1.35, Y: 1.35, H: 1.35, F: 1.35, G: 1.35, U: 1.35, l: 1.35, o: 1.35, n: 1.35 },
+  map: [
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DPD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~===========DDD=============~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~=HHHHH==================HHHHH==~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~==HHHHHF==l==========l==FHHHHH===~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~==HHHHH=====U=====U======HHHHH===~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~==HHHHH==o=============n=HHHHH===~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~=================================~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~,=====l==HHHH=========HHHH==l=====~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~,,,=======HHHH=G=====G=HHHH=======,,~~~~~~~~~~~~',
+    '~~~~~~~~~~~~,,,,,=====HHHH=========HHHH=====,,,,,~~~~~~~~~~~',
+    '~~~~~~~~~~~,,,,,,,,,U,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~~~~',
+    '~~~~~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~~~',
+    '~~~~~~~~~,,,,,,,,,,hhh,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~',
+    '~~~~~~~~,,,,,,,,,hhhhehh,,,,,aaaa,,,,,,,,,,,,,,,,,,,,~~~~~~~',
+    '~~~~~~~~,,,,,,,,hhhhhhhhhaaaaaaaaaaa,,,,,,,,,,,,,,,,,,~~~~~~',
+    '~~~~~~~,,,,,,,,hhhhhhhhhhhaaaaaaaaaaaaa,,,,,,,,,,,,,,,~~~~~~',
+    '~~~~~~~,,,,,,,,hhhhhhhhhhhaaaabbaaaaaaaa,,,,,,,,,,,,,,~~~~~~',
+    '~~~~~~~,,,,,,,,,hhhhhhhhhaabbbbbbbbbaaaaw,,,,,,,,,,,,,~~~~~~',
+    '~~~~~~,,,,,,,,,,,hhhhhhhbbbbbbbbbbbbbbaaaaa,,,,,,,,,,,,~~~~~',
+    '~~~~~~,,,,,,,,,,,,ahhhbbbbbbbbbbbbbbbbbaaaaa,,,,,,,,,,,~~~~~',
+    '~~~~~,,,,,,,,,,,,aaaYabbbbccccccccbbbbbaaaaa,,,,,,,,,,,,~~~~',
+    '~~~~~,,,,,,,,,,,,aaabbbbbcccccccccccbbbbaaaa,,,,,,,,,,,,~~~~',
+    '~~~~~,,,,,,,,,,,aaaabbbbcccCCCCCCCcccbbbbaaaa,,,,,,,,,,,,~~~',
+    '~~~~~,,,,,,,,,,,aaabbbbbccCCCCCCCCCcccbbbbaaw,,,,,,,,,,,,~~~',
+    '~~~~~,,,,,,,,,,aaaabbbbccCCCvvvvvvCCcccbbbaaa,,,,,,,,,,,,~~~',
+    '~~~~~,,,,,,,,,waaabbbbcccCCvvvvvvvCCcccbbbaaaa,,,,,,,,,,,~~~',
+    '~~~~,,,,,,,,,,,aaabbbbccCCvvvvvvvvCCccccbbbaaa,,,,,,,,,,~~~~',
+    '~~~~,,,,,,,,,,,aaabbbbccCCvvvvvvvvCCcccbbbbaaa,,,,,,,,,,~~~~',
+    '~~~~,,,,,,,,,,,aaabbbbccCCvvvvvvvvCCcccbbbaaaa,,,,,,,,,,~~~~',
+    '~~~~,,,,,,,,,,,aaaabbbccCCCvvvvvvvCCcccbbbaaaa,,,,,,,,,,~~~~',
+    '~~~~~,,,,,,,,,,aaaabbbbccCCCvvvvvCCCcccbbbaaaa,,,,,,,,,,~~~~',
+    '~~~~~~,,,,,,,,,aaaaabbbccccCCCvvCCCcccbbbaaaa,,,,,,,,,,,~~~~',
+    '~~~~~~~,,,,,,,,,aaaabbvbccccCCCCCcccccvbbaaaa,,,,,,,,,,~~~~~',
+    '~~~~~~~,,,,,,,,,aaaabvvvbccccccccccccvvvbaaaa,,,,,,,,,~~~~~~',
+    '~~~~~~~,,,,,,,,,,aaavvvbbbbccccccbbbbbvvvvaa,,,,,,,,,~~~~~~~',
+    '~~~~~~~,,,,,,,,,,,avvvbbbbbbbbbbbbbbbbavvvva,,,,,,,,,~~~~~~~',
+    '~~~~~~~,,,,,,,,,,,,vvvabbbbbbbbbbbbbbaaavvvv,,,,,,,,,~~~~~~~',
+    '~~~~~~~,,,,,,,,,,vvvvaaaaabbbbbbbbbbaaaaa,vvv,,,,,,,,~~~~~~~',
+    '~~~~~~~~~,,,,,,,vvvv,aaaaaaabbaaaaaaaaaa,,vvv,,,,,,,~~~~~~~~',
+    '~~~~~~~~~~,,,,,vvvv,,,,aaaaaaaaaaaaaaa,,,,,vvv,,,,,~~~~~~~~~',
+    '~~~~~~~~~~~,,,vvv,,,,,,,,aaaaaaaaaaa,,,,,,,,vvv,,,~~~~~~~~~~',
+    '~~~~~~~~~~~~,vvv,,,,,,,,,,,,,,,,,,,,,,,,,,,,,vvvv~~~~~~~~~~~',
+    '~~~~~~~~~~~~~vvv,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,vv~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,v~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~,,,,,,,,,,,,,,,,,,,,,,,,~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~,,,,,,,,,,,,,,,,,,~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~,,,,,,,,,,,,,,,,~~~~~~~~~~~~~~~~~~~~~',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~,,,~~~~,~~~~~~~~~~~~~~~~~~~~~~~',
+  ],
+};
+
+// ----- the Kiln: a short legacy dungeon in the volcano's flank. Same letters as Gullcliff Caves, plus:
+//   v molten glass (no crossing it; cool a Molten Puddle in it to make a stepping stone)   h hot ground   ~ a quench trough
+//   O molten puddle   w glass hound   e ember wisp   y mirror sentinel   T the Cinderglass Blade's chest
+export const KILN = {
+  name: 'The Kiln',
+  region: 'In the flank of Cinderglass',
+  line: 'Three hundred years of fire, and none of it has gone out.',
+  theme: 'kiln',
+  ambush: { x0: 34, z0: 3, x1: 44, z1: 17 },
+  boss: 'golem', tool: 'glassblade',
+  map: [
+    '################################################',
+    '################################################',
+    '################################################',
+    '##################################t.........t###',
+    '##################################........K..###',
+    '##################################....hh.....###',
+    '######.t..########################..y........###',
+    '####........######################...........###',
+    '###~.........t####################.....w.....###',
+    '###..........#####t.........t#####...........###',
+    '##............####...........#####.......y...###',
+    '##t....X......####.....T.....#####....hhh....###',
+    '##...............B...............d...........###',
+    '##...............B..r.....r......d...........###',
+    '###..........#####...........#####...y.......###',
+    '###.........~#####...........#####.........w.###',
+    '####........######t.........t#####...........###',
+    '######.t..############DDD#########t.........t###',
+    '######################...#######################',
+    '##########t.........................t###########',
+    '##########..k....................e...###########',
+    '##########...........................###########',
+    '##########vvvvvvvvvvvvvvvvvvvvvvvvvvv###########',
+    '##########vvvvOvvvvvvvvOvvvvvvvOvvvvv###########',
+    '##########vvvvvvvvvvvvvvvvvvvvvvvvvvv###########',
+    '##########...........................###########',
+    '##########......p...........hh.......###########',
+    '##########..~~....hh..............p..###########',
+    '##########...........................###########',
+    '##########t.........................t###########',
+    '######################...#######################',
+    '######################...#######################',
+    '######################...#######################',
+    '######################...#######################',
+    '#################..............#################',
+    '#################.t......p...t.#################',
+    '#################...hh....w....#################',
+    '#################...hh....hh...#################',
+    '#################....w....hh...#################',
+    '#################..p........~..#################',
+    '#################.t.........~t.#################',
+    '#################......P.......#################',
+    '######################...#######################',
+    '######################...#######################',
+    '######################EEE#######################',
+    '################################################',
   ],
 };
 
@@ -623,6 +821,8 @@ export const NPCS = {
   hale: { name: 'Hale', color: '#9fd8c8', role: 'Harbour-master' },
   jun: { name: 'Jun', color: '#ffb38a', role: 'Diver' },
   peg: { name: 'Peg', color: '#e8a0c0', role: 'Innkeeper' },
+  odda: { name: 'Odda', color: '#ffb070', role: 'Glassblower' },
+  brann: { name: 'Brann', color: '#d8c0a0', role: 'Glassblower' },
 };
 
 // ----- the Prologue, step by step. Each step has an objective line; Maren's lines are said when you talk to her. -----
@@ -663,7 +863,15 @@ export const STORY = {
     marketBoss: 'The Hour Broker keeps the market. Strike when time stands still',
     bellRock: 'Land on Bell Rock and ring its bell',
     reportMaren3: 'Sail home and tell Maren about Bell Rock',
-    act1Cinder: 'The water round Cinderglass has stopped boiling. (Cinderglass arrives in the next build.)',
+    act1Cinder: 'Sail east to Cinderglass Atoll, now the water round it has calmed',
+    cinder: 'Find the glassblowers\u2019 master, Odda',
+    kiln: 'Cross the hot ground to the Kiln in the mountain\u2019s side',
+    kilnIn: 'Find what the Kiln has been keeping',
+    kilnBoss: 'The Kiln Golem. Tools won\u2019t touch it; only a blade will',
+    reportOdda: 'Show Odda the blade',
+    forgeHome: 'Find Odda\u2019s new forge in the village on Lanternhold',
+    mirrorPool: 'Something fell on the Heights tonight. Go and look',
+    act1Temple: 'The pool on the Heights is a mirror now, and it shows a lighthouse going down. (The Temple arrives in the next build.)',
   },
   // the Prologue in chapters, for the journal in the pause menu (each lists the steps it covers)
   chapters: [
@@ -676,10 +884,11 @@ export const STORY = {
     { name: 'Act 1 \u00b7 The Boathouse', steps: ['boathouse', 'findTobin', 'setSail'] },
     { name: 'Act 1 \u00b7 Brinemoor', steps: ['brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2'] },
     { name: 'Act 1 \u00b7 Bell Rock', steps: ['act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3'] },
-    { name: 'Act 1 \u00b7 Cinderglass', steps: ['act1Cinder'] },
+    { name: 'Act 1 \u00b7 Cinderglass', steps: ['act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda', 'forgeHome'] },
+    { name: 'Act 1 \u00b7 The Mirror Pool', steps: ['mirrorPool', 'act1Temple'] },
   ],
   // every step in order (saving and the journal use this)
-  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3', 'act1Cinder'],
+  order: ['findMaren', 'practice', 'reportPractice', 'beacon', 'dusk', 'toShard', 'seep', 'reportSeep', 'enterRift', 'rift', 'guardian', 'heartGlass', 'reportRift', 'rest', 'morning', 'ending', 'free', 'gullcliff', 'caves', 'cavesBoss', 'reportOil', 'boathouse', 'findTobin', 'setSail', 'brinemoor', 'belfry', 'belfryIn', 'belfryBoss', 'reportHale', 'reportMaren2', 'act1Sea', 'market', 'marketBoss', 'bellRock', 'reportMaren3', 'act1Cinder', 'cinder', 'kiln', 'kilnIn', 'kilnBoss', 'reportOdda', 'forgeHome', 'mirrorPool', 'act1Temple'],
   maren: {
     findMaren: [
       'There you are. I thought the tide had taken you.',
@@ -760,7 +969,22 @@ export const STORY = {
       '\u2026I\u2019ve dreamed that. Long ago. Don\u2019t tell anyone.',
       'Tobin says the water round Cinderglass stopped boiling the moment it rang. The glassblowers will want to meet you. When they\u2019re ready.',
     ],
-    act1Cinder: ['Cinderglass. The glassblowers keep to themselves. Odda most of all.'],
+    act1Cinder: ['Cinderglass. The glassblowers keep to themselves. Odda most of all. Tell her I sent you; she may still owe me for a lamp.'],
+    cinder: ['Odda runs the furnaces on Cinderglass. One hand, and better with it than most are with two.'],
+    kiln: ['The Kiln? Mind the ground. If your boots smoke, move.'],
+    kilnIn: ['The Kiln? Mind the ground. If your boots smoke, move.'],
+    kilnBoss: ['The Kiln? Mind the ground. If your boots smoke, move.'],
+    reportOdda: ['Show Odda what you found. She\u2019ll know what to do with it.'],
+    forgeHome: [
+      'There\u2019s a forge in the village. A forge, apprentice. Odda walked off Tobin\u2019s boat, looked at the old smithy and said \u201cthis will do\u201d.',
+      'She says she can make your tools better, for Skyglass. Bring her slivers; she\u2019s worth every one.',
+    ],
+    mirrorPool: ['Did you see it fall? Something came down out of the crack, onto the Heights. Go and look. I\u2019ll be right behind you. Slowly.'],
+    act1Temple: [
+      'The pool. It\u2019s a mirror now, and the lighthouse in it goes down instead of up.',
+      'I have seen that before. In the oldest of the keepers\u2019 books. They called it the Temple, and nobody who wrote about it went in twice.',
+      'Not tonight. Sleep first. Whatever is down there has waited three hundred years; it can wait till morning.',
+    ],
   },
   // after the beacon is lit: night falls, then the first Riftfall
   riftfallAfter: [
@@ -910,6 +1134,51 @@ export const STORY = {
     rising: ['ROCK (old)', 'sea, warm', 'a bell goes here', 'up?'],
     bell: ['SKY (blue, not decided)', 'grass', 'stone', 'a sun goes here', 'you'],
   },
+  // Act 1: Cinderglass, Odda, the Kiln, and the forge
+  odda: {
+    cinder: [
+      'Maren\u2019s apprentice. On Maren\u2019s boat, wearing Maren\u2019s look. I owe her for a lamp; did she send you to collect?',
+      'Odda. I run the furnaces. Ran. Since the sky broke the mountain\u2019s been waking, and the Kiln with it.',
+      'The Kiln\u2019s where the old masters tempered skyglass. Nobody goes in now. Something in there kept the fire going three hundred years.',
+      'You\u2019ve a skyglass blade on your hip and it\u2019s chipped. The Kiln could make it something better. If you come out.',
+      'The Kiln\u2019s mouth is up the slope, past the hot ground. Fill your jar at the trough; the ground cools where it\u2019s wet.',
+    ],
+    kiln: ['The hot ground\u2019s in front of the Kiln. Don\u2019t stand on it. Pour the trough water and walk where it steams.'],
+    reportOdda: [
+      'Let me see. \u2026Oh. Oh, that\u2019s the old masters\u2019 work. Skyglass, tempered right through. It rings.',
+      'And you came out. And the mountain\u2019s gone quiet. I can hear the sea for the first time in a month.',
+      'I\u2019ve nothing left here to make. Your island has an empty smithy, Maren\u2019s letters said. I\u2019ll take it.',
+      'Bring me Skyglass and I\u2019ll make your tools better. That\u2019s a promise, not a sale.',
+    ],
+    after: ['Back already? The forge doesn\u2019t light itself. Neither do I.'],
+    forge: ['Skyglass in, better tools out. What\u2019ll it be?'],
+    forgeNone: ['Come back with more Skyglass. I don\u2019t do favours. I do work.'],
+    forgeDone: 'Odda works it at the forge. It rings when she\u2019s done.',
+  },
+  brann: {
+    before: ['Brann. I blow bottles. Odda blows everything else.', 'The rivers have been running since the bell stopped. Don\u2019t touch them. Obviously.'],
+    after: ['The mountain\u2019s sleeping again. You did that? Have a bottle. No, you can\u2019t have a bottle. They\u2019re for selling.'],
+  },
+  kilnLines: {
+    enter: [{ who: '', text: 'Heat like a hand on your face. Somewhere deep in the mountain, a furnace breathes in, and out.' }],
+    hot: 'The ground is hot: don\u2019t stand on it. Water cools it for a while',
+    hotHurt: 'Too hot!',
+    molten: 'A river of molten glass. Something bright drifts in it',
+    cooled: 'The puddle sets, hard as stone: somewhere to stand',
+    blade: { name: 'Cinderglass Blade', line: 'Skyglass tempered in the Kiln\u2019s fire. Heavier, longer, and it rings when it cuts. Your Skyblade goes into your pack.' },
+    golemCard: { name: 'The Kiln Golem', region: 'Guardian of the Kiln', line: 'Tools won\u2019t touch it. Wait for it to open.' },
+    golem: [{ who: '', text: 'The furnace in the far wall stands up. It is a man made of brick and fire, and it has been waiting for a blade.' }],
+    tools: 'It shrugs that off. Only a blade will do',
+    down: [{ who: '', text: 'The Golem kneels, and its fire goes out like a held breath. The whole mountain sighs and settles.' }],
+    heart: { name: 'Kiln-fired Heart', line: 'Your health grows by one heart.' },
+  },
+  forgeOpen: { name: 'Odda\u2019s Forge', region: 'Lanternhold', line: 'Skyglass in, better tools out.' },
+  shardFall: [
+    { who: '', text: 'A thread of light falls out of the crack and comes down on the Heights without a sound.' },
+  ],
+  mirror: [
+    { who: '', text: 'The little pool on the Heights has gone perfectly still. In it, the lighthouse stands upside down, and goes down, and down, further than the water is deep.' },
+  ],
   // a second memory: a rainy day
   // going to sleep in Maren's cottage
   // keepsakes: odd little things only the apprentice notices

@@ -35,7 +35,17 @@ export function createStory(ctx) {
       npcs.push({ id, w, m, x: spot.x, z: spot.z, y, face: spot.face, home: spot, solid, line: 0, phase: Math.random() * 10, talking: false, wander: null, speed: 0 });
     }
   }
-  addPeople(world, scene, ['maren', 'tobin', 'wenna', 'pip', 'ennis']);
+  addPeople(world, scene, ['maren', 'tobin', 'wenna', 'pip', 'ennis', 'odda']);
+  // someone who isn't (or is no longer) in a place: unseen, untalkable, not in the way
+  function hidePerson(id, w, on = true) {
+    const n = npcs.find((v) => v.id === id && v.w === w);
+    if (!n || !!n.hidden === on) return;
+    n.hidden = on; n.m.root.visible = !on;
+    const i = w.solids.indexOf(n.solid);
+    if (on && i >= 0) w.solids.splice(i, 1);
+    if (!on && i < 0) w.solids.push(n.solid);
+  }
+  hidePerson('odda', world);   // Odda lives on Cinderglass until she moves to Lanternhold
   const here = () => (ctx.current ? ctx.current() : world);
   const byId = (id) => npcs.find((n) => n.id === id);
 
@@ -47,9 +57,9 @@ export function createStory(ctx) {
     scene.add(m);
     return m;
   })();
-  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil', 'reportMaren2', 'reportMaren3'].includes(S.step);
+  const hasNews = () => ['findMaren', 'reportPractice', 'reportSeep', 'reportRift', 'morning', 'free', 'reportOil', 'reportMaren2', 'reportMaren3', 'act1Temple'].includes(S.step) && !(S.step === 'act1Temple' && S.templeTold);
   // whoever the story wants you to talk to next wears the marker
-  const newsWho = () => (S.step === 'findTobin' ? 'tobin' : ['brinemoor', 'reportHale'].includes(S.step) ? 'hale' : hasNews() ? 'maren' : null);
+  const newsWho = () => (S.step === 'findTobin' ? 'tobin' : ['brinemoor', 'reportHale'].includes(S.step) ? 'hale' : ['cinder', 'reportOdda', 'forgeHome'].includes(S.step) ? 'odda' : hasNews() ? 'maren' : null);
   const O = STORY.order, past = (step) => O.indexOf(S.step) >= O.indexOf(step);
   // put someone somewhere at once (between scenes), or send them walking there
   function place(n, spot, walk) {
@@ -61,7 +71,7 @@ export function createStory(ctx) {
     const now = performance.now() / 1000;
     const w0 = here();
     for (const n of npcs) {
-      if (n.w !== w0) continue;
+      if (n.w !== w0 || n.hidden) continue;
       const m = n.m;
       n.phase += dt;
       // someone with somewhere to be walks there (Maren, going to sit by her bench)
@@ -117,7 +127,7 @@ export function createStory(ctx) {
       if (n.id === 'maren' && m.lamp) m.lamp.rotation.z = Math.sin(n.phase * 1.7) * 0.15;
     }
     // the marker bobs over Maren
-    const who = newsWho(), mn = who && byId(who);
+    const who = newsWho(), mn = who && (npcs.find((v) => v.id === who && v.w === w0 && !v.hidden) || byId(who));
     mark.visible = !!mn && mn.w === w0 && !S.cine;
     if (mn) {
       if (mark.parent !== mn.m.root.parent && mn.m.root.parent) mn.m.root.parent.add(mark);
@@ -132,10 +142,10 @@ export function createStory(ctx) {
   function nearestTalker(maxD = 1.9) {
     let best = null, bd = maxD;
     const w0 = here();
-    for (const n of npcs) { if (n.w !== w0) continue; const d = Math.hypot(P.x - n.x, P.z - n.z); if (d < bd) { bd = d; best = n; } }
+    for (const n of npcs) { if (n.w !== w0 || n.hidden) continue; const d = Math.hypot(P.x - n.x, P.z - n.z); if (d < bd) { bd = d; best = n; } }
     return best;
   }
-  function npcAt(x, z) { const w0 = here(); for (const n of npcs) if (n.w === w0 && Math.hypot(x - n.x, z - n.z) < 1.0) return n; return null; }
+  function npcAt(x, z) { const w0 = here(); for (const n of npcs) if (n.w === w0 && !n.hidden && Math.hypot(x - n.x, z - n.z) < 1.0) return n; return null; }
   const line = (who, text) => ({ who: who ? NPCS[who].name : '', color: who ? NPCS[who].color : '', text });
   async function talk(n) {
     if (S.busy) return;
@@ -151,6 +161,22 @@ export function createStory(ctx) {
       if (S.step === 'brinemoor') { lines = H.brinemoor.map((t) => line('hale', t)); then = () => setStep('belfry'); }
       else if (S.step === 'reportHale') { lines = H.reportHale.map((t) => line('hale', t)); then = () => setStep('reportMaren2'); }
       else lines = [line('hale', (past('reportMaren2') ? H.after : H.belfry)[n.line++ % (past('reportMaren2') ? H.after.length : H.belfry.length)])];
+    } else if (n.id === 'odda') {
+      const O2 = STORY.odda;
+      if (n.w !== world) {
+        // on Cinderglass
+        if (['act1Cinder', 'cinder'].includes(S.step)) { lines = O2.cinder.map((t) => line('odda', t)); then = () => setStep('kiln'); }
+        else if (S.step === 'reportOdda') { lines = O2.reportOdda.map((t) => line('odda', t)); then = () => ctx.oddaMoves(); }
+        else lines = [line('odda', (past('reportOdda') ? O2.after : O2.kiln)[0])];
+      } else {
+        // at her forge on Lanternhold
+        lines = [line('odda', O2.forge[0])];
+        then = async () => { await ctx.forgeMenu(); if (S.step === 'forgeHome') ctx.shardFall(); };
+      }
+    } else if (n.id === 'brann') {
+      const set = STORY.brann[past('reportOdda') ? 'after' : 'before'];
+      lines = [line('brann', set[n.line % set.length])];
+      n.line++;
     } else if (n.id === 'jun' || n.id === 'peg') {
       const set = STORY[n.id][past('reportHale') ? 'after' : 'before'];
       lines = [line(n.id, set[n.line % set.length])];
@@ -196,7 +222,8 @@ export function createStory(ctx) {
     else if (S.step === 'free') openGate();
     else if (S.step === 'reportOil') setStep('boathouse');
     else if (S.step === 'reportMaren2') setStep('act1Sea');
-    else if (S.step === 'reportMaren3') { setStep('act1Cinder'); ui.toast(STORY.roundEnd); }
+    else if (S.step === 'reportMaren3') setStep('act1Cinder');
+    else if (S.step === 'act1Temple' && !S.templeTold) { S.templeTold = true; ui.toast(STORY.roundEnd); }
   }
   // Act 1 begins: Maren hands over the key, the keepers' gate opens, and the clock starts to run
   async function openGate() {
@@ -617,7 +644,8 @@ export function createStory(ctx) {
     if (step === 'ending') step = 'morning';
     if (step === 'act1End') step = 'findTobin';           // saves from before the sea arrived
     if (['belfryIn', 'belfryBoss'].includes(step)) step = 'belfry';
-    if (['market', 'marketBoss'].includes(step)) step = 'act1Sea';    // the Market regrows: a journey saved inside it resumes at sea
+    if (['market', 'marketBoss'].includes(step)) step = 'act1Sea';
+    if (['kilnIn', 'kilnBoss'].includes(step)) step = 'kiln';    // the Market regrows: a journey saved inside it resumes at sea
     if (at(step) < 0) step = 'findMaren';
     S.riftIn = undefined; S.cine = null; S.hits = hits;
     if (at(step) > at('beacon')) world.beacon.light();
@@ -633,6 +661,8 @@ export function createStory(ctx) {
     if (at(step) >= at('free')) world.setLamp(1, true);
     if (at(step) >= at('gullcliff')) world.openGate();
     if (at(step) >= at('setSail')) ctx.showLantern();
+    if (at(step) >= at('forgeHome')) { world.showForge(); hidePerson('odda', world, false); place(byId('odda'), world.spots.odda); }
+    if (at(step) >= at('act1Temple')) world.setMirror(true);
     setStep(step, true);
     return step;
   }
@@ -650,7 +680,7 @@ export function createStory(ctx) {
       ctx.setTime(timeOf(S.night));
     }
     if (S.riftIn !== undefined) { S.riftIn -= dt; if (S.riftIn <= 0) { S.riftIn = undefined; startRiftfall(); } }
-    if (S.cine) updateCine(dt);
+    if (S.cine && S.cine !== true) updateCine(dt);
     updateTimers(dt);
     // the Seep is waiting for you once the shard is down
     if (S.step === 'toShard' && world.shardOn() && ctx.foes.seep.sealed) setStep('seep');
@@ -679,6 +709,7 @@ export function createStory(ctx) {
       const d = world.spots.lighthouseDoor;
       S.nearRemember = !!ctx.keepsakesReady() && Math.hypot(P.x - d.x, P.z - d.z) < 1.7;
       for (const k of world.keepsakes) if (!k.taken && Math.hypot(P.x - k.x, P.z - k.z) < 0.85) { world.takeKeepsake(k.id); ctx.foundKeepsake(k); }
+      if (S.step === 'mirrorPool' && !S.busy && Math.hypot(P.x - world.spots.pool.x, P.z - world.spots.pool.z) < 2.6) ctx.mirrorScene();
       S.nearBoat = past('setSail') && !!world.spots.lantern && Math.hypot(P.x - world.spots.lantern.x, P.z - world.spots.lantern.z) < 2.6;
       // the boathouse, across the ravine
       if (S.step === 'boathouse' && Math.hypot(P.x - world.spots.boathouse.x, P.z - world.spots.boathouse.z) < 4.5) reachBoathouse();
@@ -703,6 +734,7 @@ export function createStory(ctx) {
     if (S.nearTide && !S.busy) { ctx.waitTide(); return true; }
     if (S.nearBelfry && !S.busy) { if (['brinemoor', 'belfry'].includes(S.step)) setStep('belfryIn'); ctx.travel('belfry'); return true; }
     if (S.nearBell && !S.busy) { ctx.ringBell(); return true; }
+    if (S.nearKiln && !S.busy) { if (S.step === 'kiln') setStep('kilnIn'); ctx.travel('kiln'); return true; }
     if (S.nearPier && !S.busy) { ctx.travel('sea'); return true; }
     return false;
   }
@@ -724,14 +756,16 @@ export function createStory(ctx) {
     S.nearPier = free && Math.hypot(P.x - sp.pier.x, P.z - sp.pier.z) < 2.0;
     // Bell Rock's bell
     S.nearBell = free && !!sp.bell && Math.hypot(P.x - sp.bell.x, P.z - sp.bell.z) < 2.0;
-    ui.setContext(n ? 'talk' : S.nearBelfry ? 'enter' : S.nearBell ? 'ring' : S.nearTide ? 'wait' : S.nearPier ? 'sail' : null);
+    // the Kiln's mouth: Odda has to tell you about it first
+    S.nearKiln = free && !!sp.kiln && past('kiln') && Math.hypot(P.x - sp.kiln.x, P.z - sp.kiln.z) < 2.0;
+    ui.setContext(n ? 'talk' : S.nearBelfry || S.nearKiln ? 'enter' : S.nearBell ? 'ring' : S.nearTide ? 'wait' : S.nearPier ? 'sail' : null);
     S.near = n;
   }
   function begin() { setStep('findMaren'); }
 
   // where people are, and whether Maren has something to say (for the map)
-  const people = (w = world) => npcs.filter((n) => n.w === w).map((n) => ({ id: n.id, x: n.x, z: n.z, news: n.id === newsWho() }));
-  return { people, hasNews, newsWho, addPeople, updateTown, past, update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, applyState, say, busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
+  const people = (w = world) => npcs.filter((n) => n.w === w && !n.hidden).map((n) => ({ id: n.id, x: n.x, z: n.z, news: n.id === newsWho() }));
+  return { people, hasNews, newsWho, addPeople, hidePerson, updateTown, place: (id, spot, w = world) => { const n = npcs.find((v) => v.id === id && v.w === w); if (n) place(n, spot); }, past, update, tryTalk, onDummyHit, onSeepClear, npcAt, begin, setStep, applyState, say, busy: () => S.busy || ui.isTalking(), state: S, setTalkTarget: (n) => { S.talkTarget = n; }, jump: (step) => {
     // for testing: skip ahead
     if (step === 'beacon') { setStep('beacon'); }
     else if (step === 'riftfall') { beaconLit(); S.riftIn = 0.1; }

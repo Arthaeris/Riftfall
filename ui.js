@@ -426,6 +426,39 @@ export function createUI(opts) {
 
   // ----- hearts -----
   let lastHearts = '';
+  // ----- heat: on Cinderglass's hot ground it builds; when it's full, it burns -----
+  const heatEl = el('div', 'heatBar', '<i></i>');
+  hud.appendChild(heatEl);
+  let heatShown = -1;
+  function setHeat(k) {
+    const q = Math.round(k * 50) / 50;
+    if (q === heatShown) return;
+    heatShown = q;
+    heatEl.classList.toggle('on', q > 0.02);
+    heatEl.classList.toggle('hot', q > 0.7);
+    heatEl.firstChild.style.width = (q * 100).toFixed(0) + '%';
+  }
+  // ----- Odda's forge: Skyglass in, better tools out -----
+  const forgeEl = el('div', 'forge hidden', '<div class="fgSheet glass"><div class="kicker">Odda\u2019s forge</div><h2>Skyglass in, better tools out</h2><div class="fgShards"></div><div class="fgList"></div><button class="fgDone tBtn">Done</button></div>');
+  root.appendChild(forgeEl);
+  function forgeMenu(items, shards) {
+    return new Promise((resolve) => {
+      $('.fgShards', forgeEl).innerHTML = `<i>${ICON.spark}</i> ${shards} slivers of Skyglass`;
+      const list = $('.fgList', forgeEl);
+      list.innerHTML = '';
+      for (const it of items) {
+        const b = el('button', 'fgItem' + (it.owned ? ' owned' : '') + (!it.can && !it.owned ? ' poor' : ''), `<b>${it.name}</b><span>${it.desc}</span><em>${it.owned ? 'Done' : it.cost + ' slivers'}</em>`);
+        b.disabled = it.owned || !it.can;
+        b.addEventListener('click', () => finish(it.id));
+        list.appendChild(b);
+      }
+      forgeEl.classList.remove('hidden');
+      document.body.classList.add('talking');
+      talk.lines = [];
+      const finish = (id) => { forgeEl.classList.add('hidden'); talk.lines = null; talk.ended = performance.now(); document.body.classList.remove('talking'); resolve(id); };
+      $('.fgDone', forgeEl).onclick = () => finish(null);
+    });
+  }
   function setHearts(hp, max) {
     const key = hp + '/' + max;
     if (key === lastHearts) return;
@@ -630,7 +663,7 @@ export function createUI(opts) {
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
       const h = H[j * N + i], k = K[j * N + i];
       let c;
-      if (info.cave) c = k === 'rock' ? '#1c1826' : k === 'chasm' ? '#08060e' : k === 'water' ? '#3f7f96' : k === 'ledge' ? '#8a8496' : '#6f6a7c';
+      if (info.cave) c = k === 'rock' ? '#1c1826' : k === 'chasm' ? '#08060e' : k === 'water' ? '#3f7f96' : k === 'molten' ? '#d8602a' : k === 'ledge' ? '#8a8496' : '#6f6a7c';
       else if (h <= 0.01) c = h < -1.2 ? '#2a6f8f' : h < -0.5 ? '#36869f' : '#47a3bb';
       else if (k === 'sand') c = '#ead6a6';
       else if (k === 'wood') c = '#a6764d';
@@ -896,7 +929,7 @@ export function createUI(opts) {
         </div>
         <details class="group playtest">
           <summary class="gTitle">Playtest shortcuts</summary>
-          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button><button data-jump="market">The Market</button><button data-jump="bellrock">Bell Rock</button></div>
+          <div class="jumps"><button data-jump="riftfall">The Riftfall</button><button data-jump="rift">Into the Rift</button><button data-jump="morning">First light</button><button data-jump="act1">Act 1</button><button data-jump="tether">Get the Tether</button><button data-jump="sea">Set sail</button><button data-jump="brinemoor">Brinemoor</button><button data-jump="belfry">The Belfry</button><button data-jump="market">The Market</button><button data-jump="bellrock">Bell Rock</button><button data-jump="cinder">Cinderglass</button><button data-jump="kiln">The Kiln</button><button data-jump="forge">The forge</button></div>
           <p class="sub">For testing only: these skip story steps.</p>
         </details>
       </section>
@@ -1091,7 +1124,7 @@ export function createUI(opts) {
   return {
     input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
     titleMenu, closeTitle, endCard, savedMark, fmtTime, buildMap, islandMap, closeMap, mapIsOpen: () => mapOpen,
-    setTools, setToolArt, draftLabels, openTools: () => openWheel(null), closeTools: () => closeWheel(false), setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
+    setTools, setToolArt, draftLabels, setHeat, forgeMenu, openTools: () => openWheel(null), closeTools: () => closeWheel(false), setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

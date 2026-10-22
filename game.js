@@ -2611,6 +2611,169 @@ function gameplayCam(out, outLook) {
   const dist = C.dist * ui.input.zoom * portrait * (P.boat ? 1.75 : 1);
   out.copy(outLook).addScaledVector(camDir, dist);
 }
+// ===== the 3D map: each place's ground as a small block model, drawn instead of the world while the map is open =====
+// It's built once per place from the same heights and ground kinds as the small map (one mesh, a few boxes),
+// and while it's showing the game doesn't draw the world at all, so it costs less than playing does.
+const map3d = (() => {
+  const scene3 = new THREE.Scene();
+  const cam3 = new THREE.PerspectiveCamera(30, 1, 0.5, 3000);
+  scene3.add(new THREE.HemisphereLight('#fff6ea', '#41507a', 1.7));
+  const sun3 = new THREE.DirectionalLight('#ffe6cc', 2.3); sun3.position.set(-0.55, 1, 0.4); scene3.add(sun3);
+  const fill3 = new THREE.DirectionalLight('#9fb8ff', 0.6); fill3.position.set(0.6, 0.5, -0.5); scene3.add(fill3);
+  const models = new Map();
+  let cur = null, info = null, target = new V3(), heights = null, stride = 1, bf = 1;
+  const ray3 = new THREE.Raycaster(), v3 = new V3(), ndc3 = new THREE.Vector2(), plane3 = new THREE.Plane(new V3(0, 1, 0), 0);
+  const hex = (c) => new THREE.Color(c);
+  function colorOf(I, h, k) {
+    if (I.cave) return k === 'rock' ? '#3a3448' : k === 'chasm' ? '#08060e' : k === 'water' ? '#3f7f96' : k === 'molten' ? '#ff7a2a' : k === 'ledge' ? '#9a94a6' : '#77728a';
+    if (h <= 0.01) return h < -1.2 ? '#2a6f8f' : h < -0.5 ? '#36869f' : '#5ab0c4';
+    if (k === 'sand') return '#ead6a6';
+    if (k === 'wood') return '#a6764d';
+    if (k === 'street') return '#8a958f';
+    if (k === 'path') return '#d8c49a';
+    if (k === 'stone') return '#a39d91';
+    if (k === 'sea') return '#2a6f8f';
+    return k === 'land' || !k ? '#5f9c46' : '#5f9c46';
+  }
+  function build(I) {
+    const N = I.N, u = I.scale || 1, f = N > 150 ? 2 : 1, n = Math.ceil(N / f);
+    const hgt = new Float32Array(n * n), col = new Array(n * n);
+    // map units: heights in world units / the map's unit; a little taller at sea so islands read; snapped to half-steps
+    const ex = I.scale ? 2.2 : 1;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      let best = -99, bk = null;
+      for (let b = 0; b < f; b++) for (let a = 0; a < f; a++) { const ii = Math.min(N - 1, i * f + a), jj = Math.min(N - 1, j * f + b), h = I.H[jj * N + ii]; if (h > best) { best = h; bk = I.K[jj * N + ii]; } }
+      let h = best / u * (best > 0 ? ex : 1);
+      if (I.cave) h = bk === 'rock' ? 3.2 : bk === 'chasm' ? -2.5 : Math.min(h, 2.5);
+      hgt[j * n + i] = Math.round(h * 2) / 2;
+      const c = hex(colorOf(I, best, bk));
+      // higher ground a touch lighter, like the small map
+      if (!I.cave && best > 0.01 && (bk === 'land' || bk === 'grass' || !['sand', 'wood', 'street', 'path', 'stone'].includes(bk))) c.multiplyScalar(0.82 + Math.min(best, 6) * 0.06);
+      col[j * n + i] = c;
+    }
+    const pos = [], nor = [], cols = [], idx = [];
+    const quad = (a, b, c2, d, nx, ny, nz, cl, k) => {
+      const o = pos.length / 3;
+      for (const p of [a, b, c2, d]) { pos.push(p[0], p[1], p[2]); nor.push(nx, ny, nz); cols.push(cl.r * k, cl.g * k, cl.b * k); }
+      idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+    };
+    const floor = I.cave ? -3 : -3.2, X0 = I.H0, s = f;
+    const hAtC = (i, j) => (i < 0 || j < 0 || i >= n || j >= n ? floor : hgt[j * n + i]);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const h = hgt[j * n + i], c = col[j * n + i];
+      const x0 = X0 + i * s, z0 = X0 + j * s, x1 = x0 + s, z1 = z0 + s;
+      quad([x0, h, z1], [x1, h, z1], [x1, h, z0], [x0, h, z0], 0, 1, 0, c, 1);
+      // sides down to whatever's next door: a darker band, darker still underwater
+      for (const [di, dj, a, b, nx, nz, k] of [[1, 0, [x1, z1], [x1, z0], 1, 0, 0.78], [-1, 0, [x0, z0], [x0, z1], -1, 0, 0.7], [0, 1, [x0, z1], [x1, z1], 0, 1, 0.84], [0, -1, [x1, z0], [x0, z0], 0, -1, 0.66]]) {
+        const nh = hAtC(i + di, j + dj);
+        if (nh >= h) continue;
+        const side = I.cave ? c : h > 0.3 ? c.clone().lerp(hex('#7a6a5a'), 0.45) : c;
+        quad([a[0], nh, a[1]], [b[0], nh, b[1]], [b[0], h, b[1]], [a[0], h, a[1]], nx, 0, nz, side, k * (nh < 0 ? 0.85 : 1));
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    geo.setIndex(idx);
+    const g = new THREE.Group();
+    const ground = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    g.add(ground);
+    const hAt = (x, z) => { const i = Math.floor((x - X0) / s), j = Math.floor((z - X0) / s); return i < 0 || j < 0 || i >= n || j >= n ? 0 : hgt[j * n + i]; };
+    // houses and towers, as simple boxes with a roof
+    const hb = new Batch(901);
+    for (const b of I.boxes || []) {
+      const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2, w = b.x1 - b.x0, d = b.z1 - b.z0, y = hAt(cx, cz), H2 = b.tower ? 5 : 1.6;
+      hb.box(w * 0.9, H2, d * 0.9, b.tower ? '#9a96a6' : '#e8dcc6', cx, y + H2 / 2, cz, { jitter: 0 });
+      hb.box(w, 0.5, d, b.tower ? '#6a6678' : '#a8564a', cx, y + H2 + 0.25, cz, { jitter: 0 });
+    }
+    for (const p of I.places || []) if (p.icon === 'lighthouse') {
+      const y = hAt(p.x, p.z);
+      for (let k = 0; k < 9; k++) hb.box(2.6 - k * 0.1, 1, 2.6 - k * 0.1, k % 3 === 1 ? '#c94a3f' : '#f2ece0', p.x, y + 0.5 + k, p.z, { jitter: 0 });
+      hb.box(2, 1.1, 2, '#fff1b8', p.x, y + 9.5, p.z, { glow: 1.8, jitter: 0 });
+      hb.box(2.4, 0.5, 2.4, '#c94a3f', p.x, y + 10.3, p.z, { jitter: 0 });
+    }
+    // the trees, where they really stand: a pine is two stacked blocks, a round tree one
+    const tr = (I.trees || []);
+    for (const t of tr) {
+      const y = hAt(t.x, t.z), s2 = t.s;
+      hb.box(0.35, 0.8 * s2, 0.35, '#6b4a33', t.x, y + 0.4 * s2, t.z, { jitter: 0 });
+      if (t.pine) { hb.box(1.5 * s2, 1.3 * s2, 1.5 * s2, '#2f6a4a', t.x, y + 1.3 * s2, t.z, { jitter: 0.04 }); hb.box(0.9 * s2, 1.2 * s2, 0.9 * s2, '#3a7a52', t.x, y + 2.4 * s2, t.z, { jitter: 0.04 }); }
+      else hb.box(1.7 * s2, 1.6 * s2, 1.7 * s2, '#5a9a3e', t.x, y + 1.6 * s2, t.z, { jitter: 0.05 });
+    }
+    if (I.dock && I.dock.x1 > I.dock.x0) { const d = I.dock; hb.box(d.x1 - d.x0, 0.3, d.z1 - d.z0, '#8b5e3c', (d.x0 + d.x1) / 2, 0.45, (d.z0 + d.z1) / 2, { jitter: 0 }); }
+    if (hb.pos && hb.pos.length) g.add(hb.mesh());
+    // the water: a glassy sheet over the sea bed
+    if (!I.cave) {
+      const wp = new THREE.Mesh(new THREE.PlaneGeometry(N * 3, N * 3), new THREE.MeshLambertMaterial({ color: '#4aa6c8', transparent: true, opacity: 0.62, depthWrite: false, emissive: '#0e3346' }));
+      wp.rotation.x = -Math.PI / 2; wp.position.set(X0 + N / 2, 0.02, X0 + N / 2); wp.renderOrder = 2; g.add(wp);
+    }
+    // the unexplored, under cloud (or darkness, underground): the small map's fog, laid over the top
+    let fogTex = null, fogMesh = null;
+    if (I.cave || I.fog) {
+      let top = -9; for (let k = 0; k < hgt.length; k++) top = Math.max(top, hgt[k]);
+      fogMesh = new THREE.Mesh(new THREE.PlaneGeometry(N, N), new THREE.MeshBasicMaterial({ transparent: true, opacity: I.cave ? 0.97 : 0.9, depthWrite: false }));
+      fogMesh.rotation.x = -Math.PI / 2; fogMesh.position.set(X0 + N / 2, top + 0.8, X0 + N / 2); fogMesh.renderOrder = 3; g.add(fogMesh);
+    }
+    return { g, ground, hAt, fogMesh, fogTex, version: I.version || 0, bg: I.cave ? '#0b0912' : '#123447', n, s };
+  }
+  function open(I, key, fogCanvas) {
+    info = I;
+    let m = models.get(key);
+    if (!m || m.version !== (I.version || 0)) {
+      if (m) { scene3.remove(m.g); m.g.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
+      m = build(I); models.set(key, m);
+      // keep a few places' models, not all of them
+      if (models.size > 4) { const [k0, m0] = models.entries().next().value; if (k0 !== key) { scene3.remove(m0.g); m0.g.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); models.delete(k0); } }
+    }
+    for (const v of models.values()) v.g.visible = false;
+    if (!m.g.parent) scene3.add(m.g);
+    m.g.visible = true;
+    if (m.fogMesh && fogCanvas) {
+      if (!m.fogTex || m.fogTex.image !== fogCanvas) { m.fogTex = new THREE.CanvasTexture(fogCanvas); m.fogTex.colorSpace = THREE.SRGBColorSpace; m.fogTex.magFilter = THREE.LinearFilter; m.fogMesh.material.map = m.fogTex; m.fogMesh.material.needsUpdate = true; }
+      m.fogTex.needsUpdate = true;
+    }
+    scene3.background = new THREE.Color(m.bg);
+    scene3.fog = new THREE.Fog(m.bg, 200, 900);
+    cur = m;
+  }
+  // the view: looking at (cx, cz) with sc pixels per map unit there; steeper zoomed out, more tilted up close
+  function view(cx, cz, sc, rot, W, H) {
+    if (!cur) return;
+    const k = clamp((sc - 3) / 14, 0, 1), pitch = lerp(1.22, 0.86, k);
+    cam3.aspect = W / H; cam3.fov = 30;
+    const d = H / (2 * sc * Math.tan((cam3.fov * Math.PI / 180) / 2));
+    const ty = Math.max(0, cur.hAt(cx, cz));
+    target.set(cx, ty, cz);
+    const bx = Math.sin(rot), bz = Math.cos(rot);
+    cam3.position.set(cx + bx * Math.cos(pitch) * d, ty + Math.sin(pitch) * d, cz + bz * Math.cos(pitch) * d);
+    cam3.up.set(0, 1, 0); cam3.lookAt(target);
+    cam3.near = Math.max(0.3, d * 0.05); cam3.far = d * 6 + 200;
+    cam3.updateProjectionMatrix(); cam3.updateMatrixWorld();
+    scene3.fog.near = d * 1.4; scene3.fog.far = d * 4 + 60;
+    plane3.constant = -ty;
+  }
+  function project(x, z, W, H, y) {
+    const yy = y !== undefined ? y : cur ? Math.max(0, cur.hAt(x, z)) : 0;
+    v3.set(x, yy, z).project(cam3);
+    return { x: (v3.x + 1) / 2 * W, y: (1 - v3.y) / 2 * H, behind: v3.z > 1 };
+  }
+  // a point on the screen -> where it lands on the ground (pick: against the model itself; otherwise the level of the centre)
+  function unproject(sx, sy, W, H, pick) {
+    ndc3.set(sx / W * 2 - 1, -(sy / H) * 2 + 1);
+    ray3.setFromCamera(ndc3, cam3);
+    if (pick && cur) { const hit = ray3.intersectObject(cur.ground, false)[0]; if (hit) return { x: hit.point.x, z: hit.point.z }; }
+    const p = new V3(); if (!ray3.ray.intersectPlane(plane3, p)) return { x: target.x, z: target.z };
+    return { x: p.x, z: p.z };
+  }
+  function render() {
+    renderer.setRenderTarget(null);
+    const tm = renderer.toneMappingExposure; renderer.toneMappingExposure = 1.05;
+    renderer.render(scene3, cam3);
+    renderer.toneMappingExposure = tm;
+  }
+  return { open, view, project, unproject, render, get active() { return !!cur; }, close: () => { cur = null; } };
+})();
 const wantPos = new V3(), wantLook = new V3();
 // ----- your mark from the map, standing in the world: a pillar of light you can see from far off -----
 const beacon = (() => {
@@ -2810,7 +2973,8 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (!paused) tick(dt);
-  post.render();
+  // with the map open, the map draws itself (the world isn't drawn at all)
+  if (!(ui && ui.atlas && ui.atlas.isOpen() && map3d.active)) post.render();
 }
 // one step of the game (without drawing)
 function tick(dt) {
@@ -2987,6 +3151,7 @@ try {
     onTool: (id) => setTool(id),
     onSeaView: () => { if (started && !intro) setCloseView(!closeCam); },
     camStick: () => viewK > 0.5,
+    map3d,
     onMark: () => { saveSoon = 0.6; },
     onWheel: (open) => { wheelSlow = open; },
     onWarp: (id) => warpTo(id),

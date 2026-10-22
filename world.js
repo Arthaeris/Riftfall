@@ -796,6 +796,7 @@ export function buildCove(scene) {
   take(-6.2, 19.8, 1);
 
   // ----- scatter: trees, rocks, flowers, shells, driftwood -----
+  const mapTrees = [];   // where the trees stand, for the 3D map
   const grassSpots = [];
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const x = H0 + i + 0.5, z = H0 + j + 0.5;
@@ -823,7 +824,7 @@ export function buildCove(scene) {
         const tall = !core && x < -27 && z < 4;   // Whisperwood's pines are old and tall
         const s = pine ? (tall ? 1.15 + r() * 0.55 : 0.85 + r() * 0.5) : 0.8 + r() * 0.4;
         if (pine) PROPS.pine(b, x, h, z, r, s, tall ? ['#24563f', '#1f4d39', '#2a5e45'] : null); else PROPS.roundTree(b, x, h, z, r, s);
-        solids.push({ x, z, r: (pine ? 0.82 : 0.78) * s, h: 4.5 * s }); take(x, z, 1);
+        solids.push({ x, z, r: (pine ? 0.82 : 0.78) * s, h: 4.5 * s }); take(x, z, 1); mapTrees.push({ x, z, h, pine, s });
         continue;
       }
       // each district has its own ground cover
@@ -1287,7 +1288,7 @@ export function buildCove(scene) {
     sea,
     // what the map needs: heights and ground kinds per cell, house footprints, and named places
     mapInfo: {
-      N, H0, H, K, boxes,
+      N, H0, H, K, boxes, trees: mapTrees,
       places: [
         { name: 'Lighthouse', x: lhX, z: lhZ, icon: 'lighthouse' },
         { name: 'Lanternhold', x: VILLAGE_AT.x, z: VILLAGE_AT.z, icon: 'village' },

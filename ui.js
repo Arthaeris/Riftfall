@@ -889,8 +889,11 @@ export function createUI(opts) {
   const fitSc = () => Math.min(AV.W / (mapInfo.N * 1.02), AV.H / (mapInfo.N * 1.02));
   const minSc = () => fitSc() * 0.9;
   const maxSc = () => Math.max(fitSc() * 4, 18);
-  const s2w = (sx, sy) => { const dx = (sx - AV.W / 2) / AV.sc, dy = (sy - AV.H / 2) / AV.sc, c = Math.cos(-mapRot), s2 = Math.sin(-mapRot); return { x: AV.cx + dx * c - dy * s2, z: AV.cz + dx * s2 + dy * c }; };
-  const w2s = (x, z) => proj(x, z, AV.cx, AV.cz, AV.W / 2, AV.H / 2, AV.sc);
+  // the map itself is drawn in 3D by the game when it can (M3); this canvas then only carries the markers and labels
+  const M3 = opts.map3d || null;
+  let m3 = false;
+  const s2w = (sx, sy) => { if (m3) return M3.unproject(sx, sy, AV.W, AV.H); const dx = (sx - AV.W / 2) / AV.sc, dy = (sy - AV.H / 2) / AV.sc, c = Math.cos(-mapRot), s2 = Math.sin(-mapRot); return { x: AV.cx + dx * c - dy * s2, z: AV.cz + dx * s2 + dy * c }; };
+  const w2s = (x, z) => (m3 ? M3.project(x, z, AV.W, AV.H) : proj(x, z, AV.cx, AV.cz, AV.W / 2, AV.H / 2, AV.sc));
   function clampView() {
     AV.sc = Math.max(minSc(), Math.min(maxSc(), AV.sc));
     const H0 = mapInfo.H0, N = mapInfo.N;
@@ -922,6 +925,12 @@ export function createUI(opts) {
     const g = cv.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     const t = AV.t, cave = !!mapInfo.cave;
+    if (m3) {
+      // the 3D map: set its camera to this view and draw it; this canvas is cleared to carry just the markers
+      M3.view(AV.cx, AV.cz, AV.sc, mapRot, W, Hh);
+      M3.render();
+      g.clearRect(0, 0, W, Hh);
+    } else {
     // the deep around the map
     const bg = g.createRadialGradient(W / 2, Hh / 2, 0, W / 2, Hh / 2, Math.max(W, Hh) * 0.7);
     bg.addColorStop(0, cave ? '#14101f' : '#2a6f8f'); bg.addColorStop(1, cave ? '#06050a' : '#173f57');
@@ -943,6 +952,7 @@ export function createUI(opts) {
         a = w2s(H0, v); b = w2s(H0 + N, v); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
       }
       g.restore();
+    }
     }
     const hits = [];
     const mk = curMark(), me = w2s(mapState.x, mapState.z);
@@ -1028,7 +1038,7 @@ export function createUI(opts) {
     }
     // off the edge: small arrows pointing to you, the goal and your mark
     // kept clear of the header, the rail on the right and the compass below
-    const box = { l: 34, r: W - 84, t: 34, b: Hh - 70 };
+    const box = { l: 34, r: W - 84, t: 34, b: Hh - 92 };
     const edgeTo = (q, col, icon) => {
       if (q.x > box.l && q.x < box.r && q.y > box.t && q.y < box.b) return;
       const mx = (box.l + box.r) / 2, my = (box.t + box.b) / 2, dx = q.x - mx, dy = q.y - my;
@@ -1183,7 +1193,7 @@ export function createUI(opts) {
     if (best && best.kind === 'edge') { const w = s2w(best.go.x, best.go.y); glideTo(w.x, w.z); return; }
     if (best) { opts.sfx && opts.sfx('tick'); select(best); return; }
     // open ground: your mark goes here (tapping again elsewhere moves it)
-    const w = s2w(sx, sy);
+    const w = m3 ? M3.unproject(sx, sy, AV.W, AV.H, true) : s2w(sx, sy);
     if (w.x < mapInfo.H0 || w.z < mapInfo.H0 || w.x > mapInfo.H0 + mapInfo.N || w.z > mapInfo.H0 + mapInfo.N) { select(null); return; }
     dropMark(w.x, w.z, null);
   }
@@ -1213,6 +1223,9 @@ export function createUI(opts) {
     atHint.classList.toggle('gone', !!prefs.seen.atlasMark);
     atKey.classList.add('hidden');
     bigMap.classList.remove('hidden');
+    if (M3) { revealFog(); M3.open(mapInfo, mapKey0, mapFog); m3 = true; }
+    bigMap.classList.toggle('is3d', m3);
+    document.body.classList.add('atlasOpen');
     opts.onPause && opts.onPause();
     opts.sfx && opts.sfx('open');
     AV.W = atCv.clientWidth || view.w; AV.H = atCv.clientHeight || view.h;
@@ -1227,6 +1240,8 @@ export function createUI(opts) {
     if (!mapOpen) return;
     mapOpen = false;
     cancelAnimationFrame(AV.raf);
+    if (m3) { M3.close(); m3 = false; }
+    document.body.classList.remove('atlasOpen');
     ptrs.clear(); pan = pinch2 = null;
     bigMap.classList.add('hidden');
     opts.onResume && opts.onResume();

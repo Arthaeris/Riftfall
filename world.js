@@ -1870,7 +1870,7 @@ export function buildCaves(root, D, saved = {}) {
       h = c === 'L' ? 1.9 : bh;
     }
     H[j * Wd + i] = h;
-    K[j * Wd + i] = c === '#' || c === 'L' ? 'rock' : c === '_' ? 'chasm' : c === '~' ? 'water' : c === 'v' || c === 'O' ? 'molten' : h < -0.25 ? 'sunk' : h >= 1 ? 'ledge' : 'floor';
+    K[j * Wd + i] = c === '#' || c === 'L' ? 'rock' : c === '_' ? 'chasm' : c === '~' ? 'water' : c === 'v' || (c === 'O' && D.theme === 'kiln') ? 'molten' : h < -0.25 ? 'sunk' : h >= 1 ? 'ledge' : 'floor';
   }
   // ----- the water level (the Belfry's: the Tide Bell turns it high or low; the caves have none) -----
   const WT = D.water || null;
@@ -2046,7 +2046,7 @@ export function buildCaves(root, D, saved = {}) {
   // combat doors start open; they close while there are creatures left in the room
   for (const dr of combatDoors) openDoor(dr, true);
   // ----- brass rings, the gate's chain ring and the shortcut lever -----
-  for (const o of find('O')) {
+  for (const o of (KIL ? [] : find('O'))) {
     props.push(o.x, o.y, o.z);
     props.box(0.7, 0.4, 0.7, '#6f6c78', 0, 0.2, 0, { top: '#7f7b88' }); props.box(0.22, 1.1, 0.22, '#5d5a66', 0, 0.9, 0);
     for (let k = 0; k < 10; k++) { const a = (k / 10) * TAU; props.box(0.1, 0.16, 0.09, k % 2 ? '#e0b85a' : '#c9a24a', Math.cos(a) * 0.26, 1.7 + Math.sin(a) * 0.26, 0, { rotZ: a, jitter: 0 }); }
@@ -2506,7 +2506,7 @@ export function buildCaves(root, D, saved = {}) {
   // the creatures placed in the map, made when you arrive
   function populate() {
     const list = [];
-    for (const [c, kind] of [['s', 'shardmite'], ['m', 'mirrorpuddle'], ['f', 'bellfish'], ['n', 'barnacle'], ['u', 'bubblebishop'], ['g', 'rustgill'], ['M', 'mudmimic'], ['O', 'molten'], ['w', 'hound'], ['e', 'wisp'], ['y', 'sentinel']]) for (const p of find(c)) {
+    for (const [c, kind] of [['s', 'shardmite'], ['m', 'mirrorpuddle'], ['f', 'bellfish'], ['n', 'barnacle'], ['u', 'bubblebishop'], ['g', 'rustgill'], ['M', 'mudmimic'], ...(D.theme === 'kiln' ? [['O', 'molten']] : []), ['w', 'hound'], ['e', 'wisp'], ['y', 'sentinel']]) for (const p of find(c)) {
       if (state.ambushDone && inAmb(p.x, p.z)) continue;
       list.push({ kind, x: p.x, z: p.z, amb: inAmb(p.x, p.z) });
     }

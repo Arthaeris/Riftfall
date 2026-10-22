@@ -164,12 +164,14 @@ export function createUI(opts) {
     if (btn === bAbility) { pulse(bAbility); return; }
     const st = btnFor(btn);
     const sling = btn !== bRanged || toolCur === 'sling';
-    // the sling fires while held; other tools are used when you let go (so holding can open the wheel)
-    st.down = sling; st.pressed = sling;
+    // with more than one tool, holding the tool button opens the selector, so the sling waits: a quick tap
+    // throws one shot, a drag aims and keeps throwing. Other tools are used when you let go.
+    const slingTap = btn === bRanged && toolCur === 'sling' && toolList.length > 1;
+    st.down = sling && !slingTap; st.pressed = sling && !slingTap;
     st.aim.active = false; st.aim.x = st.aim.y = 0;
     const r = btn.getBoundingClientRect();
     const c = toStage(r.left + r.width / 2, r.top + r.height / 2);
-    const t = { kind: 'btn', btn, st, cx: c.x, cy: c.y, t0: performance.now() };
+    const t = { kind: 'btn', btn, st, cx: c.x, cy: c.y, t0: performance.now(), slingTap };
     touches.set(e.pointerId, t);
     btn.classList.add('held');
     // hold the tool button still and the wheel opens
@@ -181,8 +183,9 @@ export function createUI(opts) {
     const p = stagePt(e);
     let dx = p.x - t.cx, dy = p.y - t.cy;
     const len = Math.hypot(dx, dy);
-    if (t.wheel) { pickWheel(dx, dy, len); return; }
+    if (t.wheel) { t.overSlot = !!slotAt(p.x, p.y); pickWheel(p.x, p.y); return; }
     if (len > 18) {
+      if (t.slingTap && !t.st.down) { clearTimeout(t.wheelTimer); t.st.down = true; }
       t.st.aim.active = true;
       t.st.aim.x = dx / len; t.st.aim.y = dy / len;
       aimRing.style.display = 'block';
@@ -194,7 +197,15 @@ export function createUI(opts) {
   }
   function endButton(t) {
     clearTimeout(t.wheelTimer);
-    if (t.wheel) { closeWheel(true); t.st.down = false; t.st.pressed = false; t.st.aim.active = false; t.btn.classList.remove('held'); return; }
+    if (t.wheel) {
+      t.st.down = false; t.st.pressed = false; t.st.aim.active = false; t.btn.classList.remove('held');
+      // let go over a tool: take it. Let go anywhere else: the panel stays open for a tap
+      if (t.overSlot) closeWheel(true);
+      else { wheelPinned = true; wheelTouch = null; wheelBack.classList.remove('hidden'); }
+      return;
+    }
+    // the sling, tapped: one shot
+    if (t.slingTap && !t.st.down && toolCur === 'sling') input.shoot = true;
     // a tool other than the sling: used on release, aimed if you dragged
     if (t.btn === bRanged && toolCur !== 'sling') input.use = { aim: t.st.aim.active ? { x: t.st.aim.x, y: t.st.aim.y } : null };
     t.st.down = false;
@@ -202,50 +213,68 @@ export function createUI(opts) {
     t.btn.classList.remove('held');
     aimRing.style.display = 'none';
   }
-  // ----- the tool wheel: tools fan out round the button; slide onto one and let go -----
+  // ----- the tool panel: hold the tool button and a panel of tools opens beside the buttons. Slide onto one and
+  // let go to take it; or let go first, and tap one. Anywhere else closes it. -----
   let toolList = [{ id: 'sling', icon: ICON.sling, name: 'Sling' }], toolCur = 'sling';
-  const wheel = el('div', 'wheel hidden');
+  let toolArt = {};
+  const toolPic = (id) => (toolArt[id] ? `<img src="${toolArt[id]}" alt="">` : ICON[id] || ICON.spark);
+  const wheel = el('div', 'tPanel hidden', '<div class="tpCard glass"><div class="tpHead"><span class="tpKick">Tool in hand</span><b class="tpName"></b></div><div class="tpGrid"></div></div>');
   root.appendChild(wheel);
-  let wheelPick = null;
+  const wheelBack = el('div', 'tpBack hidden');
+  root.appendChild(wheelBack);
+  let wheelPick = null, wheelPinned = false, wheelTouch = null;
   const wheelSpots = [];
+  function wheelName(id) { const tl = toolList.find((x) => x.id === id); $('.tpName', wheel).textContent = tl ? tl.name : ''; }
   function openWheel(t) {
-    t.wheel = true;
-    t.st.down = false; t.st.pressed = false;
-    wheel.innerHTML = '';
+    if (t) { t.wheel = true; t.st.down = false; t.st.pressed = false; }
+    wheelTouch = t || null; wheelPinned = !t;
+    const grid = $('.tpGrid', wheel);
+    grid.innerHTML = '';
     wheelSpots.length = 0;
-    const n = toolList.length, R2 = 92 + Math.max(0, n - 4) * 12;
-    // fan out to the left of the button and a little up (to the right when left-handed)
+    grid.style.setProperty('--cols', Math.min(5, Math.max(3, toolList.length)));
     toolList.forEach((tl, i) => {
-      const span = Math.min(0.5, 0.14 * (n - 1)) * Math.PI;
-      const a = Math.PI * 0.97 + (n === 1 ? 0 : i / (n - 1)) * span;
-      const dx = Math.cos(a) * R2 * (prefs.lefty ? -1 : 1), dy = Math.sin(a) * R2;
-      const b = el('div', 'wTool' + (tl.id === toolCur ? ' cur' : ''), `<i>${tl.icon}</i><b>${tl.name}</b>`);
-      b.style.left = (t.cx + dx) + 'px'; b.style.top = (t.cy + dy) + 'px';
-      wheel.appendChild(b);
-      wheelSpots.push({ id: tl.id, dx, dy, b });
+      const b = el('button', 'tSlot' + (tl.id === toolCur ? ' cur on' : ''), `<i>${toolPic(tl.id === 'jar' && jarFull ? 'jarFull' : tl.id)}</i><em>${i + 1}</em>`);
+      b.setAttribute('aria-label', tl.name);
+      b.addEventListener('pointerdown', (e) => { if (!wheelPinned) return; e.preventDefault(); e.stopPropagation(); wheelPick = tl.id; closeWheel(true); });
+      grid.appendChild(b);
+      wheelSpots.push({ id: tl.id, b });
     });
-    wheel.classList.remove('hidden');
-    wheelPick = toolCur;
+    wheelPick = toolCur; wheelName(toolCur);
+    wheel.classList.remove('hidden', 'out'); void wheel.offsetWidth; wheel.classList.add('in');
+    wheelBack.classList.toggle('hidden', !wheelPinned);
     opts.sfx && opts.sfx('open');
     opts.onWheel && opts.onWheel(true);
   }
-  function pickWheel(dx, dy, len) {
-    let best = null, bd = 1e9;
-    for (const w of wheelSpots) { const d = Math.hypot(dx - w.dx, dy - w.dy); if (d < bd) { bd = d; best = w; } }
-    const pick = len > 30 && best ? best.id : wheelPick;
+  // the slot under the finger while it's still held down
+  function slotAt(px, py) {
+    for (const w of wheelSpots) { const r = w.b.getBoundingClientRect(), q = toStage(r.left + r.width / 2, r.top + r.height / 2), half = Math.max(r.width, r.height) / 2 + 4; if (Math.abs(px - q.x) < half && Math.abs(py - q.y) < half) return w; }
+    return null;
+  }
+  function pickWheel(px, py) {
+    const w0 = slotAt(px, py);
+    const pick = w0 ? w0.id : wheelPick;
     if (pick !== wheelPick) { wheelPick = pick; opts.sfx && opts.sfx('tick'); }
     for (const w of wheelSpots) w.b.classList.toggle('on', w.id === wheelPick);
+    wheelName(wheelPick);
+    return pick;
   }
   function closeWheel(choose) {
-    wheel.classList.add('hidden');
+    if (wheel.classList.contains('hidden')) return;
+    wheel.classList.remove('in'); wheel.classList.add('out');
+    setTimeout(() => { if (wheel.classList.contains('out')) wheel.classList.add('hidden'); }, 160);
+    wheelBack.classList.add('hidden');
+    wheelPinned = false; wheelTouch = null;
     opts.onWheel && opts.onWheel(false);
     if (choose && wheelPick && wheelPick !== toolCur) opts.onTool && opts.onTool(wheelPick);
   }
+  wheelBack.addEventListener('pointerdown', (e) => { e.preventDefault(); closeWheel(false); });
+  function setToolArt(art) { toolArt = art || {}; setTools(toolList.map(({ id, name }) => ({ id, name })), toolCur); }
   function setTools(list, cur) {
     toolList = list.map((t) => ({ ...t, icon: ICON[t.id] || ICON.spark })); toolCur = cur;
     list = toolList;
     const tl = list.find((x) => x.id === cur) || list[0];
-    bRanged.querySelector('.ic').innerHTML = tl.icon;
+    bRanged.querySelector('.ic').innerHTML = toolPic(tl.id === 'jar' && jarFull ? 'jarFull' : tl.id);
+    bRanged.classList.toggle('pic', !!toolArt[tl.id]);
     bRanged.setAttribute('aria-label', tl.name);
     bRanged.classList.toggle('tool', cur !== 'sling');
     bRanged.classList.toggle('multi', list.length > 1);
@@ -253,7 +282,7 @@ export function createUI(opts) {
   }
   let jarFull = false;
   // the Tide Jar's water shows in its icon
-  function setJar(full) { jarFull = full; bRanged.classList.toggle('jarFull', !!full); }
+  function setJar(full) { jarFull = full; bRanged.classList.toggle('jarFull', !!full); if (toolCur === 'jar' && toolArt.jar) bRanged.querySelector('.ic').innerHTML = toolPic(full ? 'jarFull' : 'jar'); }
   function releaseStick(t) {
     if (!t.stick) return;
     t.stick = false;
@@ -1046,7 +1075,7 @@ export function createUI(opts) {
   return {
     input, setHearts, setShards, hurt, setObjective, bossBar, setMap, say, talkFrame, setContext, isTalking: () => !!talk.lines, showHint, hideHint, titleCard, number, toast, pause, resume, keyFrame, setCooldowns,
     titleMenu, closeTitle, endCard, savedMark, fmtTime, buildMap, islandMap, closeMap, mapIsOpen: () => mapOpen,
-    setTools, setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
+    setTools, setToolArt, openTools: () => openWheel(null), closeTools: () => closeWheel(false), setKeys, itemGet, setJar, wheelOpen: () => !wheel.classList.contains('hidden'),
     show(on) { document.body.classList.toggle('playing', on); },
   };
 }

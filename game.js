@@ -2,7 +2,7 @@
    The heart of the game: renderer and its look, camera, the apprentice, combat, sound and the main loop. */
 import * as THREE from 'three';
 import { VERSION, CONFIG, WEAPONS, PLACES, PALETTE, TEXT, HURT, SEEP, TIMES, RIFT, STORY, TOOLS, CAVES, BELFRY, BRINEMOOR, SEA } from '@rf/data';
-import { buildPlayer, buildSkyblade, buildTidesling, buildSailboat, buildJar, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
+import { buildPlayer, buildSkyblade, buildToolModel, renderToolArt, buildSailboat, createSparks, createBits, slashMesh, clamp, lerp, TAU, Batch, MAT, SKY_UNIFORMS } from '@rf/art';
 import { createStory } from '@rf/story';
 import { buildCove, buildRift, buildCaves, buildTown, buildSeaPlace } from '@rf/world';
 import { createFoes } from '@rf/foes';
@@ -401,11 +401,24 @@ function setupPlayer() {
   const blade = buildSkyblade();
   blade.root.rotation.x = Math.PI * 0.5 - 0.2;   // hangs pointing forward-down at rest
   m.handR.add(blade.root);
-  const sling = buildTidesling();
-  sling.root.rotation.x = Math.PI * 0.5;
-  sling.root.scale.setScalar(0.9);
-  m.handL.add(sling.root);
-  P.model = m; P.blade = blade; P.sling = sling; P.spin = spin;
+  // the tools, each a model of its own in the left hand; only the one you're using shows
+  const held = {};
+  for (const id of ['sling', 'tether']) {
+    const tm = buildToolModel(id);
+    tm.root.rotation.x = Math.PI * 0.5;
+    tm.root.scale.setScalar(0.9);
+    tm.root.visible = id === 'sling';
+    m.handL.add(tm.root);
+    held[id] = tm;
+  }
+  // the jar hangs from your hand by its cord
+  const jarG = new THREE.Group();
+  for (const full of [false, true]) { const jm = buildToolModel('jar', { full }); jm.root.position.y = -0.42; jm.root.scale.setScalar(0.85); jm.root.visible = false; jarG.add(jm.root); held[full ? 'jarFull' : 'jar'] = jm; }
+  jarG.visible = false;
+  m.handL.add(jarG);
+  held.jarG = jarG;
+  const sling = held.sling;
+  P.model = m; P.blade = blade; P.sling = sling; P.spin = spin; P.held = held;
   P.x = world.spawn.x; P.z = world.spawn.z; P.y = world.spawn.y;
   P.face = Math.PI * 0.85;
 }
@@ -1291,9 +1304,7 @@ function tetherDir(aim) {
 }
 // the Tide Jar: scoop near water, pour it where it's needed
 const jar = { full: false, cd: 0, tilt: 0 };
-const jarModel = (() => { const m = buildJar(); m.visible = false; return m; })();
-const jarWater = (() => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#7fe8ff').multiplyScalar(1.6) })); m.position.y = 0.4; m.visible = false; jarModel.add(m); return m; })();
-function setJarFull(on) { jar.full = on; jarWater.visible = on; ui.setJar(on); }
+function setJarFull(on) { jar.full = on; ui.setJar(on); }
 function useJar(aim) {
   if (jar.cd > 0 || P.state !== 'move') return;
   const T = TOOLS.jar;
@@ -1767,6 +1778,7 @@ function sailUpdate(dt) {
   const firing = I.ranged.down || (I.attack.down && !B.dockable);
   if (firing && P.fireCd <= 0) { fire(aimFor(I.ranged.down ? I.ranged : I.attack, WEAPONS.tidesling.range)); P.fireCd = 1 / WEAPONS.tidesling.rate; }
   if (I.use) { I.use = null; }
+  if (I.shoot) { I.shoot = false; if (P.fireCd <= 0) { fire(aimFor(I.ranged, WEAPONS.tidesling.range)); P.fireCd = 1 / WEAPONS.tidesling.rate; } }
   // the boat: bobbing, heeling into turns, the sail full with speed
   const t = performance.now() / 1000;
   P.y = hy;
@@ -1859,6 +1871,11 @@ function updatePlayer(dt) {
   if (P.state === 'move') {
     const firing = I.ranged.down && tools.cur === 'sling';
     if (I.use) { useTool(I.use.aim); I.use = null; }
+    // a tap on the sling button: one shot
+    if (I.shoot) {
+      I.shoot = false;
+      if (tools.cur === 'sling' && P.fireCd <= 0) { const dir = aimFor(I.ranged, WEAPONS.tidesling.range); P.face = Math.atan2(dir.x, dir.z); fire(dir); P.fireCd = 1 / WEAPONS.tidesling.rate; P.firing = 0.3; P.path = null; }
+    }
     if (firing) {
       P.path = null;
       const dir = aimFor(I.ranged, WEAPONS.tidesling.range);
@@ -2326,13 +2343,14 @@ function tick(dt) {
   cove.seaLevel = clock.running ? tideAt(clockH) : -0.08;
   if (brine) brine.setTide(clock.running ? tideAt(clockH) : -0.08);
   // the Jar rides at your hip while it's the tool in hand, and tips when you use it
-  jarModel.visible = tools.cur === 'jar' && !P.boat && P.state !== 'dead';
-  if (jarModel.visible) {
-    jar.tilt = Math.max(0, jar.tilt - dt * 2.5);
-    if (jarModel.parent !== P.model.root) P.model.root.add(jarModel);
-    jarModel.position.set(-0.32, 0.55 + jar.tilt * 0.5, 0.12 + jar.tilt * 0.3);
-    jarModel.rotation.set(jar.tilt * 1.6, 0, 0);
-  }
+  // the tool in your hand: the one you're using (the jar shows its water when it's full, and tips when you pour)
+  const H2 = P.held;
+  H2.sling.root.visible = tools.cur === 'sling' || !!P.boat;
+  H2.tether.root.visible = tools.cur === 'tether' && !P.boat;
+  H2.jarG.visible = tools.cur === 'jar' && !P.boat && P.state !== 'dead';
+  H2.jar.root.visible = !jar.full; H2.jarFull.root.visible = jar.full;
+  jar.tilt = Math.max(0, jar.tilt - dt * 2.5);
+  H2.jarG.rotation.set(jar.tilt * 1.4, 0, 0);
   // the journey's clock, and saving now and then
   if (started && !intro) {
     stats.time += dt;
@@ -2383,6 +2401,8 @@ try {
     sfx: (n) => sound.sfx(n),
   });
   setupPlayer();
+  // pictures of the tools for the tool button and the tool panel, rendered from their models
+  ui.setToolArt(renderToolArt(['sling', 'tether', 'jar', 'jarFull']));
   story = createStory({
     scene: coveRoot, world, foes, P, ui, sound, sparks, bits, shake,
     flash: (r, g, b, k) => { Object.assign(cineFlash, { r, g, b, k }); },

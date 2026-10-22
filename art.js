@@ -293,15 +293,6 @@ export function buildSkyblade() {
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return { root: g, flash: K.flash };
 }
-export function buildTidesling() {
-  const K = kit();
-  const g = new THREE.Group();
-  K.box(g, 0.05, 0.05, 0.22, '#6b4a33', 0, 0, 0.02);
-  for (const x of [-1, 1]) K.box(g, 0.04, 0.04, 0.16, '#6b4a33', x * 0.06, 0, 0.18).rotation.y = -x * 0.35;
-  K.box(g, 0.11, 0.03, 0.03, '#e8d6a8', 0, 0, 0.25);
-  K.box(g, 0.07, 0.07, 0.07, '#5fd6e8', 0, 0, 0.27, 1.8);
-  return { root: g, flash: K.flash };
-}
 
 // Practice dummy: driftwood post, sack body, a bucket for a head. Wobbles on a spring when hit.
 export function buildDummy(seed = 1) {
@@ -2046,11 +2037,105 @@ export function buildBelfryTower(b, g, x, y, z) {
   b.pop();
   g.box(0.5, 0.5, 0.06, '#9ff3ff', x, y + 4.4, z + 2.52, { glow: 1.4, jitter: 0 });   // a round window, lit from inside
 }
-// the jar you carry: blue-glazed, a cork, a cord; the water in it shows when it's full
-export function buildJar() {
-  const b = new Batch(510);
-  b.box(0.3, 0.32, 0.3, '#3f7f9a', 0, 0.16, 0, { top: '#4f8faa' }); b.box(0.2, 0.08, 0.2, '#3f7f9a', 0, 0.36, 0);
-  b.box(0.14, 0.08, 0.14, '#b08a5a', 0, 0.43, 0); b.box(0.32, 0.04, 0.32, '#e0b85a', 0, 0.26, 0);
-  const m = b.mesh(); m.matrixAutoUpdate = true; m.castShadow = true;
-  return m;
+
+// ---------------------------------------------------------------------------
+// The tools as voxel models: held in the hand, and rendered into the tool buttons and the tool panel.
+// Each is built pointing along +z (the way it's thrown or aimed), about a hand's length.
+// ---------------------------------------------------------------------------
+export function buildToolModel(id, o = {}) {
+  const K = kit();
+  const g = new THREE.Group();
+  if (id === 'sling') {
+    // the Tidesling: a forked bit of driftwood, the grip bound in leather, a band of twisted kelp and a pouch
+    // holding a bright drop of sea
+    const wood = ['#8a6040', '#7a5236', '#9a6e48'];
+    for (let k = 0; k < 4; k++) K.box(g, 0.075, 0.075, 0.06, wood[k % 3], 0, 0, -0.16 + k * 0.06);
+    for (let k = 0; k < 3; k++) K.box(g, 0.085, 0.085, 0.025, '#5d3d26', 0, 0, -0.15 + k * 0.07);   // leather wraps
+    K.box(g, 0.09, 0.07, 0.06, wood[1], 0, 0, 0.08);
+    for (const x of [-1, 1]) {
+      K.box(g, 0.06, 0.06, 0.07, wood[0], x * 0.06, 0, 0.13);
+      K.box(g, 0.055, 0.055, 0.07, wood[2], x * 0.1, 0, 0.19);
+      K.box(g, 0.05, 0.05, 0.06, wood[0], x * 0.12, 0, 0.25);
+      K.box(g, 0.06, 0.03, 0.03, '#3f7a5a', x * 0.12, 0, 0.28);                                  // where the band ties on
+    }
+    for (let k = 0; k < 4; k++) K.box(g, 0.05, 0.022, 0.022, k % 2 ? '#4f8a62' : '#3f7a5a', -0.09 + k * 0.06, 0, 0.3 - Math.abs(k - 1.5) * 0.012);
+    K.box(g, 0.08, 0.035, 0.05, '#6b4a33', 0, 0, 0.32);                                          // the pouch
+    K.box(g, 0.05, 0.05, 0.05, '#7fe8ff', 0, 0.02, 0.32, 1.9);                                  // a drop of sea
+    K.box(g, 0.025, 0.06, 0.025, '#d8d0c4', 0.045, -0.06, -0.12); K.box(g, 0.04, 0.04, 0.02, '#f2c8b8', 0.045, -0.1, -0.12);   // a shell charm on a cord
+  } else if (id === 'tether') {
+    // the Tether: a keeper's grapple. A dark haft with brass bands, a spool of glowing sky-thread at the back,
+    // and a three-pronged brass claw at the front
+    const brass = ['#c9a24a', '#e0b85a', '#b08a3a'];
+    for (let k = 0; k < 4; k++) K.box(g, 0.06, 0.06, 0.07, k % 2 ? '#3a2a20' : '#4a3426', 0, 0, -0.12 + k * 0.07);
+    for (const z of [-0.14, 0.02, 0.12]) K.box(g, 0.075, 0.075, 0.02, brass[0], 0, 0, z);
+    // the spool, side-on, with thread wound round it
+    for (const x of [-0.07, 0.07]) K.box(g, 0.02, 0.14, 0.14, brass[2], x, 0.02, -0.06);
+    K.box(g, 0.12, 0.1, 0.1, '#7fe8ff', 0, 0.02, -0.06, 1.5);
+    for (let k = 0; k < 3; k++) K.box(g, 0.125, 0.02, 0.105, '#c6f8ff', 0, -0.02 + k * 0.035, -0.06, 2.0);
+    K.box(g, 0.03, 0.03, 0.06, brass[1], 0.1, 0.06, -0.06); K.box(g, 0.03, 0.06, 0.03, '#3a2a20', 0.12, 0.09, -0.04);   // the crank
+    // the claw
+    K.box(g, 0.05, 0.05, 0.1, brass[1], 0, 0, 0.2);
+    K.box(g, 0.08, 0.08, 0.04, brass[0], 0, 0, 0.25);
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * TAU + Math.PI / 2, cx = Math.cos(a), cy = Math.sin(a);
+      const p1 = K.box(g, 0.035, 0.035, 0.09, brass[k % 2], cx * 0.06, cy * 0.06, 0.3); p1.rotation.set(-cy * 0.5, cx * 0.5, 0);
+      const p2 = K.box(g, 0.032, 0.032, 0.07, brass[1], cx * 0.1, cy * 0.1, 0.36); p2.rotation.set(cy * 0.2, -cx * 0.2, 0);
+      K.box(g, 0.03, 0.03, 0.05, '#f0d27a', cx * 0.08, cy * 0.08, 0.41);                          // the hooked tips, turned back in
+    }
+    K.box(g, 0.04, 0.04, 0.05, '#f0d27a', 0, 0, 0.32);
+    // a loose end of the thread, curling from the spool to the claw
+    for (let k = 0; k < 5; k++) K.box(g, 0.018, 0.018, 0.06, '#c6f8ff', 0, -0.07 + Math.sin(k) * 0.015, -0.02 + k * 0.05, 2.2);
+  } else if (id === 'jar') {
+    // the Tide Jar: blue glaze with a white wave round its belly, a cork, a cord to carry it by; when it's full
+    // you can see the sea glowing at its mouth
+    const glaze = ['#3f7f9a', '#4a8eaa', '#356f88'];
+    K.box(g, 0.2, 0.04, 0.2, glaze[2], 0, 0.02, 0);
+    K.box(g, 0.26, 0.08, 0.26, glaze[0], 0, 0.08, 0);
+    K.box(g, 0.29, 0.1, 0.29, glaze[1], 0, 0.17, 0);
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; K.box(g, 0.08, 0.035, 0.02, '#eef6f6', Math.cos(a) * 0.145, 0.17 + (k % 2) * 0.02, Math.sin(a) * 0.145).rotation.y = -a + Math.PI / 2; }
+    K.box(g, 0.25, 0.06, 0.25, glaze[0], 0, 0.25, 0);
+    K.box(g, 0.16, 0.05, 0.16, glaze[2], 0, 0.3, 0);
+    K.box(g, 0.12, 0.05, 0.12, glaze[1], 0, 0.345, 0);
+    K.box(g, 0.15, 0.025, 0.15, glaze[0], 0, 0.375, 0);                                          // the lip
+    if (o.full) K.box(g, 0.1, 0.02, 0.1, '#7fe8ff', 0, 0.38, 0, 1.8);
+    K.box(g, 0.08, 0.06, 0.08, '#b08a5a', 0, o.full ? 0.41 : 0.4, o.full ? 0.07 : 0);              // the cork (pushed aside when it's full)
+    for (const x of [-1, 1]) K.box(g, 0.02, 0.12, 0.02, '#c8b28a', x * 0.1, 0.38, 0);              // the cord
+    K.box(g, 0.22, 0.02, 0.02, '#c8b28a', 0, 0.44, 0);
+  }
+  g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  return { root: g, flash: K.flash };
+}
+const TOOL_POSE = { sling: [-1.1, 0, 0.75], tether: [-0.95, 0.6, 0.85], jar: [0.25, -0.5, 0], jarFull: [0.25, -0.5, 0], zoom: { sling: 0.5, tether: 0.5, jar: 0.6 } };
+// render a tool's model into a picture for the buttons and the tool panel (a small, separate renderer, used once)
+export function renderToolArt(ids, size = 128, poses = {}) {
+  const out = {};
+  let r;
+  try {
+    const cv = document.createElement('canvas'); cv.width = cv.height = size;
+    r = new THREE.WebGLRenderer({ canvas: cv, alpha: true, antialias: true, preserveDrawingBuffer: true });
+    r.setPixelRatio(1); r.setSize(size, size, false);
+    r.outputColorSpace = THREE.SRGBColorSpace;
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight('#fff6e8', '#5a5070', 2.2));
+    const sunL = new THREE.DirectionalLight('#ffffff', 2.4); sunL.position.set(2, 4, 3); scene.add(sunL);
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.05, 20);
+    for (const id of ids) {
+      const full = id === 'jarFull';
+      const m = buildToolModel(full ? 'jar' : id, { full }).root;
+      // laid at a three-quarter angle, the way you'd hold it up to show someone
+      const pose = poses[id] || TOOL_POSE[id] || [0.5, -2.35, 0.35];
+      m.rotation.set(pose[0], pose[1], pose[2]);
+      scene.add(m);
+      const box = new THREE.Box3().setFromObject(m), c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+      const rad = Math.max(s.x, s.y, s.z) * (poses.zoom || TOOL_POSE.zoom[full ? 'jar' : id] || 0.55);
+      cam.position.set(c.x, c.y + rad * 0.5, c.z + rad / Math.tan((cam.fov / 2) * Math.PI / 180) * 1.05);
+      cam.lookAt(c);
+      r.setClearColor(0x000000, 0); r.clear();
+      r.render(scene, cam);
+      out[id] = cv.toDataURL('image/png');
+      scene.remove(m);
+    }
+  } catch (e) { /* no picture: the buttons keep their drawn icons */ }
+  if (r) { r.dispose(); r.forceContextLoss(); }
+  return out;
 }

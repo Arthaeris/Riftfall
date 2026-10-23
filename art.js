@@ -2415,7 +2415,7 @@ export function buildSailboat() {
 // a little island seen from the sea: a grid of heights and kinds, drawn a block per cell at a given cell size
 export function buildMiniIsland(cells, n, cell, base) {
   const b = new Batch(600 + n);
-  const kindCol = { salt: ['#ece8de', '#e2ddcf', '#f2eee6'], grass: ['#5f9c46', '#67a54b', '#58923f'], sand: ['#ead6a6', '#e5cf9b'], stone: ['#a19b8f', '#958f83'], path: ['#c9b48d'], wood: ['#a6764d'], roof: ['#a8473d', '#3f7a6a', '#7a4a8a'], dark: ['#3a3644'], white: ['#f2ece0'], glass: ['#bff6ff'], ash: ['#4a4450', '#5a5460'], salt: ['#f2eee6', '#e8e4dc'] };
+  const kindCol = { grass: ['#5f9c46', '#67a54b', '#58923f'], sand: ['#ead6a6', '#e5cf9b'], stone: ['#a19b8f', '#958f83'], path: ['#c9b48d'], wood: ['#a6764d'], roof: ['#a8473d', '#3f7a6a', '#7a4a8a'], dark: ['#3a3644'], white: ['#f2ece0'], glass: ['#bff6ff'], ash: ['#4a4450', '#5a5460'], salt: ['#f2eee6', '#e8e4dc'] };
   const r = rng(77 + n);
   for (const c of cells) {
     if (c.h <= 0) continue;

@@ -1,7 +1,7 @@
 /* Riftfall — data.js
    Numbers, names and tuning. Everything you might want to tweak without touching game logic lives here. */
 
-export const VERSION = '0.15.5';
+export const VERSION = '0.15.6';
 
 export const CONFIG = {
   // ----- the player -----
@@ -1571,7 +1571,7 @@ export const PALETTE = {
 export const TEXT = {
   hintMove: 'Drag to move \u00b7 tap to walk there \u00b7 pinch to zoom',
   hintAttack: 'Hold to keep swinging · drag the button to aim',
-  hintRoll: 'Roll through attacks',
+  hintRoll: 'Tap the screen twice to roll through attacks',
   dummy: ['Thwack!', 'Oof.', 'Driftwood holds.', 'Again!'],
   seepSealed: 'The shard seals the clearing',
   seepWave: (n, of) => `Wave ${n} of ${of}`,

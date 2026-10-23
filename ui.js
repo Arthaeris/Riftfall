@@ -144,7 +144,6 @@ export function createUI(opts) {
   const mkBtn = (cls, icon, label, extra = '') => { const b = el('button', 'act ' + cls, `${RING}<span class="ic">${icon}</span>${extra}`); b.setAttribute('aria-label', label); pad.appendChild(b); return b; };
   const bAttack = mkBtn('attack', ICON.sword, 'Attack', '<span class="pips"><i></i><i></i><i></i></span>');
   const bRanged = mkBtn('ranged', ICON.sling, 'Sling');
-  const bRoll = mkBtn('roll', ICON.roll, 'Roll');
   const bAbility = mkBtn('ability hidden', ICON.spark, 'Ability');   // appears once an ability is unlocked
   // running, like running shoes: tap to run, tap again to walk (or hold Shift)
   const bRun = mkBtn('run', ICON.run, 'Run');
@@ -180,7 +179,6 @@ export function createUI(opts) {
     e.preventDefault();
     input.any = true;
     if (talk.lines || performance.now() - talk.ended < 400) return;
-    if (btn === bRoll) { input.roll.pressed = true; pulse(bRoll); return; }
     if (btn === bAbility) { pulse(bAbility); return; }
     const st = btnFor(btn);
     const sling = btn !== bRanged || toolCur === 'sling';
@@ -198,7 +196,7 @@ export function createUI(opts) {
     if (btn === bRanged && toolList.length > 1) t.wheelTimer = setTimeout(() => { if (touches.get(e.pointerId) === t && !st.aim.active) openWheel(t); }, 380);
     try { btn.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
   }
-  for (const b of [bAttack, bRanged, bRoll, bAbility]) b.addEventListener('pointerdown', (e) => startButton(e, b));
+  for (const b of [bAttack, bRanged, bAbility]) b.addEventListener('pointerdown', (e) => startButton(e, b));
   function moveButton(t, e) {
     const p = stagePt(e);
     let dx = p.x - t.cx, dy = p.y - t.cy;
@@ -353,12 +351,17 @@ export function createUI(opts) {
     }
     // the right side of the screen, in the close view: the camera stick
     if (onButtonSide(p.x) && opts.camStick && opts.camStick() && ![...touches.values()].some((t) => t.kind === 'cam')) {
-      touches.set(e.pointerId, { kind: 'cam', sx: p.x, sy: p.y, x: p.x, y: p.y });
+      touches.set(e.pointerId, { kind: 'cam', sx: p.x, sy: p.y, x: p.x, y: p.y, t0: performance.now(), far: 0 });
       camJoy.style.display = 'block'; camJoy.style.left = p.x + 'px'; camJoy.style.top = p.y + 'px';
       camJoy.classList.remove('fade'); camJoy.firstChild.style.transform = '';
       return;
     }
     const field = [...touches.values()].filter((t) => t.kind === 'field');
+    // a second thumb on the right while the left one steers: a tap there (two of them roll), not a pinch
+    if (field.length === 1 && field[0].stick && onButtonSide(p.x)) {
+      touches.set(e.pointerId, { kind: 'tap', sx: p.x, sy: p.y, x: p.x, y: p.y, t0: performance.now(), far: 0 });
+      return;
+    }
     if (field.length === 1 && !pinch) {
       // a second finger: pinch to zoom (the first finger stops steering)
       const a = field[0];
@@ -380,7 +383,10 @@ export function createUI(opts) {
     if (t.kind === 'btn') { moveButton(t, e); return; }
     t.x = p.x; t.y = p.y;
     if (pinch && (pinch.a === t || pinch.b === t)) { updatePinch(); return; }
+    if (t.kind === 'tap') { t.far = Math.max(t.far, Math.hypot(t.x - t.sx, t.y - t.sy)); return; }
     if (t.kind === 'cam') {
+      t.far = Math.max(t.far || 0, Math.hypot(t.x - (t.ox ?? t.sx), t.y - (t.oy ?? t.sy)));
+      if (t.ox === undefined) { t.ox = t.sx; t.oy = t.sy; }
       let dx = t.x - t.sx, dy = t.y - t.sy;
       const len = Math.hypot(dx, dy);
       if (len > R * 1.25) { const k = (len - R * 1.25) / len; t.sx += dx * k; t.sy += dy * k; dx = t.x - t.sx; dy = t.y - t.sy; camJoy.style.left = t.sx + 'px'; camJoy.style.top = t.sy + 'px'; }
@@ -410,14 +416,37 @@ export function createUI(opts) {
       joy.firstChild.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
     }
   }, { passive: true });
+  // ----- the roll: two quick taps anywhere on the screen. The left stick (if held) says which way;
+  // otherwise you roll the way you face, which after the first tap is toward where you tapped -----
+  let lastTap = null;
+  const DTAP_TIME = 320, DTAP_DIST = 80;
+  function screenTap(t, e) {
+    if (e.type !== 'pointerup' || t.far > TAP_MOVE || performance.now() - t.t0 > TAP_TIME) { return false; }
+    const now = performance.now();
+    if (lastTap && now - lastTap.t < DTAP_TIME && Math.hypot(t.x - lastTap.x, t.y - lastTap.y) < DTAP_DIST) {
+      lastTap = null; input.tap = null; input.roll.pressed = true; rollRipple(t.x, t.y);
+      return true;
+    }
+    lastTap = { x: t.x, y: t.y, t: now };
+    return false;
+  }
+  // a soft ring where the second tap landed, so the roll has a touch of feedback where your thumb is
+  function rollRipple(x, y) {
+    const r = el('div', 'tapRing');
+    r.style.left = x + 'px'; r.style.top = y + 'px';
+    root.appendChild(r);
+    setTimeout(() => r.remove(), 420);
+  }
   function endPointer(e) {
     const t = touches.get(e.pointerId);
     if (!t) return;
     touches.delete(e.pointerId);
+    if (t.kind === 'tap') { screenTap(t, e); return; }
     if (t.kind === 'btn') endButton(t);
     else if (t.kind === 'mouse') t.st.down = false;
     else if (t.kind === 'pinch2') pinch = null;
     else if (t.kind === 'cam') {
+      screenTap(t, e);
       input.look.x = input.look.y = 0; input.look.active = false;
       camJoy.classList.add('fade');
       setTimeout(() => { if (![...touches.values()].some((x) => x.kind === 'cam')) camJoy.style.display = 'none'; }, 180);
@@ -425,7 +454,7 @@ export function createUI(opts) {
     else if (t.kind === 'field') {
       if (pinch && pinch.a === t) { pinch = null; touches.forEach((o, id) => { if (o.kind === 'pinch2') touches.delete(id); }); }
       // a quick tap that didn't wander: walk there
-      if (!t.stick && !t.pinched && t.far <= TAP_MOVE && performance.now() - t.t0 < TAP_TIME && e.type === 'pointerup') { input.tap = { x: t.x, y: t.y }; hideHint('move'); }
+      if (!t.stick && !t.pinched && t.far <= TAP_MOVE && performance.now() - t.t0 < TAP_TIME && e.type === 'pointerup' && !screenTap(t, e)) { input.tap = { x: t.x, y: t.y }; hideHint('move'); }
       releaseStick(t);
     }
   }
@@ -1386,7 +1415,7 @@ export function createUI(opts) {
       <section class="tab help" data-tab="help">
         <div class="group">
           <div class="gTitle">Controls</div>
-          <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — you can't be hurt mid-roll. <b>Zoom</b> — pinch. <b>Close view</b> — the button under pause; then the right side of the screen is a stick for the camera. <b>Map</b> — tap the small map: drag, pinch, tap to set a mark.</p>
+          <p><b>Move</b> — drag on the left side, or tap where you want to go. <b>Swing</b> — tap the sword, hold to keep swinging, drag it to aim. <b>Sling</b> — hold to keep throwing, drag to aim. <b>Roll</b> — tap the screen twice, quickly; the left stick picks the way. You can't be hurt mid-roll. <b>Zoom</b> — pinch. <b>Close view</b> — the button under pause; then the right side of the screen is a stick for the camera. <b>Map</b> — tap the small map: drag, pinch, tap to set a mark.</p>
           <p class="sub">Keyboard: WASD move · J swing · K or arrow keys sling · Space roll · Esc pause. Mouse: left swing, right sling, toward the cursor.</p>
         </div>
         <div class="group">
@@ -1581,9 +1610,7 @@ export function createUI(opts) {
     if (key === lastCd) return;
     lastCd = key;
     const C = 295.3;   // circumference of the ring
-    ringOf(bRoll).style.strokeDashoffset = (C * rollLeft).toFixed(1);
     ringOf(bRanged).style.strokeDashoffset = (C * slingLeft).toFixed(1);
-    bRoll.classList.toggle('cool', rollLeft > 0.001);
     bRanged.classList.toggle('cool', slingLeft > 0.001);
     bAttack.querySelectorAll('.pips i').forEach((p, i) => p.classList.toggle('on', i < combo));
   }

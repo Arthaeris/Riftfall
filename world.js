@@ -615,7 +615,9 @@ export function buildCove(scene) {
   addRing(rvx - 2.55, ravZ, rvx - 3.4, ravZ, Math.PI / 2);
   addRing(rvx + 2.55, ravZ, rvx + 3.4, ravZ, Math.PI / 2);
   addRing(ISLE.outcrop.x - 1.6, ISLE.outcrop.z + 1.2, ISLE.outcrop.x - 0.6, ISLE.outcrop.z + 0.4, 0.8);
-  take(rvx - 4, ravZ, 2); take(rvx + 4, ravZ, 2); take(ISLE.outcrop.x, ISLE.outcrop.z, 3);
+  // and one at the outcrop's foot, on the far side, so there's a way back down
+  addRing(ISLE.outcrop.x + 4.0, ISLE.outcrop.z + 3.6, ISLE.outcrop.x + 5.0, ISLE.outcrop.z + 4.6, 0.8);
+  take(rvx - 4, ravZ, 2); take(rvx + 4, ravZ, 2); take(ISLE.outcrop.x, ISLE.outcrop.z, 3); take(ISLE.outcrop.x + 4.5, ISLE.outcrop.z + 4.1, 1.5);
   // ----- the boathouse on the headland -----
   const bh = ISLE.boathouse, bhY = cellH(bh.x, bh.z);
   at(bh.x, bh.z);
@@ -1860,11 +1862,13 @@ export function buildCaves(root, D, saved = {}) {
   const ch = (i, j) => (i < 0 || j < 0 || i >= Wd || j >= Hd ? '#' : rows[j][i]);
   // the height of a cell: terrain characters say it; anything else (a chest, a creature) sits on the ground around it
   const H = new Float32Array(Wd * Hd), K = new Array(Wd * Hd);
+  // 'O' is a molten puddle (sunk into its river) only in the Kiln; elsewhere it's a brass ring on ordinary ground
+  const caveH = (c) => (c === 'O' && D.theme !== 'kiln' ? undefined : CAVE_H[c]);
   for (let j = 0; j < Hd; j++) for (let i = 0; i < Wd; i++) {
     const c = ch(i, j);
-    let h = CAVE_H[c];
+    let h = caveH(c);
     if (h === undefined) {
-      const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([a, b]) => CAVE_H[ch(i + a, j + b)]).filter((v) => v !== undefined && v < 3 && v > -4);
+      const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([a, b]) => caveH(ch(i + a, j + b))).filter((v) => v !== undefined && v < 3 && v > -4);
       const count = {}; let best = 0, bh = 0;
       for (const v of near) { count[v] = (count[v] || 0) + 1; if (count[v] > best) { best = count[v]; bh = v; } }
       h = c === 'L' ? 1.9 : bh;
@@ -3049,7 +3053,7 @@ export function buildTown(root, D) {
   // the creatures of the drowned square, made when you arrive
   function populate() {
     const list = [];
-    for (const [c, kind] of [['M', 'mudmimic'], ['m', 'mirrorpuddle'], ['w', 'hound'], ['e', 'wisp'], ['z', 'saltgeist']]) for (const p of find(c)) list.push({ kind, x: p.x, z: p.z });
+    for (const [c, kind] of [['M', 'mudmimic'], ...(rocky ? [] : [['m', 'mirrorpuddle']]), ['w', 'hound'], ['e', 'wisp'], ['z', 'saltgeist']]) for (const p of find(c)) list.push({ kind, x: p.x, z: p.z });
     return list;
   }
   let hooks = null;

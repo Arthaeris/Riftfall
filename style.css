@@ -100,11 +100,12 @@ body.lefty .pad .ic { transform: scaleX(-1); }
 .act.pop { animation: pop 0.25s ease; }
 @keyframes pop { 40% { transform: scale(0.86); } 100% { transform: scale(1); } }
 /* the sword in the corner; roll to its left and the sling above it, on one arc; a free slot between them for a future ability */
-.act.attack { width: 76px; height: 76px; right: 10px; bottom: 10px; color: #e6fcff; }
-.act.roll { width: 54px; height: 54px; right: 113px; bottom: 21px; }
-.act.roll.cool .ic { opacity: 0.5; }
-.act.ranged { width: 54px; height: 54px; right: 21px; bottom: 113px; color: #9ff3ff; }
-.act.ability { width: 48px; height: 48px; right: 91px; bottom: 91px; color: #ffd29a; }
+/* one arc around the thumb's resting place: the sword in the corner, the tool straight above it, the ability on the
+   diagonal, running out to the side. Everything sits low and tight in the corner so the rest of the right side is free
+   for the camera stick. */
+.act.attack { width: 82px; height: 82px; right: 14px; bottom: 14px; color: #e6fcff; }
+.act.ranged { width: 58px; height: 58px; right: 26px; bottom: 116px; color: #9ff3ff; }
+.act.ability { width: 50px; height: 50px; right: 104px; bottom: 96px; color: #ffd29a; }
 .pips { position: absolute; bottom: 9px; left: 50%; display: flex; gap: 4px; transform: translateX(-50%); }
 body.lefty .pad .pips { transform: translateX(-50%) scaleX(-1); }
 .pips i { width: 5px; height: 5px; border-radius: 1px; background: rgba(255, 255, 255, 0.22); transition: background 0.15s; }
@@ -358,7 +359,7 @@ body.cine .hud, body.cine .pad, body.cine .quest { opacity: 0 !important; pointe
 }
 
 /* ---------- running ---------- */
-.act.run { width: 44px; height: 44px; right: 167px; bottom: 77px; color: var(--ink-2); }
+.act.run { width: 46px; height: 46px; right: 118px; bottom: 22px; color: var(--ink-2); }
 .act.run.on { color: #1d1b4a; background: radial-gradient(110% 110% at 32% 22%, rgba(255, 255, 255, 0.9), rgba(159, 243, 255, 0.85) 60%), rgba(159, 243, 255, 0.6); border-color: rgba(230, 252, 255, 0.9); box-shadow: 0 0 16px rgba(159, 243, 255, 0.6), inset 0 1px 0 #fff; }
 .act.run .ic { width: 52%; height: 52%; }
 
@@ -525,3 +526,8 @@ body.atlasOpen #ui > *:not(.atlas) { visibility: hidden; }
 .imDist.hidden { display: none; }
 .imDist svg { width: 14px; height: 14px; }
 .row em.val { font-style: normal; color: var(--ink-3); font-weight: 700; margin-left: 6px; }
+
+/* the second tap of a roll: a ring that opens out under your thumb */
+.tapRing { position: absolute; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; pointer-events: none; z-index: 4;
+  border: 2px solid rgba(159, 243, 255, 0.85); box-shadow: 0 0 14px rgba(159, 243, 255, 0.5); animation: tapRing 0.4s ease-out forwards; }
+@keyframes tapRing { from { transform: scale(0.35); opacity: 0.95; } to { transform: scale(1.25); opacity: 0; } }
